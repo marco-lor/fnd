@@ -21,10 +21,23 @@ import {
 export type Task07MediaTargetKind =
   "profile" | "user-inventory" | "catalog-item" | "npc" | "foe" |
   "user-technique" | "common-technique" | "user-spell" |
+  "catalog-item-spell" | "foe-technique" | "foe-spell" |
   "grigliata-token" | "grigliata-background" |
   "grigliata-music-track";
 
 export type Task07MediaTargetSlot = "media" | "videoMedia";
+
+export type Task07NestedMediaTargetKind =
+  "catalog-item-spell" | "foe-technique" | "foe-spell";
+
+export interface Task07NestedMediaTarget {
+  schemaVersion: 1;
+  kind: Task07NestedMediaTargetKind;
+  entryId: string;
+  entryKey: string | null;
+  entryIndex: number | null;
+  slot: Task07MediaTargetSlot;
+}
 
 export interface Task07MediaTargetFields {
   slot: Task07MediaTargetSlot;
@@ -55,6 +68,7 @@ export interface MediaUploadPlan {
   ownerKey: string;
   entityId: string;
   commonTechnique?: boolean;
+  nestedTarget?: Task07NestedMediaTarget;
   referenceScope: ItemMediaReferenceScope | null;
   audienceScope: MediaAudienceScope;
   previousAssetId: string | null;
@@ -106,8 +120,10 @@ const hash = (value: unknown): string =>
 const targetKindFor = (
   kind: MediaKind,
   referenceScope: ItemMediaReferenceScope | null,
-  commonTechnique: boolean
+  commonTechnique: boolean,
+  nestedTarget: Task07NestedMediaTarget | null = null
 ): Task07MediaTargetKind | null => {
+  if (nestedTarget) return nestedTarget.kind;
   switch (kind) {
   case "avatar": return "profile";
   case "item":
@@ -131,8 +147,21 @@ const targetKindFor = (
 };
 
 export const task07MediaTargetFields = (
-  input: Pick<MediaUploadPlan, "kind">
+  input: Pick<MediaUploadPlan, "kind" | "nestedTarget">
 ): Task07MediaTargetFields => {
+  if (input.nestedTarget) {
+    return input.nestedTarget.slot === "videoMedia" ? {
+      slot: "videoMedia",
+      mediaField: "videoMedia",
+      revisionField: "task07VideoMediaRevision",
+      updatedAtField: "videoMediaUpdatedAt",
+    } : {
+      slot: "media",
+      mediaField: "media",
+      revisionField: "task07MediaRevision",
+      updatedAtField: "mediaUpdatedAt",
+    };
+  }
   const video = input.kind === "technique-video" ||
     input.kind === "spell-video";
   return video ? {
@@ -151,11 +180,52 @@ export const task07MediaTargetFields = (
 const isCanonicalAssetId = (value: unknown): value is string =>
   typeof value === "string" && /^m_[a-f0-9]{40}$/.test(value);
 
+const NESTED_TARGET_KINDS = new Set<Task07NestedMediaTargetKind>([
+  "catalog-item-spell", "foe-technique", "foe-spell",
+]);
+
+export const asTask07NestedMediaTarget = (
+  value: unknown
+): Task07NestedMediaTarget | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<Task07NestedMediaTarget>;
+  const kind = typeof candidate.kind === "string" ?
+    candidate.kind.trim() as Task07NestedMediaTargetKind : null;
+  const entryId = typeof candidate.entryId === "string" ?
+    candidate.entryId.trim() : "";
+  const entryKey = candidate.entryKey === null ? null :
+    typeof candidate.entryKey === "string" ? candidate.entryKey.trim() : null;
+  const entryIndex = candidate.entryIndex === null ? null :
+    Number.isSafeInteger(candidate.entryIndex) ? Number(candidate.entryIndex) : null;
+  const slot = candidate.slot === "videoMedia" ? "videoMedia" :
+    candidate.slot === "media" ? "media" : null;
+  if (candidate.schemaVersion !== 1 || !kind ||
+    !NESTED_TARGET_KINDS.has(kind) || !isSafeMediaSegment(entryId) || !slot) {
+    return null;
+  }
+  if (kind === "catalog-item-spell") {
+    if (!entryKey || entryKey.length > 256 ||
+      /[\u0000-\u001f\u007f]/.test(entryKey) || entryIndex !== null) return null;
+  } else if (entryKey !== null || entryIndex === null ||
+    entryIndex < 0 || entryIndex > 99 || slot !== "media") {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    kind,
+    entryId,
+    entryKey,
+    entryIndex,
+    slot,
+  };
+};
+
 export const buildTask07MediaUploadPlan = (input: {
   actorUid: unknown;
   ownerUid: unknown;
   entityId: unknown;
   commonTechnique?: unknown;
+  nestedTarget?: unknown;
   referenceScope?: unknown;
   previousAssetId?: unknown;
   operationId: unknown;
@@ -170,10 +240,14 @@ export const buildTask07MediaUploadPlan = (input: {
   const commonTechniqueSpecified = input.commonTechnique !== undefined;
   const operationId = validateMediaOperationId(input.operationId);
   const kind = asMediaKind(input.kind);
+  const nestedTarget = input.nestedTarget === undefined ||
+    input.nestedTarget === null ? null :
+    asTask07NestedMediaTarget(input.nestedTarget);
   const sourceContentType = normalizeMediaContentType(input.sourceContentType);
   const sourceBytes = Number(input.sourceBytes);
   const requestedScope = asItemMediaReferenceScope(input.referenceScope);
-  const usesScope = kind === "item";
+  const usesScope = kind === "item" ||
+    nestedTarget?.kind === "catalog-item-spell";
   const referenceScope = usesScope ? requestedScope : null;
   const previousAssetId = input.previousAssetId === undefined ||
     input.previousAssetId === null ?
@@ -188,6 +262,13 @@ export const buildTask07MediaUploadPlan = (input: {
     (input.commonTechnique !== undefined &&
       typeof input.commonTechnique !== "boolean") ||
     (commonTechnique && !["technique", "technique-video"].includes(kind || "")) ||
+    (commonTechnique && nestedTarget !== null) ||
+    ((input.nestedTarget !== undefined && input.nestedTarget !== null) &&
+      !nestedTarget) ||
+    (nestedTarget?.kind === "catalog-item-spell" &&
+      !["spell", "spell-video"].includes(kind || "")) ||
+    (["foe-technique", "foe-spell"].includes(nestedTarget?.kind || "") &&
+      kind !== "foe") ||
     !operationId ||
     (usesScope && !referenceScope) ||
     (!usesScope && input.referenceScope !== undefined &&
@@ -207,7 +288,12 @@ export const buildTask07MediaUploadPlan = (input: {
   if (sourceBytes > contract.source.maxBytes) {
     throw new TypeError(`${kind} media exceeds the source byte budget.`);
   }
-  const targetKind = targetKindFor(kind, referenceScope, commonTechnique);
+  const targetKind = targetKindFor(
+    kind,
+    referenceScope,
+    commonTechnique,
+    nestedTarget
+  );
   if (!targetKind) {
     throw new TypeError(`No Task 07 target adapter is registered for ${kind}.`);
   }
@@ -230,6 +316,7 @@ export const buildTask07MediaUploadPlan = (input: {
     ownerKey: ownerUid,
     entityId,
     ...(commonTechniqueSpecified ? {commonTechnique} : {}),
+    ...(nestedTarget ? {nestedTarget} : {}),
     referenceScope,
     audienceScope: commonTechnique ?
       "signed-in" as const :
@@ -252,9 +339,13 @@ export const isTask07MediaRequestAuthorized = (input: {
   ownerUid: string;
   referenceScope: ItemMediaReferenceScope | null;
   actorRole: string;
+  targetKind?: Task07MediaTargetKind;
 }): boolean => {
   const isOwner = input.actorUid === input.ownerUid;
   const manager = ["dm", "webmaster"].includes(input.actorRole);
+  if (input.targetKind === "catalog-item-spell") {
+    return isOwner && manager && input.referenceScope === "global-catalog";
+  }
   switch (input.kind) {
   case "avatar": return isOwner;
   case "item":
@@ -281,9 +372,11 @@ export const isTask07MediaRetirementAuthorized = (input: {
   ownerUid: string;
   referenceScope: ItemMediaReferenceScope | null;
   actorRole: string;
+  targetKind?: Task07MediaTargetKind;
 }): boolean => {
   const isOwner = input.actorUid === input.ownerUid;
   const manager = ["dm", "webmaster"].includes(input.actorRole);
+  if (input.targetKind === "catalog-item-spell") return manager;
   switch (input.kind) {
   case "avatar": return isOwner;
   case "item":
@@ -368,8 +461,17 @@ export const task07MediaReferencePath = (input: {
   ownerUid: string;
   entityId: string;
   commonTechnique?: boolean;
+  nestedTarget?: Task07NestedMediaTarget;
   referenceScope: ItemMediaReferenceScope | null;
 }): string => {
+  if (input.nestedTarget?.kind === "catalog-item-spell") {
+    return `items/${input.entityId}`;
+  }
+  if (["foe-technique", "foe-spell"].includes(
+    input.nestedTarget?.kind || ""
+  )) {
+    return `foes/${input.entityId}`;
+  }
   switch (input.kind) {
   case "avatar": return `users/${input.ownerUid}`;
   case "item":
@@ -405,12 +507,20 @@ export const isTask07MediaPlanReferenceCompatible = (
   first: MediaUploadPlan | null,
   second: MediaUploadPlan | null
 ): boolean => {
+  const firstNested = first?.nestedTarget;
+  const secondNested = second?.nestedTarget;
   if (!first || !second ||
     first.kind !== second.kind ||
     first.targetKind !== second.targetKind ||
     first.entityId !== second.entityId ||
     (first.commonTechnique === true) !== (second.commonTechnique === true) ||
-    first.referenceScope !== second.referenceScope) return false;
+    first.referenceScope !== second.referenceScope ||
+    Boolean(firstNested) !== Boolean(secondNested) ||
+    (firstNested && secondNested && (
+      firstNested.kind !== secondNested.kind ||
+      firstNested.entryId !== secondNested.entryId ||
+      firstNested.slot !== secondNested.slot
+    ))) return false;
   try {
     return task07MediaReferencePath(first) === task07MediaReferencePath(second);
   } catch {
@@ -539,6 +649,7 @@ export const asStoredTask07MediaUploadPlan = (
       ownerUid: plan.ownerUid,
       entityId: plan.entityId,
       commonTechnique: plan.commonTechnique,
+      nestedTarget: plan.nestedTarget,
       referenceScope: plan.referenceScope,
       previousAssetId: plan.previousAssetId,
       operationId: plan.operationId,

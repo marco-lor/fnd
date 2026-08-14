@@ -2,6 +2,7 @@ import {
   asStoredTask07MediaUploadPlan,
   buildTask07MediaUploadPlan,
   MediaUploadPlan,
+  Task07NestedMediaTarget,
   scanTask07MediaTargetReferences,
   task07MediaReferencePath,
 } from "./mediaAssetLifecycleCore";
@@ -169,6 +170,15 @@ const assertSourceDescriptors = (
   }
 };
 
+const nestedTargetIdentityMatches = (
+  left: Task07NestedMediaTarget | undefined,
+  right: Task07NestedMediaTarget | undefined
+): boolean => Boolean(left && right &&
+  left.schemaVersion === right.schemaVersion &&
+  left.kind === right.kind &&
+  left.entryId === right.entryId &&
+  left.slot === right.slot);
+
 export const buildTask07FoeMediaClonePlan = (input: {
   actorUid: string;
   backendReceiptId: string;
@@ -176,8 +186,24 @@ export const buildTask07FoeMediaClonePlan = (input: {
   sourceFoeId: string;
   source: Record<string, unknown>;
   sourceManifest: Record<string, unknown> | null;
+  sourceNestedTarget?: Task07NestedMediaTarget;
+  destinationNestedTarget?: Task07NestedMediaTarget;
 }): Task07FoeMediaClonePlan | null => {
-  const sourceAssetId = task07CanonicalFoeMediaAssetId(input.source);
+  const sourceContainer = input.sourceNestedTarget ?
+    asRecord(asRecord(input.source.task07EmbeddedMedia)[
+      input.sourceNestedTarget.entryId
+    ]) : input.source;
+  const nestedScan = input.sourceNestedTarget ?
+    scanTask07MediaTargetReferences(sourceContainer).media : null;
+  if (nestedScan && (nestedScan.malformed || nestedScan.assetIds.length > 1)) {
+    throw new Task07MediaClonePlanError(
+      "canonical-reference-invalid",
+      "Nested foe media reference is malformed or conflicting."
+    );
+  }
+  const sourceAssetId = input.sourceNestedTarget ?
+    nestedScan?.assetIds[0] || null :
+    task07CanonicalFoeMediaAssetId(input.source);
   if (!sourceAssetId) return null;
   const manifest = input.sourceManifest;
   const sourcePlan = asStoredTask07MediaUploadPlan(manifest?.plan);
@@ -192,7 +218,12 @@ export const buildTask07FoeMediaClonePlan = (input: {
       asRecord(manifest.generated).generation) ||
     sourcePlan.assetId !== sourceAssetId ||
     sourcePlan.kind !== "foe" ||
-    sourcePlan.targetKind !== "foe" ||
+    sourcePlan.targetKind !== (input.sourceNestedTarget?.kind || "foe") ||
+    Boolean(sourcePlan.nestedTarget) !== Boolean(input.sourceNestedTarget) ||
+    (input.sourceNestedTarget && !nestedTargetIdentityMatches(
+      sourcePlan.nestedTarget,
+      input.sourceNestedTarget
+    )) ||
     sourcePlan.entityId !== input.sourceFoeId ||
     manifest.purpose !== sourcePlan.kind ||
     manifest.audience !== sourcePlan.audienceScope ||
@@ -211,7 +242,12 @@ export const buildTask07FoeMediaClonePlan = (input: {
   const targetSlot = asTrimmedString(attachment.targetSlot);
   if (sourceReferencePath !== `foes/${input.sourceFoeId}` ||
     asTrimmedString(attachment.referencePath) !== sourceReferencePath ||
-    targetSlot !== "media") {
+    targetSlot !== "media" ||
+    Boolean(attachment.nestedTarget) !== Boolean(input.sourceNestedTarget) ||
+    (input.sourceNestedTarget && !nestedTargetIdentityMatches(
+      attachment.nestedTarget as Task07NestedMediaTarget,
+      input.sourceNestedTarget
+    ))) {
     throw new Task07MediaClonePlanError(
       "source-attachment-invalid",
       "Foe media manifest is attached to a different target."
@@ -228,15 +264,25 @@ export const buildTask07FoeMediaClonePlan = (input: {
       "Attached foe media family is incomplete."
     );
   }
-  assertSourceDescriptors(input.source, expectedMedia);
+  assertSourceDescriptors(sourceContainer, expectedMedia);
 
+  const nestedIdentity = input.sourceNestedTarget ?
+    hashValue({
+      entryId: input.sourceNestedTarget.entryId,
+      kind: input.sourceNestedTarget.kind,
+      slot: input.sourceNestedTarget.slot,
+    }).slice(0, 24) : "";
   const mediaOperationId =
-    `duplicate-foe-media:${input.backendReceiptId}`;
+    `duplicate-foe-media:${input.backendReceiptId}` +
+    (nestedIdentity ? `:${nestedIdentity}` : "");
   const destinationPlan = buildTask07MediaUploadPlan({
     actorUid: input.actorUid,
     ownerUid: input.actorUid,
     entityId: input.destinationFoeId,
     previousAssetId: null,
+    ...(input.destinationNestedTarget ? {
+      nestedTarget: input.destinationNestedTarget,
+    } : {}),
     operationId: mediaOperationId,
     kind: "foe",
     sourceContentType: generated.original.contentType,

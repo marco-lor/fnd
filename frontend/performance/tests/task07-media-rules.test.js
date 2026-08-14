@@ -255,6 +255,41 @@ const sourceMetadata = (manifest, overrides = {}) => ({
 });
 
 let environment;
+let sharedFixtureSnapshots = new Map();
+
+const SHARED_FIXTURE_PATHS = Object.freeze([
+  'grigliata_music_playback/current',
+  'grigliata_music_stream/current',
+  'utils/task07_media',
+]);
+
+const captureSharedFixtureDocuments = async (firestore) => {
+  const snapshots = await Promise.all(SHARED_FIXTURE_PATHS.map(async (pathName) => {
+    const snapshot = await getDoc(doc(firestore, pathName));
+    return [pathName, {
+      data: snapshot.exists() ? snapshot.data() : null,
+      exists: snapshot.exists(),
+    }];
+  }));
+  sharedFixtureSnapshots = new Map(snapshots);
+};
+
+const restoreSharedFixtureDocuments = async (
+  firestore,
+  pathNames = SHARED_FIXTURE_PATHS
+) => {
+  for (const pathName of pathNames) {
+    const original = sharedFixtureSnapshots.get(pathName);
+    if (!original) {
+      throw new Error(`Shared fixture snapshot was not captured: ${pathName}`);
+    }
+    if (original.exists) {
+      await setDoc(doc(firestore, pathName), original.data);
+    } else {
+      await deleteDoc(doc(firestore, pathName));
+    }
+  }
+};
 
 before(async () => {
   environment = await initializeTestEnvironment({
@@ -279,6 +314,7 @@ before(async () => {
   await environment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     const storage = context.storage();
+    await captureSharedFixtureDocuments(firestore);
     for (const user of Object.values(USERS)) {
       await setDoc(doc(firestore, `users/${user.uid}`), {
         role: user.role,
@@ -342,44 +378,50 @@ before(async () => {
 
 after(async () => {
   if (!environment) return;
-  await environment.withSecurityRulesDisabled(async (context) => {
-    const firestore = context.firestore();
-    const storage = context.storage();
-    for (const manifest of Object.values(FIXTURES)) {
-      if (manifest.generated) {
+  try {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      const storage = context.storage();
+      try {
+        for (const manifest of Object.values(FIXTURES)) {
+          if (manifest.generated) {
+            await deleteObject(ref(
+              storage,
+              manifest.generated.original.path
+            )).catch(() => undefined);
+          }
+          await deleteObject(ref(
+            storage,
+            manifest.plan.sourcePath
+          )).catch(() => undefined);
+          await deleteDoc(doc(
+            firestore,
+            `media_assets/${manifest.assetId}`
+          ));
+        }
+        for (const user of Object.values(USERS)) {
+          await deleteDoc(doc(firestore, `users/${user.uid}`));
+        }
+        await deleteDoc(doc(firestore, 'grigliata_music_stream/private-copy'));
         await deleteObject(ref(
           storage,
-          manifest.generated.original.path
+          FOE_OPERATION_FIXTURE.path
         )).catch(() => undefined);
+        await deleteObject(ref(
+          storage,
+          'foes/task07-rules-generic.png'
+        )).catch(() => undefined);
+        await deleteDoc(doc(
+          firestore,
+          `task07_foe_media_operations/${FOE_OPERATION_FIXTURE.receiptId}`
+        ));
+      } finally {
+        await restoreSharedFixtureDocuments(firestore);
       }
-      await deleteObject(ref(
-        storage,
-        manifest.plan.sourcePath
-      )).catch(() => undefined);
-      await deleteDoc(doc(
-        firestore,
-        `media_assets/${manifest.assetId}`
-      ));
-    }
-    for (const user of Object.values(USERS)) {
-      await deleteDoc(doc(firestore, `users/${user.uid}`));
-    }
-    await deleteDoc(doc(firestore, 'grigliata_music_stream/current'));
-    await deleteDoc(doc(firestore, 'grigliata_music_stream/private-copy'));
-    await deleteObject(ref(
-      storage,
-      FOE_OPERATION_FIXTURE.path
-    )).catch(() => undefined);
-    await deleteObject(ref(
-      storage,
-      'foes/task07-rules-generic.png'
-    )).catch(() => undefined);
-    await deleteDoc(doc(
-      firestore,
-      `task07_foe_media_operations/${FOE_OPERATION_FIXTURE.receiptId}`
-    ));
-  });
-  await environment.cleanup();
+    });
+  } finally {
+    await environment.cleanup();
+  }
 });
 
 test('music stream permits only signed-in current-document gets', async () => {
@@ -564,15 +606,20 @@ test('canonical-only music writes bind tracks and cannot introduce legacy URLs',
   } finally {
     await environment.withSecurityRulesDisabled(async (context) => {
       const firestore = context.firestore();
-      for (const pathName of [
-        `grigliata_music_playback_sessions/${trackId}`,
-        'grigliata_music_playback/current',
-        `grigliata_music_tracks/${trackId}`,
-        `grigliata_music_tracks/${newTrackId}`,
-        `grigliata_music_tracks/${legacyTrackId}`,
-        'utils/task07_media',
-      ]) {
-        await deleteDoc(doc(firestore, pathName));
+      try {
+        for (const pathName of [
+          `grigliata_music_playback_sessions/${trackId}`,
+          `grigliata_music_tracks/${trackId}`,
+          `grigliata_music_tracks/${newTrackId}`,
+          `grigliata_music_tracks/${legacyTrackId}`,
+        ]) {
+          await deleteDoc(doc(firestore, pathName));
+        }
+      } finally {
+        await restoreSharedFixtureDocuments(firestore, [
+          'grigliata_music_playback/current',
+          'utils/task07_media',
+        ]);
       }
     });
   }

@@ -9,6 +9,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {
+  CANONICAL_AUDIT_VERSION,
   PLAN_VERSION: MIGRATION_PLAN_VERSION,
   POLICY_HASH,
   PRODUCTION_PROJECT_ID,
@@ -22,7 +23,9 @@ const {
   computePlanFingerprint,
   createAdminBackend: createMigrationBackend,
   exactSourceKeys,
+  expectedStorageBucket,
   storagePathFromValue,
+  validCanonicalAuditExclusion,
 } = require('./media-derivative-backfill');
 const TOKEN_RUNTIME_COVERAGE = require('./token-runtime-coverage.json');
 
@@ -76,7 +79,8 @@ const MUSIC_STREAM_SCHEMA_VERSION = 2;
 const MUSIC_STREAM_READY_TIMEOUT_MS = 2 * 60 * 1000;
 const MUSIC_STREAM_READY_POLL_MS = 1000;
 const TOKEN_COVERAGE_MAX_DOCUMENTS = 500;
-const TOKEN_RECEIPT_SOURCES = new Set([
+const CANONICAL_BINDING_MAX_DOCUMENTS = 450;
+const TOKEN_AUDIT_SOURCES = new Set([
   'custom-token-templates',
   'foe-tokens',
 ]);
@@ -95,16 +99,34 @@ const canonicalMediaHash = (entity) => canonicalMediaReady(entity) ?
   canonicalHash(entity.media) :
   null;
 
-const mainLegacyPaths = (entity) => collectMediaPaths({
-  imagePath: entity?.imagePath,
-  imageUrl: entity?.imageUrl,
-  image_url: entity?.image_url,
-  General: {
-    imagePath: entity?.General?.imagePath,
-    imageUrl: entity?.General?.imageUrl,
-    image_url: entity?.General?.image_url,
-  },
+const mainLegacyValues = (entity) => [
+  entity?.imagePath,
+  entity?.imageUrl,
+  entity?.image_url,
+  entity?.General?.imagePath,
+  entity?.General?.imageUrl,
+  entity?.General?.image_url,
+].filter((value) => typeof value === 'string' && value.trim());
+
+const mainLegacyProjection = (entity, storageContext) => ({
+  paths: collectMediaPaths({
+    imagePath: entity?.imagePath,
+    imageUrl: entity?.imageUrl,
+    image_url: entity?.image_url,
+    General: {
+      imagePath: entity?.General?.imagePath,
+      imageUrl: entity?.General?.imageUrl,
+      image_url: entity?.General?.image_url,
+    },
+  }, storageContext),
+  invalid: mainLegacyValues(entity).some((value) => (
+    !storagePathFromValue(value, storageContext)
+  )),
 });
+
+const mainLegacyPaths = (entity, storageContext) => (
+  mainLegacyProjection(entity, storageContext).paths
+);
 
 const samePaths = (first, second) => (
   canonicalHash([...first].sort()) === canonicalHash([...second].sort())
@@ -154,6 +176,10 @@ const evaluateTokenCoverage = ({
   placements = [],
   users = [],
   runtimeProof = TOKEN_RUNTIME_COVERAGE,
+  storageContext = {
+    expectedBucket: PRODUCTION_STORAGE_BUCKET,
+    allowLoopback: false,
+  },
 }) => {
   const issues = new Set();
   const tokenById = new Map(tokens.map((entry) => [entry.id, entry]));
@@ -191,6 +217,24 @@ const evaluateTokenCoverage = ({
     ...foeTokens,
   ].map(({id}) => id));
   if (classified.size !== tokens.length) issues.add('unclassified-token');
+  if (tokens.some((entry) => mainLegacyProjection(
+    entry,
+    storageContext
+  ).invalid)) {
+    issues.add('token-media-reference-invalid');
+  }
+  if (placements.some((entry) => mainLegacyProjection(
+    entry,
+    storageContext
+  ).invalid)) {
+    issues.add('placement-media-reference-invalid');
+  }
+  if (users.some((entry) => mainLegacyProjection(
+    entry,
+    storageContext
+  ).invalid)) {
+    issues.add('character-user-media-reference-invalid');
+  }
 
   customTemplates.forEach((template) => {
     if (!canonicalMediaReady(template)) {
@@ -209,7 +253,10 @@ const evaluateTokenCoverage = ({
       String(template.ownerUid || '').trim()) {
       issues.add('custom-instance-template-owner-mismatch');
     }
-    if (!samePaths(mainLegacyPaths(instance), mainLegacyPaths(template))) {
+    if (!samePaths(
+      mainLegacyPaths(instance, storageContext),
+      mainLegacyPaths(template, storageContext)
+    )) {
       issues.add('custom-instance-template-path-mismatch');
     }
   });
@@ -224,7 +271,10 @@ const evaluateTokenCoverage = ({
     if (!canonicalMediaReady(user)) {
       issues.add('character-user-canonical-missing');
     }
-    if (!samePaths(mainLegacyPaths(token), mainLegacyPaths(user))) {
+    if (!samePaths(
+      mainLegacyPaths(token, storageContext),
+      mainLegacyPaths(user, storageContext)
+    )) {
       issues.add('character-token-user-path-mismatch');
     }
   });
@@ -243,7 +293,12 @@ const evaluateTokenCoverage = ({
       String(token.ownerUid || '').trim()) {
       issues.add('placement-token-owner-mismatch');
     }
-    if (!samePaths(mainLegacyPaths(placement), mainLegacyPaths(token))) {
+    const placementLegacyPaths = mainLegacyPaths(placement, storageContext);
+    if (placementLegacyPaths.length > 0 &&
+      !samePaths(
+        placementLegacyPaths,
+        mainLegacyPaths(token, storageContext)
+      )) {
       issues.add('placement-token-path-mismatch');
     }
   });
@@ -299,7 +354,7 @@ const evaluateTokenCoverage = ({
         ownerUid: entry.ownerUid,
         characterId: entry.characterId,
         customTemplateId: entry.customTemplateId,
-        paths: mainLegacyPaths(entry),
+        paths: mainLegacyPaths(entry, storageContext),
         canonical: canonicalMediaReady(entry),
         canonicalMediaHash: canonicalMediaHash(entry),
       })),
@@ -308,11 +363,11 @@ const evaluateTokenCoverage = ({
         backgroundId: entry.backgroundId,
         tokenId: placementTokenId(entry).tokenId,
         ownerUid: entry.ownerUid,
-        paths: mainLegacyPaths(entry),
+        paths: mainLegacyPaths(entry, storageContext),
       })),
       users: [...users].sort(byId).map((entry) => ({
         id: entry.id,
-        paths: mainLegacyPaths(entry),
+        paths: mainLegacyPaths(entry, storageContext),
         canonical: canonicalMediaReady(entry),
         canonicalMediaHash: canonicalMediaHash(entry),
       })),
@@ -320,15 +375,15 @@ const evaluateTokenCoverage = ({
   };
 };
 
-const assertTokenActivationCoverage = ({coverage, verificationReport}) => {
-  const tokenReceiptTargets = (verificationReport?.entries || [])
-    .filter((entry) => TOKEN_RECEIPT_SOURCES.has(entry.sourceKey))
+const assertTokenActivationCoverage = ({coverage, auditReport}) => {
+  const tokenAuditTargets = (auditReport?.entries || [])
+    .filter((entry) => TOKEN_AUDIT_SOURCES.has(entry.sourceKey))
     .map(({targetPath}) => targetPath)
     .sort();
-  const requiredReceiptTargets = [...coverage.requiredReceiptTargets].sort();
+  const requiredAuditTargets = [...coverage.requiredReceiptTargets].sort();
   const issues = [...coverage.issues];
-  if (!samePaths(tokenReceiptTargets, requiredReceiptTargets)) {
-    issues.push('token-receipt-coverage-mismatch');
+  if (!samePaths(tokenAuditTargets, requiredAuditTargets)) {
+    issues.push('token-audit-coverage-mismatch');
   }
   if (issues.length) {
     throw new Error(
@@ -341,7 +396,7 @@ const assertTokenActivationCoverage = ({coverage, verificationReport}) => {
     counts: coverage.counts,
     relationshipHash: coverage.relationshipHash,
     placementReferenceHash: coverage.placementReferenceHash,
-    receiptTargetsHash: canonicalHash(tokenReceiptTargets),
+    auditTargetsHash: canonicalHash(tokenAuditTargets),
     runtimeProofHash: coverage.runtimeProofHash,
   };
 };
@@ -385,14 +440,14 @@ const evaluateMusicCoverage = ({tracks = []} = {}) => {
   };
 };
 
-const assertMusicActivationCoverage = ({coverage, verificationReport}) => {
-  const receiptTargets = (verificationReport?.entries || [])
+const assertMusicActivationCoverage = ({coverage, auditReport}) => {
+  const auditTargets = (auditReport?.entries || [])
     .filter((entry) => entry.sourceKey === 'music-tracks')
     .map(({targetPath}) => targetPath)
     .sort();
   const issues = [...coverage.issues];
-  if (!samePaths(receiptTargets, coverage.requiredReceiptTargets)) {
-    issues.push('music-receipt-coverage-mismatch');
+  if (!samePaths(auditTargets, coverage.requiredReceiptTargets)) {
+    issues.push('music-audit-coverage-mismatch');
   }
   if (issues.length) {
     throw new Error(
@@ -404,7 +459,7 @@ const assertMusicActivationCoverage = ({coverage, verificationReport}) => {
     schemaVersion: MUSIC_COVERAGE_SCHEMA_VERSION,
     counts: coverage.counts,
     relationshipHash: coverage.relationshipHash,
-    receiptTargetsHash: canonicalHash(receiptTargets),
+    auditTargetsHash: canonicalHash(auditTargets),
   };
 };
 
@@ -547,7 +602,7 @@ const waitForMusicStreamActivationReady = async ({
   throw new Error(
     'Canonical-only control was written, but the bounded music-stream ' +
     `readiness check timed out: ${latest.issues.join(', ')}. ` +
-    'Use the reviewed legacy rollback if the projector does not recover.'
+    'Use the reviewed v1-write rollback if the projector does not recover.'
   );
 };
 
@@ -558,14 +613,14 @@ const assertRuntimeCoverageFresh = ({
 }) => {
   const tokenEvidence = assertTokenActivationCoverage({
     coverage: tokenCoverage,
-    verificationReport: {entries: tokenCoverage.requiredReceiptTargets.map(
+    auditReport: {entries: tokenCoverage.requiredReceiptTargets.map(
       (targetPath) => ({sourceKey: targetPath.includes('grigliata_tokens/') ?
         'custom-token-templates' : '', targetPath})
     )},
   });
   const musicEvidence = assertMusicActivationCoverage({
     coverage: musicCoverage,
-    verificationReport: {entries: musicCoverage.requiredReceiptTargets.map(
+    auditReport: {entries: musicCoverage.requiredReceiptTargets.map(
       (targetPath) => ({sourceKey: 'music-tracks', targetPath})
     )},
   });
@@ -601,8 +656,8 @@ const parseArguments = (args = []) => {
     mode: '',
     projectId: '',
     reportPath: DEFAULT_REPORT_PATH,
-    verificationFingerprint: '',
-    verificationReportPath: '',
+    canonicalAuditFingerprint: '',
+    canonicalAuditReportPath: '',
     webmasterUid: '',
   };
   for (let index = 0; index < args.length; index += 1) {
@@ -619,8 +674,8 @@ const parseArguments = (args = []) => {
       '--webmaster-uid',
       '--confirm-webmaster-uid',
       '--expected-candidates',
-      '--verification-report',
-      '--verification-fingerprint',
+      '--canonical-audit-report',
+      '--canonical-audit-fingerprint',
       '--report',
       '--approve-fingerprint',
     ].includes(argument)) {
@@ -643,11 +698,11 @@ const parseArguments = (args = []) => {
           '--expected-candidates'
         );
       }
-      if (argument === '--verification-report') {
-        options.verificationReportPath = path.resolve(value);
+      if (argument === '--canonical-audit-report') {
+        options.canonicalAuditReportPath = path.resolve(value);
       }
-      if (argument === '--verification-fingerprint') {
-        options.verificationFingerprint = value;
+      if (argument === '--canonical-audit-fingerprint') {
+        options.canonicalAuditFingerprint = value;
       }
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--approve-fingerprint') {
@@ -672,13 +727,13 @@ const parseArguments = (args = []) => {
     throw new Error('--auth must be exactly admin or firebase-cli.');
   }
   if (options.mode === 'canonical-only' && (
-    !options.verificationReportPath ||
-    !/^[a-f0-9]{64}$/i.test(options.verificationFingerprint) ||
+    !options.canonicalAuditReportPath ||
+    !/^[a-f0-9]{64}$/i.test(options.canonicalAuditFingerprint) ||
     options.expectedCandidates === null
   )) {
     throw new Error(
-      'canonical-only requires --verification-report, exact ' +
-      '--verification-fingerprint, and --expected-candidates.'
+      'canonical-only requires --canonical-audit-report, exact ' +
+      '--canonical-audit-fingerprint, and --expected-candidates.'
     );
   }
   if (options.execute && !/^[a-f0-9]{64}$/i.test(
@@ -776,7 +831,97 @@ const controlKind = (value) => {
   return 'partial-rollout';
 };
 
-const validateVerificationReport = ({
+const canonicalBindingDocuments = (entries) => {
+  const versions = new Map();
+  for (const entry of entries) {
+    for (const binding of [{
+      type: 'target',
+      path: entry.targetPath,
+      version: entry.targetVersion,
+    }, {
+      type: 'manifest',
+      path: entry.manifestPath,
+      version: entry.manifestVersion,
+    }, {
+      type: 'owner',
+      path: `users/${entry.ownerUid}`,
+      version: entry.ownerVersion,
+    }]) {
+      const key = binding.path;
+      if (versions.has(key) && versions.get(key).version !== binding.version) {
+        throw new Error(
+          `Canonical audit has conflicting versions for ${binding.path}.`
+        );
+      }
+      versions.set(key, binding);
+    }
+  }
+  const bindings = [...versions.values()].sort((left, right) => (
+    left.path.localeCompare(right.path) || left.type.localeCompare(right.type)
+  ));
+  if (bindings.length > CANONICAL_BINDING_MAX_DOCUMENTS) {
+    throw new Error(
+      `Canonical audit exceeds the ${CANONICAL_BINDING_MAX_DOCUMENTS}-` +
+      'document transaction fence.'
+    );
+  }
+  return bindings;
+};
+
+const validCanonicalAuditEntry = (entry) => {
+  if (!isRecord(entry)) return false;
+  const {auditId, auditHash, status, issues, ...core} = entry;
+  return SOURCE_KEYS.includes(entry.sourceKey) &&
+    entry.status === 'verified' &&
+    Array.isArray(entry.issues) && entry.issues.length === 0 &&
+    /^a_[a-f0-9]{40}$/.test(String(auditId || '')) &&
+    /^[a-f0-9]{64}$/.test(String(auditHash || '')) &&
+    auditId === `a_${auditHash.slice(0, 40)}` &&
+    canonicalHash(core) === auditHash &&
+    /^m_[a-f0-9]{40}$/.test(String(entry.assetId || '')) &&
+    entry.manifestPath === `media_assets/${entry.assetId}` &&
+    /^\d+:\d{9}$/.test(String(entry.targetVersion || '')) &&
+    /^\d+:\d{9}$/.test(String(entry.manifestVersion || '')) &&
+    Number.isSafeInteger(entry.targetRevision) &&
+    entry.targetRevision >= 1 &&
+    typeof entry.ownerUid === 'string' && entry.ownerUid.length > 0 &&
+    ['target-path', 'explicit', 'attached-manifest',
+      'verified-global-fallback']
+      .includes(entry.ownerResolution) &&
+    ['player', 'dm', 'webmaster'].includes(entry.ownerRole) &&
+    /^\d+:\d{9}$/.test(String(entry.ownerVersion || '')) &&
+    /^[a-f0-9]{64}$/.test(String(entry.targetFingerprint || '')) &&
+    /^[a-f0-9]{64}$/.test(String(entry.manifestFingerprint || '')) &&
+    /^[a-f0-9]{64}$/.test(String(entry.descriptorFingerprint || '')) &&
+    Array.isArray(entry.objectProofs) && entry.objectProofs.length >= 1 &&
+    entry.objectProofs.every((proof) => (
+      proof?.verified === true &&
+      exactStringArray(proof.validationErrors, []) &&
+      typeof proof.path === 'string' && proof.path.length > 0 &&
+      /^[a-f0-9]{64}$/.test(String(
+        proof.descriptorFingerprint || ''
+      )) &&
+      /^[a-f0-9]{64}$/.test(String(proof.objectFingerprint || ''))
+    )) &&
+    Array.isArray(entry.legacySources) &&
+    entry.legacySources.every((source) => (
+      source?.exists === true &&
+      typeof source.path === 'string' && source.path.length > 0 &&
+      Number.isSafeInteger(source.bytes) && source.bytes > 0 &&
+      /^[1-9][0-9]*$/.test(String(source.generation || '')) &&
+      /^[a-f0-9]{64}$/.test(String(source.fingerprint || ''))
+    )) &&
+    (entry.sourceKey !== 'foe-tokens' || (
+      Number.isSafeInteger(entry.placementReferenceCount) &&
+      entry.placementReferenceCount >= 1 &&
+      /^[a-f0-9]{64}$/.test(String(
+        entry.placementReferenceHash || ''
+      )) &&
+      /^[a-f0-9]{64}$/.test(String(entry.sourceFoeFingerprint || ''))
+    ));
+};
+
+const validateCanonicalAuditReport = ({
   report,
   fingerprint,
   expectedCandidates,
@@ -784,32 +929,14 @@ const validateVerificationReport = ({
 }) => {
   const validEntries = Array.isArray(report?.entries) &&
     report.entries.length === expectedCandidates &&
-    report.entries.every((entry) => (
-      SOURCE_KEYS.includes(entry.sourceKey) &&
-      entry.status === 'verified' &&
-      entry.proofs?.generatedObjectsPresent === true &&
-      entry.proofs?.legacySourceUnchanged === true &&
-      entry.proofs?.legacyGeneralImageUrlUnchanged === true &&
-      (!['catalog-items', 'inventory-items'].includes(entry.sourceKey) || (
-        entry.proofs?.itemOriginalGenerated === true &&
-        entry.proofs?.itemCardGenerated === true &&
-        entry.proofs?.itemCard2xGenerated === true
-      ))
-      && (entry.sourceKey !== 'foe-tokens' || (
-        Number.isSafeInteger(entry.proofs?.placementReferenceCount) &&
-        entry.proofs.placementReferenceCount >= 1 &&
-        /^[a-f0-9]{64}$/.test(String(
-          entry.proofs?.placementReferenceHash || ''
-        )) &&
-        /^[a-f0-9]{64}$/.test(String(entry.proofs?.sourceFoeFingerprint || ''))
-      ))
-    ));
+    report.entries.every(validCanonicalAuditEntry);
   if (!isRecord(report) ||
     report.schemaVersion !== MIGRATION_REPORT_SCHEMA_VERSION ||
     report.planVersion !== MIGRATION_PLAN_VERSION ||
     report.policyVersion !== mediaPolicy.policyVersion ||
     report.policyHash !== POLICY_HASH ||
-    report.operation !== 'verify' ||
+    report.operation !== 'canonical-audit' ||
+    report.canonicalAuditVersion !== CANONICAL_AUDIT_VERSION ||
     report.projectId !== PRODUCTION_PROJECT_ID ||
     report.storageBucket !== PRODUCTION_STORAGE_BUCKET ||
     !exactSourceKeys(report.sourceKeys) ||
@@ -827,37 +954,45 @@ const validateVerificationReport = ({
     report.scan?.concurrency !== 1 ||
     !exactStringArray(report.scan?.truncatedSources, []) ||
     report.counts?.candidates !== expectedCandidates ||
-    report.counts?.excluded !== 0 ||
-    report.counts?.discovered !== expectedCandidates ||
+    report.counts?.excluded !== report.excluded?.length ||
+    report.counts?.discovered !==
+      expectedCandidates + (report.excluded?.length || 0) ||
     report.counts?.errors !== 0 ||
     !Array.isArray(report.excluded) ||
-    report.excluded.length !== 0 ||
+    !report.excluded.every(validCanonicalAuditExclusion) ||
     report.planFingerprint !== computePlanFingerprint(report) ||
     report.planFingerprint !== fingerprint ||
     !validEntries) {
     throw new Error(
       'canonical-only requires the exact fresh, complete, zero-error, ' +
-      'all-source Task 07 verification report.'
+      'all-source Task 07 active canonical audit.'
     );
   }
+  const bindingDocuments = canonicalBindingDocuments(report.entries);
   return {
-    migrationPlanFingerprint: report.planFingerprint,
+    canonicalAuditFingerprint: report.planFingerprint,
     expectedCandidates,
-    verifiedReceipts: report.entries.length,
+    auditedTargets: report.entries.length,
+    exclusions: report.excluded.length,
     sourceKeys: [...report.sourceKeys],
+    bindingDocuments,
+    bindingDocumentsHash: canonicalHash(bindingDocuments),
     proofHash: canonicalHash(report.entries.map((entry) => ({
-      receiptId: entry.receiptId,
+      auditId: entry.auditId,
       sourceKey: entry.sourceKey,
-      inspectionHash: entry.inspectionHash,
-      proofs: entry.proofs,
+      auditHash: entry.auditHash,
+      targetPath: entry.targetPath,
+      targetVersion: entry.targetVersion,
+      manifestPath: entry.manifestPath,
+      manifestVersion: entry.manifestVersion,
     }))),
   };
 };
 
-const assertFreshVerification = ({reviewed, fresh}) => {
+const assertFreshCanonicalAudit = ({reviewed, fresh}) => {
   if (canonicalHash(reviewed) !== canonicalHash(fresh)) {
     throw new Error(
-      'The reviewed verification report is stale. Re-run verification.'
+      'The reviewed canonical audit is stale. Re-run the active audit.'
     );
   }
   return fresh;
@@ -869,22 +1004,34 @@ const buildPlan = ({
   snapshot,
   verificationEvidence = null,
 }) => {
+  if (mode === 'legacy') {
+    throw new Error(
+      'legacy rollback is not supported; use the reviewed v1-write rollback.'
+    );
+  }
   const beforeControl = snapshot.exists ? snapshot.data : null;
   const beforeKind = snapshot.exists ? controlKind(beforeControl) : 'legacy';
   if (snapshot.exists && beforeKind === 'malformed') {
     throw new Error('The current Task 07 control document is malformed.');
   }
   const afterControl = mode === 'canonical-only' ?
-    CANONICAL_ONLY_CONTROL :
-    mode === 'v1-write' ? V1_WRITE_CONTROL : LEGACY_CONTROL;
+    CANONICAL_ONLY_CONTROL : V1_WRITE_CONTROL;
   if (beforeKind === mode) {
     throw new Error(`Task 07 control is already ${mode}.`);
   }
-  if (mode === 'v1-write' && beforeKind !== 'legacy') {
-    throw new Error('v1-write may be enabled only from exact legacy state.');
+  if (mode === 'v1-write' &&
+    !['legacy', 'canonical-only'].includes(beforeKind)) {
+    throw new Error(
+      'v1-write requires exact legacy activation or canonical-only rollback state.'
+    );
   }
   if (mode === 'canonical-only' && !verificationEvidence) {
     throw new Error('canonical-only requires verified migration evidence.');
+  }
+  if (mode === 'canonical-only' && beforeKind !== 'v1-write') {
+    throw new Error(
+      'canonical-only requires the exact active v1-write control state.'
+    );
   }
   const subject = {
     schemaVersion: CONTROL_PLAN_SCHEMA_VERSION,
@@ -912,6 +1059,52 @@ const assertApprovedPlan = ({approved, current, fingerprint}) => {
     );
   }
   return approved;
+};
+
+const firestoreSnapshotVersion = (snapshot) => {
+  const timestamp = snapshot?.updateTime;
+  const seconds = Number(timestamp?.seconds ?? timestamp?._seconds);
+  const nanoseconds = Number(timestamp?.nanoseconds ?? timestamp?._nanoseconds);
+  return Number.isInteger(seconds) && Number.isInteger(nanoseconds) ?
+    `${seconds}:${String(nanoseconds).padStart(9, '0')}` :
+    '';
+};
+
+const assertCanonicalBindingSnapshotsFresh = ({bindings, snapshots}) => {
+  if (!Array.isArray(bindings) || !Array.isArray(snapshots) ||
+    bindings.length !== snapshots.length ||
+    bindings.length > CANONICAL_BINDING_MAX_DOCUMENTS) {
+    throw new Error('Canonical audit transaction fence is malformed.');
+  }
+  bindings.forEach((binding, index) => {
+    const snapshot = snapshots[index];
+    const targetPath = String(binding?.path || '');
+    const manifestPath = binding?.type === 'manifest' &&
+      /^media_assets\/m_[a-f0-9]{40}$/.test(targetPath);
+    const ownerDocument = binding?.type === 'owner' &&
+      /^users\/[^/]+$/.test(targetPath);
+    const targetDocument = binding?.type === 'target' && (
+      /^users\/[^/]+$/.test(targetPath) ||
+      /^items\/[^/]+$/.test(targetPath) ||
+      /^users\/[^/]+\/(?:inventory|tecniche|spells)\/[^/]+$/.test(
+        targetPath
+      ) ||
+      /^(?:echi_npcs|foes|grigliata_tokens|grigliata_backgrounds|grigliata_music_tracks)\/[^/]+$/
+        .test(targetPath) ||
+      targetPath === 'utils/tecniche_common'
+    );
+    if ((!manifestPath && !targetDocument && !ownerDocument) ||
+      !/^\d+:\d{9}$/.test(String(binding?.version || '')) ||
+      snapshot?.exists !== true ||
+      snapshot?.ref?.path !== targetPath ||
+      firestoreSnapshotVersion(snapshot) !== binding.version) {
+      throw new Error(
+        `Canonical media binding changed after audit: ${targetPath || 'unknown'}. ` +
+        'Re-run the active audit and re-plan.'
+      );
+    }
+  });
+  return true;
 };
 
 const createBackend = async ({projectId, authMode}) => {
@@ -942,6 +1135,10 @@ const createBackend = async ({projectId, authMode}) => {
   }
   const db = getFirestore(app);
   const firebaseAuth = getAuth(app);
+  const tokenStorageContext = {
+    expectedBucket: expectedStorageBucket(projectId),
+    allowLoopback: projectId !== PRODUCTION_PROJECT_ID,
+  };
   const reference = db.doc(CONTROL_PATH);
   const musicStreamReference = db.doc('grigliata_music_stream/current');
   const snapshotData = (snapshot) => ({
@@ -1006,6 +1203,7 @@ const createBackend = async ({projectId, authMode}) => {
       placements: await readBoundedCollection('grigliata_token_placements'),
       users: await readBoundedCollection('users'),
       runtimeProof: TOKEN_RUNTIME_COVERAGE,
+      storageContext: tokenStorageContext,
     }),
     readMusicCoverage: async () => evaluateMusicCoverage({
       tracks: await readBoundedCollection('grigliata_music_tracks'),
@@ -1037,8 +1235,26 @@ const createBackend = async ({projectId, authMode}) => {
               placements,
               users,
               runtimeProof: TOKEN_RUNTIME_COVERAGE,
+              storageContext: tokenStorageContext,
             }),
             musicCoverage: evaluateMusicCoverage({tracks}),
+          });
+          const bindingDocuments = verificationEvidence?.bindingDocuments;
+          if (!Array.isArray(bindingDocuments) ||
+            canonicalHash(bindingDocuments) !==
+              verificationEvidence?.bindingDocumentsHash) {
+            throw new Error(
+              'Canonical audit binding evidence is malformed. Re-plan.'
+            );
+          }
+          const bindingSnapshots = await transaction.getAll(
+            ...bindingDocuments.map(({path: bindingPath}) => (
+              db.doc(bindingPath)
+            ))
+          );
+          assertCanonicalBindingSnapshotsFresh({
+            bindings: bindingDocuments,
+            snapshots: bindingSnapshots,
           });
         }
         const snapshot = await transaction.get(reference);
@@ -1084,7 +1300,7 @@ const createBackend = async ({projectId, authMode}) => {
   };
 };
 
-const refreshVerification = async ({options, reviewedReport}) => {
+const refreshCanonicalAudit = async ({options, reviewedReport}) => {
   const backend = await createMigrationBackend({
     projectId: PRODUCTION_PROJECT_ID,
     storageBucket: PRODUCTION_STORAGE_BUCKET,
@@ -1094,7 +1310,7 @@ const refreshVerification = async ({options, reviewedReport}) => {
     await backend.verifyCatalogOwner(options.webmasterUid);
     const fresh = await buildMigrationPlan({
       backend,
-      operation: 'verify',
+      operation: 'canonical-audit',
       projectId: PRODUCTION_PROJECT_ID,
       storageBucket: PRODUCTION_STORAGE_BUCKET,
       sourceKeys: SOURCE_KEYS,
@@ -1106,7 +1322,7 @@ const refreshVerification = async ({options, reviewedReport}) => {
     assertCandidateCountBinding(fresh, options.expectedCandidates, {
       required: true,
     });
-    return assertFreshVerification({reviewed: reviewedReport, fresh});
+    return assertFreshCanonicalAudit({reviewed: reviewedReport, fresh});
   } finally {
     await backend.close();
   }
@@ -1117,11 +1333,11 @@ const printHelp = () => console.log([
   '',
   'Usage:',
   `  node scripts/task07/media-rollout-control.js --project ${PRODUCTION_PROJECT_ID}`,
-  '    --mode v1-write|canonical-only|legacy --auth firebase-cli',
+  '    --mode v1-write|canonical-only --auth firebase-cli',
   `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --webmaster-uid <uid> --confirm-webmaster-uid <same-uid>',
-  '    [--verification-report <zero-error-all-source-report>]',
-  '    [--verification-fingerprint <sha256>]',
+  '    [--canonical-audit-report <zero-error-active-audit>]',
+  '    [--canonical-audit-fingerprint <sha256>]',
   '    [--expected-candidates <reviewed-count>]',
   '    [--report <control-plan>]',
   '    [--execute --approve-fingerprint <control-plan-sha256>]',
@@ -1129,10 +1345,13 @@ const printHelp = () => console.log([
   'v1-write enables the temporary all-source migration write stage.',
   'canonical-only writes the strict canonical-only mode with wildcard',
   'purpose, role, and UID',
-  'allowlists only after a fresh all-source verification. legacy is the',
-  'explicit rollback. Token templates/foe roots, character/custom/placement',
+  'allowlists only after a fresh all-source active canonical audit.',
+  'v1-write is the only supported rollback; legacy requires a separately',
+  'reviewed compatibility procedure. Token templates/foe roots,',
+  'character/custom/placement',
   'relationships, and nested-foe non-rendering are re-audited before writes.',
-  'Production and emulator targets are always refused.',
+  'Any target other than the exact reviewed production or demo-emulator',
+  'binding is refused.',
 ].join('\n'));
 
 const main = async (argv = process.argv.slice(2)) => {
@@ -1140,23 +1359,26 @@ const main = async (argv = process.argv.slice(2)) => {
   if (options.help) return printHelp();
   const target = assertSafeTarget(options);
   let verificationEvidence = null;
-  let verificationReport = null;
+  let canonicalAuditReport = null;
   if (options.mode === 'canonical-only') {
     const reviewed = readJson(
-      options.verificationReportPath,
-      'Task 07 verification report'
+      options.canonicalAuditReportPath,
+      'Task 07 active canonical audit'
     );
-    validateVerificationReport({
+    validateCanonicalAuditReport({
       report: reviewed,
-      fingerprint: options.verificationFingerprint,
+      fingerprint: options.canonicalAuditFingerprint,
       expectedCandidates: options.expectedCandidates,
       webmasterUid: options.webmasterUid,
     });
-    const fresh = await refreshVerification({options, reviewedReport: reviewed});
-    verificationReport = fresh;
-    verificationEvidence = validateVerificationReport({
+    const fresh = await refreshCanonicalAudit({
+      options,
+      reviewedReport: reviewed,
+    });
+    canonicalAuditReport = fresh;
+    verificationEvidence = validateCanonicalAuditReport({
       report: fresh,
-      fingerprint: options.verificationFingerprint,
+      fingerprint: options.canonicalAuditFingerprint,
       expectedCandidates: options.expectedCandidates,
       webmasterUid: options.webmasterUid,
     });
@@ -1167,11 +1389,11 @@ const main = async (argv = process.argv.slice(2)) => {
     if (options.mode === 'canonical-only') {
       const tokenCoverage = assertTokenActivationCoverage({
         coverage: await backend.readTokenCoverage(),
-        verificationReport,
+        auditReport: canonicalAuditReport,
       });
       const musicCoverage = assertMusicActivationCoverage({
         coverage: await backend.readMusicCoverage(),
-        verificationReport,
+        auditReport: canonicalAuditReport,
       });
       verificationEvidence = {
         ...verificationEvidence,
@@ -1237,7 +1459,8 @@ module.exports = {
   LEGACY_CONTROL,
   V1_WRITE_CONTROL,
   assertApprovedPlan,
-  assertFreshVerification,
+  assertCanonicalBindingSnapshotsFresh,
+  assertFreshCanonicalAudit,
   assertMusicActivationCoverage,
   assertMusicStreamActivationReady,
   assertRuntimeCoverageFresh,
@@ -1249,6 +1472,6 @@ module.exports = {
   evaluateMusicStreamReadiness,
   evaluateTokenCoverage,
   parseArguments,
-  validateVerificationReport,
+  validateCanonicalAuditReport,
   waitForMusicStreamActivationReady,
 };

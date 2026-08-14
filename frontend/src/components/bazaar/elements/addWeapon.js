@@ -15,9 +15,18 @@ import { persistCanonicalInventoryItem } from "../../../data/media/privateInvent
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
 import {
     isTask07CatalogItemWriterEnabled,
+    prepareTask07CatalogEmbeddedSpells,
+    retireTask07CatalogItemImage,
     runTask07CatalogItemWriter,
+    runTask07CatalogEmbeddedMediaOperations,
+    task07CatalogEmbeddedSpellEditorState,
+    task07CatalogItemImageEditorState,
     withTask07CatalogLegacyImageField,
 } from "../../../data/media/catalogItemMediaWriter";
+import {
+    resolveTask07CatalogCreateAttempt,
+    task07EmbeddedFileFingerprint,
+} from "../../../data/media/embeddedMediaRetry";
 import {
     describeTask07ConsumerOutcome,
     task07ConsumerNeedsAttention,
@@ -49,8 +58,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         Parametri: { Base: {}, Combattimento: {}, Special: {} }
     });
     const [imageFile, setImageFile] = useState(null);
+    const [imageRemoved, setImageRemoved] = useState(false);
     const imageObjectUrl = useObjectUrl(imageFile);
-    const imagePreviewUrl = imageObjectUrl || weaponFormData.General?.image_url || null;
+    const imageEditor = task07CatalogItemImageEditorState(
+        initialData || weaponFormData,
+        { objectUrl: imageObjectUrl, removed: imageRemoved }
+    );
+    const imagePreviewUrl = imageEditor.src;
     const [isLoading, setIsLoading] = useState(false);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
@@ -81,6 +95,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     // Refs to manage initialization logic
     const prevInitialDataIdRef = useRef(null);
     const formInitializedForCurrentItem = useRef(false);
+    const pendingCatalogCreateRef = useRef(null);
+    const completedEmbeddedOperationsRef = useRef(new Set());
+    const completedRootUploadRef = useRef(null);
 
 
     const addTecnica = useCallback(() => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]), []);
@@ -196,28 +213,22 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             // This check is now primarily handled by the calling useEffect.
             // Here, we assume if currentItemData is provided, we are setting based on it,
             // but the calling useEffect prevents this from overwriting local changes.
-            const initialLinkedSpells = [];
-            const initialCustomSpellsFromData = [];
-            if (currentItemData.General?.spells && typeof currentItemData.General.spells === 'object') {
-                Object.entries(currentItemData.General.spells).forEach(([name, data]) => {
-                    if (data === true) {
-                        initialLinkedSpells.push(name);
-                    } else if (typeof data === 'object') {
-                        initialCustomSpellsFromData.push({ spellData: data, imageFile: null, videoFile: null });
-                    }
-                });
-            }
-            setWeaponSpellsList(initialLinkedSpells);
-            setCustomSpells(initialCustomSpellsFromData);
+            const embeddedEditorState = task07CatalogEmbeddedSpellEditorState(
+                currentItemData
+            );
+            setWeaponSpellsList(embeddedEditorState.linkedSpells);
+            setCustomSpells(embeddedEditorState.customSpells);
 
 
             setImageFile(null);
+            setImageRemoved(false);
         } else { // New item
             setRidTecnicheList([]);
             setRidSpellList([]);
             setWeaponSpellsList([]);
             setCustomSpells([]);
             setImageFile(null);
+            setImageRemoved(false);
         }
 
         initialFormState.General = initialFormState.General || {};
@@ -353,6 +364,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         const file = e.target.files[0];
         if (file) {
             setImageFile(file);
+            setImageRemoved(false);
         }
     };
 
@@ -420,27 +432,52 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         let catalogWriteCommitted = false;
 
         try {
+            let catalogBefore = null;
+            let resumeCreate = false;
             if (!editMode) {
                 const existingDocSnap = await getDoc(weaponDocRef);
-                if (existingDocSnap.exists()) {
+                const createAttempt = resolveTask07CatalogCreateAttempt({
+                    documentExists: existingDocSnap.exists(),
+                    documentId: docId,
+                    pendingDocumentId: pendingCatalogCreateRef.current,
+                });
+                if (createAttempt.blocked) {
                     if (showMessage) showMessage(`Un'arma con nome "${weaponName}" (ID: ${docId}) esiste già.`, "error");
                     setIsLoading(false);
                     return;
                 }
+                resumeCreate = createAttempt.resume;
+                catalogBefore = resumeCreate ? existingDocSnap.data() : null;
+            } else if (!inventoryEditMode) {
+                catalogBefore = (await getDoc(weaponDocRef)).data() || null;
             }
-
-            const catalogBefore = !inventoryEditMode && editMode
-                ? (await getDoc(weaponDocRef)).data()
+            const catalogIsExisting = editMode || resumeCreate;
+            const rootUploadKey = imageFile
+                ? task07EmbeddedFileFingerprint(imageFile)
                 : null;
+            const rootMediaAlreadyCommitted = Boolean(
+                rootUploadKey
+                && completedRootUploadRef.current === rootUploadKey
+                && (catalogBefore?.media?.assetId || catalogBefore?.General?.media?.assetId)
+            );
             const task07V1Write = await isTask07CatalogItemWriterEnabled({
                 actorUid: user?.uid,
                 role,
                 file: imageFile,
                 inventoryEditMode,
             });
-            if (customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
-                throw new Error("Embedded spell media has no canonical Task 07 slot yet. Remove those files before saving.");
+            if (inventoryEditMode && customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
+                throw new Error("Embedded spell media can only be changed on the catalog item.");
             }
+            const embeddedSpellPlan = inventoryEditMode
+                ? { operations: [], spells: Object.fromEntries(customSpells.map((entry) => [entry.spellData.Nome.trim(), {...entry.spellData}])) }
+                : await prepareTask07CatalogEmbeddedSpells({
+                    actorUid: user?.uid,
+                    role,
+                    itemId: weaponDocRef.id,
+                    currentItem: catalogBefore || initialData || {},
+                    customSpells,
+                });
 
             let finalWeaponData = {
                 item_type: "weapon",
@@ -448,8 +485,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 Specific: { ...(weaponFormData.Specific || {}) },
                 Parametri: JSON.parse(JSON.stringify(weaponFormData.Parametri || { Base: {}, Combattimento: {}, Special: {} }))
             };
+            if (!inventoryEditMode && catalogBefore?.task07EmbeddedMedia) {
+                finalWeaponData.task07EmbeddedMedia = catalogBefore.task07EmbeddedMedia;
+            }
 
-            let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
+            let newImageUrl = catalogIsExisting
+                ? (catalogBefore?.General?.image_url ?? initialData?.General?.image_url ?? null)
+                : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const weaponImgFileName = `weapon_${docId}_${Date.now()}_${imageFile.name}`;
                 uploadedLegacyImagePath = 'items/' + weaponImgFileName;
@@ -462,28 +504,12 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 deferredStorageCleanup.addUrl(initialData.General.image_url);
             }
             finalWeaponData = withTask07CatalogLegacyImageField(finalWeaponData, {
-                editMode,
+                editMode: catalogIsExisting,
                 imageUrl: newImageUrl,
                 task07V1Write,
             });
 
-            const finalSpells = {};
-            for (const spellObj of customSpells) {
-                const createdSpellData = { ...spellObj.spellData };
-                const spellNameKey = createdSpellData.Nome.trim();
-                const initialSpellFromData = (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object')
-                    ? initialData.General.spells[spellNameKey]
-                    : {};
-
-                let spellImageUrlToSave = createdSpellData.image_url || initialSpellFromData.image_url || null;
-                let spellVideoUrlToSave = createdSpellData.video_url || initialSpellFromData.video_url || null;
-
-
-
-                createdSpellData.image_url = spellImageUrlToSave;
-                createdSpellData.video_url = spellVideoUrlToSave;
-                finalSpells[spellNameKey] = createdSpellData;
-            }
+            const finalSpells = {...embeddedSpellPlan.spells};
 
             weaponSpellsList.forEach(spellNameKey => {
                 if (spellNameKey && !finalSpells[spellNameKey]) {
@@ -537,7 +563,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
                 const removeCanonicalImage = Boolean(
                     !imageFile
-                    && !imagePreviewUrl
+                    && imageRemoved
                     && initialData?.media?.assetId
                 );
                 const inventorySnapshot = { ...finalWeaponData };
@@ -573,7 +599,21 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
                 onClose(true);
             } else {
-                if (task07V1Write) {
+                if (imageRemoved) {
+                    await task07MediaOperationOwner.run(() => (
+                        retireTask07CatalogItemImage(catalogBefore)
+                    ));
+                }
+                const persistCatalogParent = async () => {
+                    if (catalogIsExisting) {
+                        await updateDoc(weaponDocRef, finalWeaponData);
+                    } else {
+                        await setDoc(weaponDocRef, finalWeaponData);
+                    }
+                    catalogWriteCommitted = true;
+                    if (!editMode) pendingCatalogCreateRef.current = docId;
+                };
+                if (task07V1Write && !rootMediaAlreadyCommitted) {
                     const outcome = await task07MediaOperationOwner.run((signal) => (
                         runTask07CatalogItemWriter({
                             actorUid: user.uid,
@@ -581,15 +621,22 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                             itemId: weaponDocRef.id,
                             file: imageFile,
                             currentItem: catalogBefore || initialData || {},
-                            prepareEntity: () => editMode
-                                ? updateDoc(weaponDocRef, finalWeaponData)
-                                : setDoc(weaponDocRef, finalWeaponData),
-                            rollbackPreparedEntity: () => catalogBefore
-                                ? setDoc(weaponDocRef, catalogBefore)
-                                : deleteDoc(weaponDocRef),
+                            prepareEntity: persistCatalogParent,
+                            rollbackPreparedEntity: async () => {
+                                if (catalogBefore) {
+                                    await setDoc(weaponDocRef, catalogBefore);
+                                } else {
+                                    await deleteDoc(weaponDocRef);
+                                    pendingCatalogCreateRef.current = null;
+                                    catalogWriteCommitted = false;
+                                }
+                            },
                             signal,
                         })
                     ));
+                    if (!task07ConsumerNeedsAttention(outcome)) {
+                        completedRootUploadRef.current = rootUploadKey;
+                    }
                     if (task07ConsumerNeedsAttention(outcome)) {
                         if (showMessage) showMessage(
                             describeTask07ConsumerOutcome(outcome, "Weapon image"),
@@ -598,18 +645,32 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     } else if (showMessage) {
                         showMessage(`Arma "${weaponName}" salvata!`, "success");
                     }
-                } else if (editMode) {
+                } else if (catalogIsExisting) {
                     console.log("Updating document:", docId, finalWeaponData);
-                    await updateDoc(weaponDocRef, finalWeaponData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Arma "${weaponName}" aggiornata!`, "success");
                 } else {
                     console.log("Creating document:", docId, finalWeaponData);
-                    await setDoc(weaponDocRef, finalWeaponData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Arma "${weaponName}" creata!`, "success");
                 }
+                if (embeddedSpellPlan.operations.length > 0) {
+                    await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogEmbeddedMediaOperations({
+                            actorUid: user.uid,
+                            role,
+                            itemId: weaponDocRef.id,
+                            currentItem: catalogBefore || initialData || {},
+                            completedOperationKeys: completedEmbeddedOperationsRef.current,
+                            operations: embeddedSpellPlan.operations,
+                            signal,
+                        })
+                    ));
+                }
                 await deferredStorageCleanup.flush();
+                pendingCatalogCreateRef.current = null;
+                completedEmbeddedOperationsRef.current.clear();
+                completedRootUploadRef.current = null;
                 onClose(true);
             }
 
@@ -684,11 +745,12 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                             onChange={handleImageChange}
                             className="w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer mb-2"
                         />
-                        {(imagePreviewUrl) && (
+                        {imageEditor.hasImage && (
                             <button
                                 type="button"
                                 onClick={() => {
                                     setImageFile(null);
+                                    setImageRemoved(true);
                                     handleNestedChange('General.image_url', null);
                                 }}
                                 className="text-xs text-red-400 hover:text-red-300 mb-1"
@@ -697,10 +759,10 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                             </button>
                         )}
                         <div className="w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center bg-gray-700/50 overflow-hidden">
-                            {(imagePreviewUrl) ? (
+                            {imageEditor.hasImage ? (
                                 <MediaImage
-                                    compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
-                                    media={imageObjectUrl ? { imageUrl: imageObjectUrl } : (initialData || weaponFormData)}
+                                    compatibilityMode={imageEditor.compatibilityMode}
+                                    media={imageEditor.media}
                                     mediaPurpose={imageObjectUrl ? "" : "item"}
                                     src={imagePreviewUrl}
                                     variant="thumbnail"

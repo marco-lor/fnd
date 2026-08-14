@@ -15,21 +15,29 @@ const {
   assertApprovedReport,
   assertCheckpoint,
   assertSafeTarget,
+  buildCanonicalMediaAudit,
+  backfillTargetFenceIssue,
   buildLegacyMediaBackfillPlan,
   buildLegacyMapBackfillMarker,
+  buildNestedRollbackRegistry,
   buildReceiptOperationPlan,
   canonicalHash,
   collectMediaPaths,
   computePlanFingerprint,
   executeMigrationPlan,
+  expandMediaRecords,
   isCanonicalTask07Path,
   loadLegacyMediaRecords,
   loadPaged,
   loadTask07AdminSdk,
   legacyMapRecoveryIssue,
   parseOptions,
+  nestedMediaRecordsForRecord,
+  nestedTargetBindingMatches,
+  recordFromSnapshot,
   stagingActionForManifest,
   storagePathFromValue,
+  validCanonicalAuditExclusion,
 } = require('./media-derivative-backfill');
 
 test('migration and compiled adapters share one Firebase Admin runtime', () => {
@@ -60,7 +68,658 @@ const activeOwner = (role = 'player') => ({
   exists: true,
   role,
   deletionState: '',
+  version: '9:000000001',
 });
+
+const canonicalAuditFixture = () => {
+  const assetId = `m_${'a'.repeat(40)}`;
+  const ownerUid = 'dm-owner';
+  const entityId = 'video-map';
+  const sourceGeneration = '123';
+  const descriptor = (role, overrides = {}) => {
+    const path = `media_assets/v1/signed-in/${ownerUid}/${assetId}/` +
+      `${sourceGeneration}/${role}`;
+    return {
+      path,
+      contentType: role === 'original' ? 'video/mp4' : 'image/webp',
+      bytes: role === 'original' ? 2048 : 512,
+      width: role === 'original' ? 1920 : 384,
+      height: role === 'original' ? 1080 : 216,
+      durationMs: role === 'original' ? 12000 : null,
+      orientationDegrees: 0,
+      checksum: role === 'original' ? '1'.repeat(64) :
+        role === 'poster' ? '2'.repeat(64) : '3'.repeat(64),
+      role,
+      generation: role === 'original' ? '501' :
+        role === 'poster' ? '502' : '503',
+      cacheControl: 'private, max-age=31536000, immutable',
+      ...overrides,
+    };
+  };
+  const original = descriptor('original');
+  const poster = descriptor('poster');
+  const poster2x = descriptor('poster2x', {width: 768, height: 432});
+  const media = {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId,
+    kind: 'map-video',
+    state: 'ready',
+    generation: sourceGeneration,
+    audience: 'signed-in',
+    ownerUid,
+    original,
+    variants: {poster, poster2x},
+    processing: {authoritative: true, fallbackCode: null},
+  };
+  const plan = {
+    schemaVersion: 1,
+    contractVersion: 1,
+    policyVersion: 1,
+    assetId,
+    kind: 'map-video',
+    targetKind: 'grigliata-background',
+    actorUid: ownerUid,
+    ownerUid,
+    ownerKey: ownerUid,
+    entityId,
+    commonTechnique: false,
+    referenceScope: null,
+    audienceScope: 'signed-in',
+    previousAssetId: null,
+    operationId: 'operation-video-map',
+    sourceContentType: 'video/mp4',
+    sourceBytes: original.bytes,
+    sourcePath: `media_uploads/${ownerUid}/${assetId}/source`,
+    requestHash: '4'.repeat(64),
+  };
+  const manifest = {
+    schemaVersion: 1,
+    policyVersion: 1,
+    assetId,
+    generation: sourceGeneration,
+    state: 'attached',
+    purpose: 'map-video',
+    audience: 'signed-in',
+    ownerUid,
+    actorUid: ownerUid,
+    targetKind: 'grigliata-background',
+    targetId: entityId,
+    previousAssetId: null,
+    requestHash: plan.requestHash,
+    plan,
+    generated: {generation: sourceGeneration, original, variants: {
+      poster,
+      poster2x,
+    }},
+    attachment: {
+      referencePath: `grigliata_backgrounds/${entityId}`,
+      targetSlot: 'media',
+      revision: 1,
+    },
+  };
+  const compiled = require('../../functions/lib/mediaAssetLifecycleCore.js');
+  const completePlan = compiled.buildTask07MediaUploadPlan({
+    actorUid: ownerUid,
+    ownerUid,
+    entityId,
+    operationId: plan.operationId,
+    kind: 'map-video',
+    sourceContentType: 'video/mp4',
+    sourceBytes: original.bytes,
+    commonTechnique: false,
+  });
+  const generatedAssetId = completePlan.assetId;
+  [media, original, poster, poster2x].forEach((value) => {
+    if (value.assetId) value.assetId = generatedAssetId;
+  });
+  for (const object of [original, poster, poster2x]) {
+    object.path = object.path.replace(assetId, generatedAssetId);
+  }
+  manifest.assetId = generatedAssetId;
+  manifest.plan = completePlan;
+  manifest.requestHash = completePlan.requestHash;
+  manifest.previousAssetId = completePlan.previousAssetId;
+  media.assetId = generatedAssetId;
+  const objectInspection = (object) => ({
+    exists: true,
+    path: object.path,
+    contentType: object.contentType,
+    bytes: object.bytes,
+    generation: object.generation,
+    checksum: 'gcs-checksum',
+    sha256: object.checksum,
+    cacheControl: object.cacheControl,
+    contentDisposition: 'inline',
+    customMetadata: {
+      task07AssetId: generatedAssetId,
+      task07ContractVersion: '1',
+      task07EntityId: entityId,
+      task07Kind: 'map-video',
+      task07OwnerUid: ownerUid,
+      task07Role: object.role,
+      task07Checksum: object.checksum,
+    },
+  });
+  return {
+    record: {
+      kind: 'map-video',
+      ownerUid,
+      entityId,
+      targetPath: `grigliata_backgrounds/${entityId}`,
+      targetVersion: '10:000000001',
+      data: {
+        assetType: 'video',
+        contentType: 'video/mp4',
+        media,
+        task07MediaRevision: 1,
+      },
+    },
+    inspection: {
+      manifest: {
+        exists: true,
+        version: '11:000000002',
+        data: manifest,
+      },
+      objects: [original, poster, poster2x].map(objectInspection),
+      legacyObjects: [],
+    },
+  };
+};
+
+test('canonical audit includes canonical-only video and exact object bindings',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      projectId: 'fatin-test',
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.operation, 'canonical-audit');
+    assert.equal(report.counts.candidates, 1);
+    assert.equal(report.counts.errors, 0);
+    assert.equal(report.entries[0].kind, 'map-video');
+    assert.equal(report.entries[0].status, 'verified');
+    assert.equal(report.entries[0].objectProofs.length, 3);
+    assert.deepEqual(report.entries[0].objectProofs.map(
+      ({validationErrors}) => validationErrors
+    ), [[], [], []]);
+    assert.equal(report.entries[0].legacySources.length, 0);
+  });
+
+test('canonical audit blocks missing immutable objects and legacy sources',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    fixture.record.data.imagePath = 'grigliata/backgrounds/dm-owner/old.mp4';
+    fixture.inspection.objects[0] = {
+      exists: false,
+      path: fixture.inspection.objects[0].path,
+    };
+    fixture.inspection.legacyObjects = [{
+      exists: false,
+      path: fixture.record.data.imagePath,
+    }];
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.errors, 1);
+    assert.ok(report.entries[0].issues.some(({code}) => (
+      code === 'canonical-object-missing'
+    )));
+    assert.ok(report.entries[0].issues.some(({code}) => (
+      code === 'legacy-source-object-missing'
+    )));
+  });
+
+test('canonical audit mirrors root then General descriptor precedence',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    fixture.record.data.General = {media: fixture.record.data.media};
+    delete fixture.record.data.media;
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.candidates, 1);
+    assert.equal(report.counts.errors, 0);
+    assert.equal(report.entries[0].descriptorFingerprint,
+      canonicalHash(fixture.record.data.General.media));
+  });
+
+test('canonical audit blocks conflicting image slots with error severity',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    fixture.record.data.General = {media: {
+      ...fixture.record.data.media,
+      assetId: `m_${'b'.repeat(40)}`,
+    }};
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.errors, 1);
+    assert.deepEqual(report.entries[0].issues, [{
+      code: 'canonical-descriptor-conflict',
+      severity: 'error',
+    }]);
+  });
+
+test('map-video audit follows videoMedia precedence and blocks malformed primary',
+  async () => {
+    const precedence = canonicalAuditFixture();
+    precedence.record.data.videoMedia = {
+      ...precedence.record.data.media,
+      assetId: `m_${'b'.repeat(40)}`,
+    };
+    const precedenceReport = await buildCanonicalMediaAudit([
+      precedence.record,
+    ], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => precedence.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(precedenceReport.counts.errors, 1);
+    assert.equal(precedenceReport.entries[0].descriptorFingerprint,
+      canonicalHash(precedence.record.data.videoMedia));
+    assert.ok(precedenceReport.entries[0].issues.some(({code}) => (
+      code === 'canonical-manifest-contract-mismatch'
+    )));
+
+    const malformed = canonicalAuditFixture();
+    malformed.record.data.videoMedia = 'broken';
+    const malformedReport = await buildCanonicalMediaAudit([
+      malformed.record,
+    ], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => malformed.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(malformedReport.counts.errors, 1);
+    assert.equal(malformedReport.entries[0].descriptorFingerprint,
+      canonicalHash(malformed.record.data.media));
+    assert.ok(malformedReport.entries[0].issues.some(({code, severity}) => (
+      code === 'canonical-descriptor-malformed' && severity === 'error'
+    )));
+  });
+
+test('canonical audit fails closed on malformed and external declarations',
+  async () => {
+    const malformed = canonicalAuditFixture();
+    malformed.record.data.media = 'broken';
+    const externalRecords = [];
+    const addExternal = ({kind = 'map', root = true, field, value}) => {
+      const fixture = canonicalAuditFixture();
+      const entityId = `external-${externalRecords.length + 1}`;
+      fixture.record.kind = kind;
+      fixture.record.entityId = entityId;
+      fixture.record.targetPath = `grigliata_backgrounds/${entityId}`;
+      fixture.record.data = {
+        assetType: kind === 'map-video' ? 'video' : 'image',
+        contentType: kind === 'map-video' ? 'video/mp4' : 'image/png',
+        task07MediaRevision: kind === 'map' ? 1 : undefined,
+        task07VideoMediaRevision: kind === 'map-video' ? 1 : undefined,
+        ...(root ? {[field]: value} : {General: {[field]: value}}),
+      };
+      externalRecords.push(fixture.record);
+    };
+    for (const root of [true, false]) {
+      for (const field of ['url', 'downloadUrl', 'imageUrl', 'image_url']) {
+        addExternal({root, field, value: `https://example.com/${field}.png`});
+      }
+      for (const field of [
+        'url', 'downloadUrl', 'videoUrl', 'video_url', 'imageUrl', 'image_url',
+      ]) {
+        addExternal({
+          kind: 'map-video',
+          root,
+          field,
+          value: `https://example.com/${field}.mp4`,
+        });
+      }
+    }
+    addExternal({
+      kind: 'map-video',
+      root: false,
+      field: 'videoMedia',
+      value: {downloadUrl: 'https://example.com/nested-video.mp4'},
+    });
+    const report = await buildCanonicalMediaAudit([
+      malformed.record,
+      ...externalRecords,
+    ], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => ({
+        manifest: {exists: false, version: '', data: null},
+        objects: [],
+        legacyObjects: [],
+      }),
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.candidates, 22);
+    assert.equal(report.counts.errors, 22);
+    const codes = report.entries.map(({issues}) => (
+      new Set(issues.map(({code}) => code))
+    ));
+    assert.ok(codes.some((entry) => (
+      entry.has('canonical-descriptor-malformed') &&
+      entry.has('canonical-descriptor-missing')
+    )));
+    assert.ok(codes.some((entry) => (
+      entry.has('media-reference-unclassifiable')
+    )));
+    assert.equal(codes.filter((entry) => (
+      entry.has('media-reference-unclassifiable')
+    )).length, externalRecords.length);
+  });
+
+test('snapshot records retain every renderer-supported fallback declaration',
+  () => {
+    const snapshot = ({id, path, data, ownerUid = ''}) => ({
+      id,
+      data: () => data,
+      updateTime: {seconds: 10, nanoseconds: 1},
+      ref: {
+        path,
+        parent: {parent: ownerUid ? {id: ownerUid} : null},
+      },
+    });
+    const avatar = recordFromSnapshot('avatars', snapshot({
+      id: 'player-a',
+      path: 'users/player-a',
+      data: {General: {downloadUrl: 'https://example.test/avatar.png'}},
+    }));
+    const token = recordFromSnapshot('custom-token-templates', snapshot({
+      id: 'token-a',
+      path: 'grigliata_tokens/token-a',
+      data: {
+        ownerUid: 'player-a',
+        tokenType: 'custom',
+        customTemplateId: 'token-a',
+        General: {url: 'https://example.test/token.png'},
+      },
+    }));
+    const spellVideo = recordFromSnapshot('spell-video', snapshot({
+      id: 'spell-a',
+      path: 'users/player-a/spells/spell-a',
+      ownerUid: 'player-a',
+      data: {
+        General: {
+          videoMedia: {downloadUrl: 'https://example.test/spell.mp4'},
+        },
+      },
+    }));
+    const music = recordFromSnapshot('music-tracks', snapshot({
+      id: 'track-a',
+      path: 'grigliata_music_tracks/track-a',
+      data: {
+        createdBy: 'dm-a',
+        General: {audioUrl: 'https://example.test/track.mp3'},
+      },
+    }));
+    assert.equal(avatar.data.General.downloadUrl,
+      'https://example.test/avatar.png');
+    assert.equal(token.data.General.url, 'https://example.test/token.png');
+    assert.equal(spellVideo.data.General.videoMedia.downloadUrl,
+      'https://example.test/spell.mp4');
+    assert.equal(music.data.General.audioUrl,
+      'https://example.test/track.mp3');
+  });
+
+test('background snapshot classification fails closed on renderer video declarations',
+  () => {
+    const snapshot = (data, id = 'background-a') => ({
+      id,
+      data: () => data,
+      updateTime: {seconds: 10, nanoseconds: 1},
+      ref: {path: `grigliata_backgrounds/${id}`},
+    });
+    [
+      {videoMedia: {assetId: 'bad'}},
+      {General: {videoMedia: {assetId: 'bad'}}},
+      {General: {videoUrl: 'https://example.test/video.mp4'}},
+      {General: {url: 'https://example.test/video.mp4'}},
+    ].forEach((data, index) => {
+      assert.equal(
+        recordFromSnapshot('backgrounds', snapshot(data, `background-${index}`)).kind,
+        'map-video'
+      );
+    });
+    assert.equal(recordFromSnapshot('backgrounds', snapshot({
+      General: {imageUrl: 'https://example.test/image.png'},
+    }, 'image')).kind, 'map');
+  });
+
+test('personal video audit catches generic General fallback without art media',
+  async () => {
+    const record = {
+      kind: 'spell-video',
+      sourceKey: 'spell-video',
+      ownerUid: 'player-a',
+      entityId: 'spell-a',
+      targetPath: 'users/player-a/spells/spell-a',
+      targetVersion: '10:000000001',
+      data: {
+        General: {downloadUrl: 'https://example.test/spell.mp4'},
+        task07VideoMediaRevision: 1,
+      },
+    };
+    const report = await buildCanonicalMediaAudit([record], {
+      sourceKeys: ['spell-video'],
+      inspectCanonicalRecord: async () => ({
+        manifest: {exists: false, version: '', data: null},
+        objects: [],
+        legacyObjects: [],
+      }),
+      readOwner: async () => activeOwner('player'),
+    });
+    assert.equal(report.counts.candidates, 1);
+    assert.equal(report.counts.errors, 1);
+    assert.ok(report.entries[0].issues.some(({code}) => (
+      code === 'media-reference-unclassifiable'
+    )));
+  });
+
+test('canonical audit enforces media budgets, checksums, and private metadata',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    const original = fixture.record.data.media.original;
+    original.contentType = 'text/plain';
+    original.bytes = 999999999;
+    original.checksum = '';
+    const inspected = fixture.inspection.objects[0];
+    inspected.contentType = original.contentType;
+    inspected.bytes = original.bytes;
+    inspected.customMetadata.task07Checksum = original.checksum;
+    inspected.customMetadata.firebaseStorageDownloadTokens = 'public-token';
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.errors, 1);
+    const codes = new Set(report.entries[0].issues.map(({code}) => code));
+    assert.ok(codes.has('canonical-object-policy-mismatch'));
+    assert.ok(codes.has('canonical-original-policy-mismatch'));
+    assert.ok(codes.has('canonical-object-contract-mismatch'));
+    assert.equal(report.entries[0].objectProofs[0].verified, false);
+  });
+
+test('canonical audit rejects bytes whose independent SHA-256 mismatches',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    fixture.inspection.objects[0].sha256 = 'f'.repeat(64);
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.errors, 1);
+    assert.ok(report.entries[0].issues.some(({code}) => (
+      code === 'canonical-object-checksum-mismatch'
+    )));
+    assert.equal(report.entries[0].objectProofs[0].verified, false);
+  });
+
+test('canonical audit rejects incomplete or internally drifted stored plans',
+  async () => {
+    const mutations = [
+      (fixture) => {
+        fixture.inspection.manifest.data.plan.requestHash = '9'.repeat(64);
+      },
+      (fixture) => {
+        fixture.inspection.manifest.data.plan.sourcePath = 'wrong/source';
+      },
+      (fixture) => {
+        fixture.inspection.manifest.data.plan.actorUid = 'other-manager';
+      },
+      (fixture) => {
+        fixture.inspection.manifest.data.plan.previousAssetId =
+          `m_${'d'.repeat(40)}`;
+      },
+      (fixture) => {
+        fixture.inspection.manifest.data.generation = '999';
+      },
+    ];
+    for (const mutate of mutations) {
+      const fixture = canonicalAuditFixture();
+      mutate(fixture);
+      const report = await buildCanonicalMediaAudit([fixture.record], {
+        sourceKeys: ['backgrounds'],
+        inspectCanonicalRecord: async () => fixture.inspection,
+        readOwner: async () => activeOwner('dm'),
+      });
+      assert.equal(report.counts.errors, 1);
+      assert.ok(report.entries[0].issues.some(({code}) => (
+        code === 'canonical-manifest-contract-mismatch'
+      )));
+    }
+  });
+
+test('canonical audit derives personal ownership from the target path',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    const targetOwnerUid = 'player-a';
+    const claimedOwnerUid = 'player-b';
+    const media = fixture.record.data.media;
+    fixture.record.kind = 'spell-video';
+    fixture.record.sourceKey = 'spell-video';
+    fixture.record.ownerUid = claimedOwnerUid;
+    fixture.record.targetPath =
+      `users/${targetOwnerUid}/spells/${fixture.record.entityId}`;
+    fixture.record.data = {
+      videoMedia: media,
+      media: {
+        schemaVersion: 1,
+        assetId: `m_${'f'.repeat(40)}`,
+        kind: 'spell',
+        state: 'ready',
+      },
+      task07VideoMediaRevision: 1,
+    };
+    media.kind = 'spell-video';
+    media.audience = 'owner-manager';
+    media.ownerUid = claimedOwnerUid;
+    const generatedObjects = [
+      media.original,
+      ...Object.values(media.variants),
+    ];
+    generatedObjects.forEach((object) => {
+      object.path = object.path.replace(
+        '/signed-in/dm-owner/',
+        `/owner-manager/${claimedOwnerUid}/`
+      );
+    });
+    const manifest = fixture.inspection.manifest.data;
+    manifest.purpose = 'spell-video';
+    manifest.audience = 'owner-manager';
+    manifest.ownerUid = claimedOwnerUid;
+    manifest.targetKind = 'user-spell';
+    manifest.attachment.referencePath = fixture.record.targetPath;
+    manifest.attachment.targetSlot = 'videoMedia';
+    Object.assign(manifest.plan, {
+      kind: 'spell-video',
+      targetKind: 'user-spell',
+      actorUid: claimedOwnerUid,
+      ownerUid: claimedOwnerUid,
+      ownerKey: claimedOwnerUid,
+      audienceScope: 'owner-manager',
+    });
+    fixture.inspection.objects.forEach((object, index) => {
+      object.path = generatedObjects[index].path;
+      Object.assign(object.customMetadata, {
+        task07Kind: 'spell-video',
+        task07OwnerUid: claimedOwnerUid,
+      });
+    });
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['spell-video'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async (ownerUid) => ({
+        ...activeOwner('player'),
+        ownerUid,
+      }),
+    });
+    assert.equal(report.counts.errors, 1);
+    assert.equal(report.entries[0].ownerUid, targetOwnerUid);
+    const codes = new Set(report.entries[0].issues.map(({code}) => code));
+    assert.ok(codes.has('canonical-owner-target-mismatch'));
+    assert.ok(codes.has('canonical-owner-binding-mismatch'));
+    assert.equal(codes.has('canonical-descriptor-conflict'), false);
+  });
+
+test('canonical audit follows the current attached manager for global media',
+  async () => {
+    const fixture = canonicalAuditFixture();
+    fixture.record.ownerUid = 'former-manager';
+    const report = await buildCanonicalMediaAudit([fixture.record], {
+      sourceKeys: ['backgrounds'],
+      inspectCanonicalRecord: async () => fixture.inspection,
+      readOwner: async (uid) => uid === 'dm-owner' ?
+        activeOwner('dm') : null,
+    });
+    assert.equal(report.counts.errors, 0);
+    assert.equal(report.entries[0].ownerUid, 'dm-owner');
+    assert.equal(report.entries[0].ownerResolution, 'attached-manifest');
+  });
+
+test('canonical audit preserves hashed non-rendering foe-root exclusions',
+  async () => {
+    const record = {
+      kind: 'token',
+      sourceKey: 'foe-tokens',
+      tokenMigrationClass: 'foe',
+      ownerUid: 'dm-owner',
+      entityId: 'unplaced-foe',
+      targetPath: 'grigliata_tokens/unplaced-foe',
+      targetVersion: '12:000000003',
+      placementReferenceCount: 0,
+      placementReferenceHash: canonicalHash([]),
+      sourceFoeProof: {
+        scanned: true,
+        exists: true,
+        referencePath: 'foes/source-foe',
+        dataFingerprint: '5'.repeat(64),
+      },
+      data: {
+        foeSourceId: 'source-foe',
+        imagePath: 'foes/unplaced.png',
+      },
+    };
+    const report = await buildCanonicalMediaAudit([record], {
+      sourceKeys: ['foe-tokens'],
+      inspectCanonicalRecord: async () => {
+        throw new Error('non-rendering exclusion must not be inspected');
+      },
+    });
+    assert.equal(report.counts.candidates, 0);
+    assert.equal(report.counts.excluded, 1);
+    assert.equal(validCanonicalAuditExclusion(report.excluded[0]), true);
+  });
 
 test('legacy map recovery marker is plan-bound and one-shot', () => {
   const entry = {
@@ -298,16 +957,482 @@ const executionOptions = (report, overrides = {}) => {
   };
 };
 
+test('nested catalog extraction does not invent video from an image alias',
+  async () => {
+    const record = {
+      kind: 'item',
+      sourceKey: 'catalog-items',
+      ownerUid: '',
+      entityId: 'chain',
+      referenceScope: 'global-catalog',
+      targetPath: 'items/chain',
+      targetVersion: '41:000000001',
+      data: {
+        General: {
+          spells: {
+            Grab: {image_url: 'spells/grab.webp'},
+          },
+        },
+      },
+    };
+    const nested = nestedMediaRecordsForRecord(record);
+    assert.equal(nested.length, 1);
+    assert.equal(nested[0].kind, 'spell');
+    assert.equal(nested[0].nestedTarget.slot, 'media');
+    const report = await planFor(expandMediaRecords(record), {
+      catalogOwnerUid: 'verified-webmaster',
+      readOwner: async () => activeOwner('webmaster'),
+    });
+    assert.equal(report.counts.executable, 1);
+    assert.equal(report.counts.errors, 0);
+    assert.equal(report.entries[0].sourcePath, 'spells/grab.webp');
+    assert.equal(report.entries[0].targetKind, 'catalog-item-spell');
+  });
+
+test('nested catalog extraction keeps art and explicit video independent', () => {
+  const nested = nestedMediaRecordsForRecord({
+    kind: 'item',
+    sourceKey: 'catalog-items',
+    entityId: 'wand',
+    targetPath: 'items/wand',
+    data: {
+      General: {
+        spells: {
+          Spark: {
+            image_url: 'spells/spark.webp',
+            video_url: 'spells/spark.mp4',
+          },
+        },
+      },
+    },
+  });
+  assert.deepEqual(nested.map(({kind}) => kind), ['spell', 'spell-video']);
+  assert.equal(nested[0].nestedTarget.entryId,
+    nested[1].nestedTarget.entryId);
+  assert.deepEqual(nested.map(({nestedTarget}) => nestedTarget.slot),
+    ['media', 'videoMedia']);
+});
+
+test('nested catalog video discovery mirrors generic renderer URL fields',
+  async () => {
+    const videoPath = 'spells/spark-generic.mp4';
+    const record = {
+      kind: 'item',
+      sourceKey: 'catalog-items',
+      ownerUid: '',
+      entityId: 'generic-video-wand',
+      referenceScope: 'global-catalog',
+      targetPath: 'items/generic-video-wand',
+      targetVersion: '42:000000001',
+      data: {
+        General: {spells: {Spark: {General: {url: videoPath}}}},
+      },
+    };
+    const nested = nestedMediaRecordsForRecord(record);
+    assert.deepEqual(nested.map(({kind}) => kind), ['spell', 'spell-video']);
+    const videoRecord = nested.find(({kind}) => kind === 'spell-video');
+    const report = await planFor([videoRecord], {
+      catalogOwnerUid: 'verified-webmaster',
+      readOwner: async () => activeOwner('webmaster'),
+      readSourceObject: async () => source({contentType: 'video/mp4'}),
+    });
+    assert.equal(report.counts.executable, 1);
+    assert.equal(report.entries[0].sourcePath, videoPath);
+
+    const downloadRecord = {
+      ...record,
+      entityId: 'generic-download-video-wand',
+      targetPath: 'items/generic-download-video-wand',
+      data: {General: {spells: {Spark: {
+        downloadUrl: 'spells/spark-download.webm',
+      }}}},
+    };
+    assert.ok(nestedMediaRecordsForRecord(downloadRecord)
+      .some(({kind}) => kind === 'spell-video'));
+  });
+
+test('nested audit rejects entry IDs reused across foe media kinds',
+  async () => {
+    const sharedEntryId = 'shared-entry';
+    const record = {
+      kind: 'foe',
+      sourceKey: 'foes',
+      ownerUid: 'dm-owner',
+      entityId: 'malformed-foe',
+      targetPath: 'foes/malformed-foe',
+      targetVersion: '45:000000001',
+      data: {
+        tecniche: [{
+          name: 'Technique',
+          imagePath: 'foes/tecniche/technique.webp',
+          task07MediaEntryId: sharedEntryId,
+        }],
+        spells: [{
+          name: 'Spell',
+          imagePath: 'foes/spells/spell.webp',
+          task07MediaEntryId: sharedEntryId,
+        }],
+        task07EmbeddedMedia: {
+          [sharedEntryId]: {
+            targetKind: 'foe-technique',
+            media: {
+              schemaVersion: 1,
+              assetId: `m_${'a'.repeat(40)}`,
+              kind: 'foe',
+              state: 'ready',
+            },
+            task07MediaRevision: 1,
+          },
+        },
+      },
+    };
+    const report = await buildCanonicalMediaAudit(expandMediaRecords(record), {
+      sourceKeys: ['foes'],
+      inspectCanonicalRecord: async () => ({
+        manifest: {exists: false, version: '', data: null},
+        objects: [],
+        legacyObjects: [],
+      }),
+      readOwner: async () => activeOwner('dm'),
+    });
+    assert.equal(report.counts.candidates, 2);
+    assert.equal(report.counts.errors, 2);
+    assert.deepEqual(new Set(report.entries.map(
+      ({nestedTarget}) => nestedTarget.kind
+    )), new Set(['foe-technique', 'foe-spell']));
+    report.entries.forEach(({issues}) => {
+      assert.ok(issues.some(({code}) => (
+        code === 'canonical-nested-target-conflict'
+      )));
+    });
+    assert.ok(report.entries.find(({nestedTarget}) => (
+      nestedTarget.kind === 'foe-spell'
+    )).issues.some(({code}) => (
+      code === 'canonical-nested-binding-kind-mismatch'
+    )));
+  });
+
+test('nested discovery includes registry-only canonical catalog and foe media',
+  () => {
+    const asset = (character) => ({
+      schemaVersion: 1,
+      assetId: `m_${character.repeat(40)}`,
+      kind: 'foe',
+      state: 'ready',
+    });
+    const catalog = nestedMediaRecordsForRecord({
+      kind: 'item',
+      sourceKey: 'catalog-items',
+      entityId: 'registry-item',
+      referenceScope: 'global-catalog',
+      data: {
+        General: {spells: {Shield: {
+          Nome: 'Shield',
+          task07MediaEntryId: 'catalog-registry-entry',
+        }}},
+        task07EmbeddedMedia: {
+          'catalog-registry-entry': {
+            targetKind: 'catalog-item-spell',
+            media: {...asset('a'), kind: 'spell'},
+            videoMedia: {...asset('b'), kind: 'spell-video'},
+          },
+        },
+      },
+    });
+    assert.deepEqual(catalog.map(({kind}) => kind), ['spell', 'spell-video']);
+
+    const foe = nestedMediaRecordsForRecord({
+      kind: 'foe',
+      sourceKey: 'foes',
+      entityId: 'registry-foe',
+      data: {
+        tecniche: [{
+          name: 'Slash',
+          task07MediaEntryId: 'foe-registry-entry',
+        }],
+        task07EmbeddedMedia: {
+          'foe-registry-entry': {
+            targetKind: 'foe-technique',
+            media: asset('c'),
+          },
+        },
+      },
+    });
+    assert.equal(foe.length, 1);
+    assert.equal(foe[0].nestedTarget.kind, 'foe-technique');
+  });
+
+test('nested discovery emits registry-only wrong-kind bindings for fail-closed audit',
+  async () => {
+    const asset = {
+      schemaVersion: 1,
+      assetId: `m_${'d'.repeat(40)}`,
+      kind: 'foe',
+      state: 'ready',
+    };
+    const catalogRecord = {
+      kind: 'item',
+      sourceKey: 'catalog-items',
+      referenceScope: 'global-catalog',
+      ownerUid: 'dm-owner',
+      entityId: 'catalog-wrong-kind',
+      targetPath: 'items/catalog-wrong-kind',
+      targetVersion: '10:000000001',
+      data: {
+        General: {spells: {Entry: {task07MediaEntryId: 'entry'}}},
+        task07EmbeddedMedia: {
+          entry: {targetKind: 'foe-spell', media: asset},
+        },
+      },
+    };
+    const foeRecord = {
+      kind: 'foe',
+      sourceKey: 'foes',
+      ownerUid: 'dm-owner',
+      entityId: 'foe-wrong-kind',
+      targetPath: 'foes/foe-wrong-kind',
+      targetVersion: '10:000000001',
+      data: {
+        spells: [{task07MediaEntryId: 'entry'}],
+        task07EmbeddedMedia: {
+          entry: {targetKind: 'foe-technique', media: asset},
+        },
+      },
+    };
+    const records = [
+      ...expandMediaRecords(catalogRecord),
+      ...expandMediaRecords(foeRecord),
+    ];
+    const report = await buildCanonicalMediaAudit(records, {
+      sourceKeys: ['catalog-items', 'foes'],
+      catalogOwnerUid: 'dm-owner',
+      inspectCanonicalRecord: async () => ({
+        manifest: {exists: false, version: '', data: null},
+        objects: [],
+        legacyObjects: [],
+      }),
+      readOwner: async () => activeOwner('dm'),
+    });
+    const nestedEntries = report.entries.filter(({nestedTarget}) => nestedTarget);
+    assert.equal(nestedEntries.length, 2);
+    nestedEntries.forEach(({issues}) => assert.ok(issues.some(({code}) => (
+      code === 'canonical-nested-binding-kind-mismatch'
+    ))));
+  });
+
+test('nested audit fails closed on direct descriptors outside the registry',
+  async () => {
+    const direct = {
+      schemaVersion: 1,
+      assetId: `m_${'d'.repeat(40)}`,
+      kind: 'spell',
+      state: 'ready',
+    };
+    const catalogRoot = {
+      kind: 'item',
+      sourceKey: 'catalog-items',
+      entityId: 'direct-catalog-media',
+      referenceScope: 'global-catalog',
+      targetPath: 'items/direct-catalog-media',
+      targetVersion: '46:000000001',
+      data: {General: {spells: {Spark: {General: {media: direct}}}}},
+    };
+    const foeRoot = {
+      kind: 'foe',
+      sourceKey: 'foes',
+      ownerUid: 'dm-owner',
+      entityId: 'direct-foe-media',
+      targetPath: 'foes/direct-foe-media',
+      targetVersion: '47:000000001',
+      data: {spells: [{name: 'Spark', media: {...direct, kind: 'foe'}}]},
+    };
+    const records = [catalogRoot, foeRoot].flatMap(expandMediaRecords);
+    const nested = records.filter(({nestedTarget}) => nestedTarget);
+    assert.equal(nested.length, 2);
+    const report = await buildCanonicalMediaAudit(records, {
+      sourceKeys: ['catalog-items', 'foes'],
+      catalogOwnerUid: 'verified-webmaster',
+      inspectCanonicalRecord: async () => ({
+        manifest: {exists: false, version: '', data: null},
+        objects: [],
+        legacyObjects: [],
+      }),
+      readOwner: async (uid) => activeOwner(
+        uid === 'verified-webmaster' ? 'webmaster' : 'dm'
+      ),
+    });
+    assert.equal(report.counts.candidates, 2);
+    assert.equal(report.counts.errors, 2);
+    report.entries.forEach(({issues}) => assert.ok(issues.some(({code}) => (
+      code === 'canonical-descriptor-missing'
+    ))));
+  });
+
+test('nested audit identity survives catalog rename and foe reorder locators', () => {
+  const stored = {
+    schemaVersion: 1,
+    kind: 'catalog-item-spell',
+    entryId: 'stable-spell',
+    entryKey: 'Old name',
+    entryIndex: null,
+    slot: 'media',
+  };
+  assert.equal(nestedTargetBindingMatches(stored, {
+    ...stored,
+    entryKey: 'Renamed spell',
+  }), true);
+  assert.equal(nestedTargetBindingMatches({
+    schemaVersion: 1,
+    kind: 'foe-technique',
+    entryId: 'stable-technique',
+    entryKey: null,
+    entryIndex: 0,
+    slot: 'media',
+  }, {
+    schemaVersion: 1,
+    kind: 'foe-technique',
+    entryId: 'stable-technique',
+    entryKey: null,
+    entryIndex: 3,
+    slot: 'media',
+  }), true);
+  assert.equal(nestedTargetBindingMatches(stored, {
+    ...stored,
+    entryId: 'different-spell',
+  }), false);
+});
+
+test('nested rollback restores only the reviewed catalog or foe binding', () => {
+  const catalogTarget = {
+    task07EmbeddedMedia: {
+      spellA: {
+        targetKind: 'catalog-item-spell',
+        media: {assetId: `m_${'a'.repeat(40)}`},
+        task07MediaRevision: 4,
+      },
+      untouched: {targetKind: 'catalog-item-spell', marker: true},
+    },
+  };
+  const restoredCatalog = buildNestedRollbackRegistry({
+    current: catalogTarget,
+    nestedTarget: {
+      kind: 'catalog-item-spell', entryId: 'spellA', slot: 'media',
+    },
+    beforeFields: {media: {exists: false}},
+    revision: 5,
+    timestamp: 'catalog-time',
+  });
+  assert.equal(restoredCatalog.spellA.media, undefined);
+  assert.equal(restoredCatalog.spellA.task07MediaRevision, 5);
+  assert.equal(restoredCatalog.spellA.mediaUpdatedAt, 'catalog-time');
+  assert.deepEqual(restoredCatalog.untouched,
+    catalogTarget.task07EmbeddedMedia.untouched);
+
+  const previous = {assetId: `m_${'b'.repeat(40)}`};
+  const restoredFoe = buildNestedRollbackRegistry({
+    current: {task07EmbeddedMedia: {
+      techniqueA: {
+        targetKind: 'foe-technique',
+        media: {assetId: `m_${'c'.repeat(40)}`},
+        task07MediaRevision: 2,
+      },
+    }},
+    nestedTarget: {
+      kind: 'foe-technique', entryId: 'techniqueA', slot: 'media',
+    },
+    beforeFields: {media: {exists: true, value: previous}},
+    revision: 3,
+    timestamp: 'foe-time',
+  });
+  assert.deepEqual(restoredFoe.techniqueA.media, previous);
+  assert.equal(restoredFoe.techniqueA.task07MediaRevision, 3);
+  assert.equal(restoredFoe.techniqueA.targetKind, 'foe-technique');
+});
+
 test('backfill path parsing strips Firebase tokens and foreign URLs', () => {
   const storagePath = 'characters/avatar_user-a.png';
   const url = `https://firebasestorage.googleapis.com/v0/b/demo/o/` +
     `${encodeURIComponent(storagePath)}?alt=media&token=must-not-leak`;
-  assert.equal(storagePathFromValue(url), storagePath);
-  assert.deepEqual(collectMediaPaths({imageUrl: url}), [storagePath]);
+  const demoContext = {expectedBucket: 'demo', allowLoopback: false};
+  assert.equal(storagePathFromValue(url, demoContext), storagePath);
+  assert.deepEqual(
+    collectMediaPaths({imageUrl: url}, demoContext),
+    [storagePath]
+  );
   assert.equal(
     storagePathFromValue('https://example.com/private/object.png'),
     ''
   );
+});
+
+test('Storage URL provenance is exact and live scans reject loopback', () => {
+  const storagePath = 'shared/same.png';
+  const encodedPath = encodeURIComponent(storagePath);
+  const liveContext = {
+    expectedBucket: PRODUCTION_STORAGE_BUCKET,
+    allowLoopback: false,
+  };
+  const correct = `https://firebasestorage.googleapis.com/v0/b/` +
+    `${PRODUCTION_STORAGE_BUCKET}/o/${encodedPath}?alt=media`;
+  const foreign = `https://firebasestorage.googleapis.com/v0/b/` +
+    `fatins.firebasestorage.app/o/${encodedPath}?alt=media`;
+  const foreignGcs = `https://storage.googleapis.com/` +
+    `fatins.firebasestorage.app/${storagePath}`;
+  const loopback = `http://127.0.0.1:9199/v0/b/` +
+    `${PRODUCTION_STORAGE_BUCKET}/o/${encodedPath}?alt=media`;
+  const demoLoopback = `http://127.0.0.1:9199/v0/b/` +
+    `demo-fnd-perf.appspot.com/o/${encodedPath}?alt=media`;
+
+  assert.equal(storagePathFromValue(correct, liveContext), storagePath);
+  assert.equal(storagePathFromValue(foreign, liveContext), '');
+  assert.equal(storagePathFromValue(foreignGcs, liveContext), '');
+  assert.equal(storagePathFromValue(loopback, liveContext), '');
+  assert.equal(storagePathFromValue(demoLoopback, {
+    expectedBucket: 'demo-fnd-perf.appspot.com',
+    allowLoopback: true,
+  }), storagePath);
+  assert.equal(storagePathFromValue(demoLoopback, {
+    expectedBucket: 'other.appspot.com',
+    allowLoopback: true,
+  }), '');
+  assert.equal(storagePathFromValue(correct), '');
+});
+
+test('foreign-bucket references cannot become executable backfill sources', async () => {
+  const path = 'shared/same.png';
+  const foreign = `https://firebasestorage.googleapis.com/v0/b/` +
+    `fatins.firebasestorage.app/o/${encodeURIComponent(path)}?alt=media`;
+  const record = {
+    ...avatarRecord('player-one'),
+    data: {imageUrl: foreign},
+  };
+  const options = {
+    projectId: 'fatin-test',
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
+    sourceKeys: ['avatars'],
+    readSourceObject: async () => {
+      assert.fail('foreign-bucket object must never be read');
+    },
+    readOwner: async () => activeOwner(),
+    scan: {complete: true, pageSize: 25, maxPages: 1},
+  };
+  const backfill = await buildLegacyMediaBackfillPlan([record], options);
+  assert.equal(backfill.entries.length, 0);
+  assert.equal(backfill.complete, false);
+  assert.equal(backfill.scan.invalidMediaReferences, 1);
+
+  const audit = await buildCanonicalMediaAudit([record], {
+    ...options,
+    inspectCanonicalRecord: async () => ({
+      manifest: {exists: false, version: '', data: null},
+      objects: [],
+      legacyObjects: [],
+    }),
+  });
+  assert.equal(audit.entries.length, 1);
+  assert.ok(audit.entries[0].issues.some(
+    ({code}) => code === 'media-reference-unclassifiable'
+  ));
 });
 
 test('both current and compatibility Task 07 generated paths are excluded', () => {
@@ -876,6 +2001,20 @@ test('CLI defaults to planning and gates every execution fingerprint', () => {
   ]);
   assert.equal(applied.execute, true);
   assert.equal(applied.operation, 'rollback');
+  assert.throws(() => parseOptions(liveArgs({extra: [
+    '--operation', 'verify',
+  ]})), /requires --approved-backfill-report/);
+  const liveVerify = parseOptions(liveArgs({extra: [
+    '--operation', 'verify',
+    '--approved-backfill-report', 'approved-backfill.json',
+  ]}));
+  assert.match(liveVerify.approvedBackfillReportPath,
+    /approved-backfill\.json$/);
+  assert.throws(() => parseOptions([
+    '--project', 'demo-fnd-perf',
+    '--operation', 'rollback',
+    '--approved-backfill-report', 'approved-backfill.json',
+  ]), /supported only.*verify/);
 });
 
 test('staging retries only intents and retryable failures', () => {
@@ -1132,6 +2271,167 @@ test('execution is strictly serial and checkpoints only verified receipts', asyn
   assert.deepEqual(result, {processed: 2, complete: true});
 });
 
+test('resume refuses a legacy reference changed after receipt creation', () => {
+  const base = {
+    targetExists: true,
+    targetAvailable: true,
+    targetFingerprintMatches: true,
+    legacyReferenceMatches: true,
+    legacyGeneralImageUrlMatches: true,
+    previousAssetMatches: true,
+  };
+  assert.equal(backfillTargetFenceIssue(base), null);
+  assert.match(backfillTargetFenceIssue({
+    ...base,
+    legacyReferenceMatches: false,
+  }), /Legacy media reference changed/);
+  assert.match(backfillTargetFenceIssue({
+    ...base,
+    targetFingerprintMatches: false,
+  }), /changed after planning/);
+});
+
+test('backfill preserves attached canonical media and blocks malformed descriptors',
+  async () => {
+    const ready = {
+      schemaVersion: 1,
+      assetId: `m_${'a'.repeat(40)}`,
+      kind: 'avatar',
+      state: 'ready',
+    };
+    const canonicalRecord = {
+      ...avatarRecord('canonical-owner'),
+      data: {
+        imagePath: 'characters/canonical-owner-stale.png',
+        media: ready,
+        task07MediaRevision: 3,
+      },
+    };
+    const secondCanonicalRecord = {
+      ...avatarRecord('canonical-owner-2'),
+      // Deliberately share the target path so the exclusion comparator must
+      // handle the absent sourcePath before reaching the exclusion ID.
+      targetPath: canonicalRecord.targetPath,
+      data: {
+        imagePath: 'characters/canonical-owner-2-stale.png',
+        media: {
+          ...ready,
+          assetId: `m_${'b'.repeat(40)}`,
+        },
+        task07MediaRevision: 2,
+      },
+    };
+    const malformedRecord = {
+      ...avatarRecord('malformed-owner'),
+      data: {
+        imagePath: 'characters/malformed-owner.png',
+        media: {...ready, assetId: 'not-canonical'},
+      },
+    };
+    const report = await planFor([
+      secondCanonicalRecord,
+      canonicalRecord,
+      malformedRecord,
+    ]);
+    const reversedReport = await planFor([
+      canonicalRecord,
+      secondCanonicalRecord,
+      malformedRecord,
+    ]);
+    assert.equal(report.counts.excluded, 2);
+    assert.deepEqual(
+      report.excluded.map(({exclusionId}) => exclusionId),
+      reversedReport.excluded.map(({exclusionId}) => exclusionId)
+    );
+    assert.deepEqual(
+      new Set(report.excluded.map(({entityId}) => entityId)),
+      new Set(['canonical-owner', 'canonical-owner-2'])
+    );
+    assert.ok(report.excluded.every(({sourcePath}) => sourcePath === undefined));
+    const preserved = report.excluded.find(({entityId}) => (
+      entityId === 'canonical-owner'
+    ));
+    assert.equal(preserved.reason, 'already-canonical');
+    assert.equal(preserved.assetId, ready.assetId);
+    assert.deepEqual(preserved.legacyPaths,
+      ['characters/canonical-owner-stale.png']);
+    assert.equal(report.counts.candidates, 1);
+    assert.equal(report.counts.executable, 0);
+    assert.equal(report.counts.errors, 1);
+    assert.ok(report.entries[0].issues.some(({code}) => (
+      code === 'existing-canonical-descriptor-invalid'
+    )));
+  });
+
+test('live approval accepts hashed already-canonical exclusions', async () => {
+  const catalogOwnerUid = 'verified-webmaster';
+  const report = await buildLegacyMediaBackfillPlan([{
+    kind: 'avatar',
+    sourceKey: 'avatars',
+    ownerUid: 'canonical-owner',
+    entityId: 'canonical-owner',
+    targetPath: 'users/canonical-owner',
+    targetVersion: '52:000000001',
+    data: {
+      imagePath: 'characters/canonical-owner-stale.png',
+      media: {
+        schemaVersion: 1,
+        assetId: `m_${'b'.repeat(40)}`,
+        kind: 'avatar',
+        state: 'ready',
+      },
+      task07MediaRevision: 2,
+    },
+  }], {
+    projectId: 'fatin-test',
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
+    sourceKeys: SOURCE_KEYS,
+    catalogOwnerUid,
+    readOwner: async () => activeOwner('player'),
+    readSourceObject: async () => source(),
+    scan: {
+      complete: true,
+      pageSize: 25,
+      maxPages: 100,
+      concurrency: 1,
+      pagesBySource: Object.fromEntries(SOURCE_KEYS.map((key) => [key, 1])),
+      truncatedSources: [],
+    },
+  });
+  report.expectedCandidates = 0;
+  report.planFingerprint = computePlanFingerprint(report);
+  const options = executionOptions(report, {
+    projectId: 'fatin-test',
+    sourceKeys: SOURCE_KEYS,
+    catalogOwnerUid,
+    expectedCandidates: 0,
+  });
+  assert.equal(assertApprovedReport(report, options), report);
+  const tampered = structuredClone(report);
+  tampered.excluded[0].assetId = `m_${'c'.repeat(40)}`;
+  assert.throws(() => assertApprovedReport(tampered, options), /exact completed/);
+});
+
+test('bounded pagination permits bounded nested expansion per root page',
+  async () => {
+    const pageSize = 25;
+    const roots = Array.from({length: pageSize}, (_, index) => `root-${index}`);
+    const expanded = roots.flatMap((root) => [root, `${root}-nested`]);
+    const loaded = await loadPaged({
+      sourceKeys: ['catalog-items'],
+      pageSize,
+      maxPages: 1,
+      readPage: async () => ({
+        records: expanded,
+        rootRecordCount: roots.length,
+        cursor: null,
+        hasMore: false,
+      }),
+    });
+    assert.equal(loaded.records.length, pageSize * 2);
+    assert.equal(loaded.scan.complete, true);
+  });
+
 test('execution derives foe-token source receipts from the approved plan',
   async () => {
     const report = await planFor([{
@@ -1318,6 +2618,65 @@ test('receipt verification and rollback plans bind current inspection', async ()
   assert.equal(rollback.counts.executable, 1);
   assert.notEqual(rollback.entries[0].inspectionHash, '');
 });
+
+test('receipt verification scopes exactly to the approved current backfill',
+  async () => {
+    const approved = await planFor([avatarRecord('scoped-owner')]);
+    approved.expectedCandidates = approved.counts.candidates;
+    approved.planFingerprint = computePlanFingerprint(approved);
+    const planned = approved.entries[0];
+    const attachedRevision = Number(planned.expectedRevision) + 1;
+    const receipt = {
+      ...planned,
+      schemaVersion: REPORT_SCHEMA_VERSION,
+      planVersion: PLAN_VERSION,
+      policyVersion: approved.policyVersion,
+      policyHash: approved.policyHash,
+      approvedPlanFingerprint: approved.planFingerprint,
+      state: 'attached',
+      attachedRevision,
+    };
+    let requestedIds = [];
+    const backend = {
+      readReceiptsByIds: async (ids) => {
+        requestedIds = [...ids];
+        return [receipt];
+      },
+      inspectReceipt: async () => ({
+        manifestState: 'attached',
+        targetAssetId: receipt.assetId,
+        targetRevision: attachedRevision,
+        generatedObjectsPresent: true,
+        legacySourceUnchanged: true,
+        legacyGeneralImageUrlUnchanged: true,
+        itemOriginalGenerated: true,
+        itemCardGenerated: true,
+        itemCard2xGenerated: true,
+      }),
+    };
+    const report = await buildReceiptOperationPlan({
+      backend,
+      operation: 'verify',
+      expectedCandidates: 1,
+      approvedBackfillReport: approved,
+    });
+    assert.deepEqual(requestedIds, [planned.receiptId]);
+    assert.equal(report.counts.candidates, 1);
+    assert.equal(report.counts.errors, 0);
+    assert.equal(report.scope.type, 'approved-backfill-plan');
+    assert.equal(report.scope.planFingerprint, approved.planFingerprint);
+
+    const missing = await buildReceiptOperationPlan({
+      backend: {...backend, readReceiptsByIds: async () => []},
+      operation: 'verify',
+      expectedCandidates: 1,
+      approvedBackfillReport: approved,
+    });
+    assert.equal(missing.counts.errors, 1);
+    assert.ok(missing.entries[0].issues.some(({code}) => (
+      code === 'receipt-missing'
+    )));
+  });
 
 test('drifted receipts block verification and rollback execution', async () => {
   const receipt = {

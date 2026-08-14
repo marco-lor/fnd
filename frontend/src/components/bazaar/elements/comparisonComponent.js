@@ -20,6 +20,7 @@ import { getSchema, getVarie } from '../../../data/configRepository';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import MediaVideo from '../../common/MediaVideo';
 import { normalizeCatalogItemMedia } from '../catalogItemMedia';
+import { withTask07EmbeddedMedia } from '../../../data/media/embeddedMediaProjection';
 
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -895,7 +896,11 @@ export default function ComparisonPanel({ item, showMessage }) {
                   <SpellCard
                     key={spellName}
                     spellName={spellName}
-                    spell={spellData}
+                    spell={withTask07EmbeddedMedia(
+                      item,
+                      spellData,
+                      'catalog-item-spell'
+                    )}
                     userData={userData}
                   />                ))}
               </div>

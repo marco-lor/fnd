@@ -93,6 +93,7 @@ export const runTask07ControlledWriterUpload = async (
     ownerUid,
     entityId,
     kind,
+    nestedTarget,
     referenceScope,
     file,
     target = null,
@@ -142,6 +143,7 @@ export const runTask07ControlledWriterUpload = async (
     expectedRevision,
     previousAssetId,
     referenceScope,
+    nestedTarget,
     signal,
     invoke: ({ operationId, signal: receiptSignal }) => runConsumer({
       file,
@@ -149,6 +151,7 @@ export const runTask07ControlledWriterUpload = async (
       entityId,
       operationId,
       kind,
+      nestedTarget,
       referenceScope,
       previousAssetId,
       expectedRevision,

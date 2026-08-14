@@ -15,9 +15,18 @@ import { persistCanonicalInventoryItem } from "../../../data/media/privateInvent
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
 import {
     isTask07CatalogItemWriterEnabled,
+    prepareTask07CatalogEmbeddedSpells,
+    retireTask07CatalogItemImage,
     runTask07CatalogItemWriter,
+    runTask07CatalogEmbeddedMediaOperations,
+    task07CatalogEmbeddedSpellEditorState,
+    task07CatalogItemImageEditorState,
     withTask07CatalogLegacyImageField,
 } from "../../../data/media/catalogItemMediaWriter";
+import {
+    resolveTask07CatalogCreateAttempt,
+    task07EmbeddedFileFingerprint,
+} from "../../../data/media/embeddedMediaRetry";
 import {
     describeTask07ConsumerOutcome,
     task07ConsumerNeedsAttention,
@@ -49,8 +58,13 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         Parametri: { Base: {}, Combattimento: {}, Special: {} }
     });
     const [imageFile, setImageFile] = useState(null);
+    const [imageRemoved, setImageRemoved] = useState(false);
     const imageObjectUrl = useObjectUrl(imageFile);
-    const imagePreviewUrl = imageObjectUrl || armaturaFormData.General?.image_url || null;
+    const imageEditor = task07CatalogItemImageEditorState(
+        initialData || armaturaFormData,
+        { objectUrl: imageObjectUrl, removed: imageRemoved }
+    );
+    const imagePreviewUrl = imageEditor.src;
     const [isLoading, setIsLoading] = useState(false);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
@@ -81,6 +95,9 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
     // Refs to manage initialization logic
     const prevInitialDataIdRef = useRef(null);
     const formInitializedForCurrentItem = useRef(false);
+    const pendingCatalogCreateRef = useRef(null);
+    const completedEmbeddedOperationsRef = useRef(new Set());
+    const completedRootUploadRef = useRef(null);
 
     const addTecnica = useCallback(() => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]), []);
     const removeTecnica = useCallback(index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index)), []);
@@ -190,27 +207,21 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             );
 
             // Initialize spells from currentItemData
-            const initialLinkedSpells = [];
-            const initialCustomSpellsFromData = [];
-            if (currentItemData.General?.spells && typeof currentItemData.General.spells === 'object') {
-                Object.entries(currentItemData.General.spells).forEach(([name, data]) => {
-                    if (data === true) {
-                        initialLinkedSpells.push(name);
-                    } else if (typeof data === 'object') {
-                        initialCustomSpellsFromData.push({ spellData: data, imageFile: null, videoFile: null });
-                    }
-                });
-            }
-            setArmaturaSpellsList(initialLinkedSpells);
-            setCustomSpells(initialCustomSpellsFromData);
+            const embeddedEditorState = task07CatalogEmbeddedSpellEditorState(
+                currentItemData
+            );
+            setArmaturaSpellsList(embeddedEditorState.linkedSpells);
+            setCustomSpells(embeddedEditorState.customSpells);
 
             setImageFile(null);
+            setImageRemoved(false);
         } else { // New item
             setRidTecnicheList([]);
             setRidSpellList([]);
             setArmaturaSpellsList([]);
             setCustomSpells([]);
             setImageFile(null);
+            setImageRemoved(false);
         }
 
         initialFormState.General = initialFormState.General || {};
@@ -350,6 +361,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         const file = e.target.files[0];
         if (file) {
             setImageFile(file);
+            setImageRemoved(false);
         }
     };
 
@@ -420,31 +432,62 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         let catalogWriteCommitted = false;
         
         try {
+            let catalogBefore = null;
+            let resumeCreate = false;
             if (!editMode) {
                 const existingDocSnap = await getDoc(armaturaDocRef);
-                if (existingDocSnap.exists()) {
+                const createAttempt = resolveTask07CatalogCreateAttempt({
+                    documentExists: existingDocSnap.exists(),
+                    documentId: docId,
+                    pendingDocumentId: pendingCatalogCreateRef.current,
+                });
+                if (createAttempt.blocked) {
                     if (showMessage) showMessage(`Un'armatura con nome "${armaturaName}" (ID: ${docId}) esiste già.`, "error");
                     setIsLoading(false);
                     return;
                 }
+                resumeCreate = createAttempt.resume;
+                catalogBefore = resumeCreate ? existingDocSnap.data() : null;
+            } else if (!inventoryEditMode) {
+                catalogBefore = (await getDoc(armaturaDocRef)).data() || null;
             }
-            const catalogBefore = !inventoryEditMode && editMode
-                ? (await getDoc(armaturaDocRef)).data()
+            const catalogIsExisting = editMode || resumeCreate;
+            const rootUploadKey = imageFile
+                ? task07EmbeddedFileFingerprint(imageFile)
                 : null;
+            const rootMediaAlreadyCommitted = Boolean(
+                rootUploadKey
+                && completedRootUploadRef.current === rootUploadKey
+                && (catalogBefore?.media?.assetId || catalogBefore?.General?.media?.assetId)
+            );
             const task07V1Write = await isTask07CatalogItemWriterEnabled({
                 actorUid: user?.uid,
                 role,
                 file: imageFile,
                 inventoryEditMode,
             });
-            if (customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
-                throw new Error("Embedded spell media has no canonical Task 07 slot yet. Remove those files before saving.");
+            if (inventoryEditMode && customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
+                throw new Error("Embedded spell media can only be changed on the catalog item.");
             }
+            const embeddedSpellPlan = inventoryEditMode
+                ? { operations: [], spells: Object.fromEntries(customSpells.map((entry) => [entry.spellData.Nome.trim(), {...entry.spellData}])) }
+                : await prepareTask07CatalogEmbeddedSpells({
+                    actorUid: user?.uid,
+                    role,
+                    itemId: armaturaDocRef.id,
+                    currentItem: catalogBefore || initialData || {},
+                    customSpells,
+                });
 
             let finalArmaturaData = JSON.parse(JSON.stringify(armaturaFormData));
+            if (!inventoryEditMode && catalogBefore?.task07EmbeddedMedia) {
+                finalArmaturaData.task07EmbeddedMedia = catalogBefore.task07EmbeddedMedia;
+            }
 
             // Handle image upload
-            let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
+            let newImageUrl = catalogIsExisting
+                ? (catalogBefore?.General?.image_url ?? initialData?.General?.image_url ?? null)
+                : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const armaturaImgFileName = `armatura_${docId}_${Date.now()}_${imageFile.name}`;
                 uploadedLegacyImagePath = 'items/' + armaturaImgFileName;
@@ -457,33 +500,26 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 deferredStorageCleanup.addUrl(initialData.General.image_url);
             }
             finalArmaturaData = withTask07CatalogLegacyImageField(finalArmaturaData, {
-                editMode,
+                editMode: catalogIsExisting,
                 imageUrl: newImageUrl,
                 task07V1Write,
             });
 
             // Handle custom spells
-            let finalSpells = {};
+            let finalSpells = {...embeddedSpellPlan.spells};
             for (const customSpell of customSpells) {
                 const spellNameKey = customSpell.spellData.Nome.trim();
-                let createdSpellData = { ...customSpell.spellData };
-                
-                let spellImageUrlToSave = createdSpellData.image_url || '';
-                let spellVideoUrlToSave = createdSpellData.video_url || '';
                 
                 // Queue old files for cleanup only after the catalog document commits.
                 if (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
-                    if (!inventoryEditMode && customSpell.imageFile && initialSpellFromData.image_url) {
+                    if (!embeddedSpellPlan.enabled && !inventoryEditMode && customSpell.imageFile && initialSpellFromData.image_url) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.image_url);
                     }
-                        if (!inventoryEditMode && customSpell.videoFile && initialSpellFromData.video_url) {
+                        if (!embeddedSpellPlan.enabled && !inventoryEditMode && customSpell.videoFile && initialSpellFromData.video_url) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.video_url);
                     }
                 }
-                createdSpellData.image_url = spellImageUrlToSave;
-                createdSpellData.video_url = spellVideoUrlToSave;
-                finalSpells[spellNameKey] = createdSpellData;
             }
 
             armaturaSpellsList.forEach(spellNameKey => {
@@ -536,7 +572,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 }
                 const removeCanonicalImage = Boolean(
                     !imageFile
-                    && !imagePreviewUrl
+                    && imageRemoved
                     && initialData?.media?.assetId
                 );
                 const inventorySnapshot = { ...finalArmaturaData };
@@ -572,7 +608,18 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 }
                 onClose(true);
             } else {
-                if (task07V1Write) {
+                if (imageRemoved) {
+                    await task07MediaOperationOwner.run(() => (
+                        retireTask07CatalogItemImage(catalogBefore)
+                    ));
+                }
+                const persistCatalogParent = async () => {
+                    if (catalogIsExisting) await updateDoc(armaturaDocRef, finalArmaturaData);
+                    else await setDoc(armaturaDocRef, finalArmaturaData);
+                    catalogWriteCommitted = true;
+                    if (!editMode) pendingCatalogCreateRef.current = docId;
+                };
+                if (task07V1Write && !rootMediaAlreadyCommitted) {
                     const outcome = await task07MediaOperationOwner.run((signal) => (
                         runTask07CatalogItemWriter({
                             actorUid: user.uid,
@@ -580,15 +627,21 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                             itemId: armaturaDocRef.id,
                             file: imageFile,
                             currentItem: catalogBefore || initialData || {},
-                            prepareEntity: () => editMode
-                                ? updateDoc(armaturaDocRef, finalArmaturaData)
-                                : setDoc(armaturaDocRef, finalArmaturaData),
-                            rollbackPreparedEntity: () => catalogBefore
-                                ? setDoc(armaturaDocRef, catalogBefore)
-                                : deleteDoc(armaturaDocRef),
+                            prepareEntity: persistCatalogParent,
+                            rollbackPreparedEntity: async () => {
+                                if (catalogBefore) await setDoc(armaturaDocRef, catalogBefore);
+                                else {
+                                    await deleteDoc(armaturaDocRef);
+                                    pendingCatalogCreateRef.current = null;
+                                    catalogWriteCommitted = false;
+                                }
+                            },
                             signal,
                         })
                     ));
+                    if (!task07ConsumerNeedsAttention(outcome)) {
+                        completedRootUploadRef.current = rootUploadKey;
+                    }
                     if (task07ConsumerNeedsAttention(outcome)) {
                         if (showMessage) showMessage(
                             describeTask07ConsumerOutcome(outcome, "Armatura image"),
@@ -597,18 +650,32 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     } else if (showMessage) {
                         showMessage(`Armatura "${armaturaName}" salvata!`, "success");
                     }
-                } else if (editMode) {
+                } else if (catalogIsExisting) {
                     console.log("Updating document:", docId, finalArmaturaData);
-                    await updateDoc(armaturaDocRef, finalArmaturaData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");
                 } else {
                     console.log("Creating new document:", docId, finalArmaturaData);
-                    await setDoc(armaturaDocRef, finalArmaturaData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Armatura "${armaturaName}" creata!`, "success");
                 }
+                if (embeddedSpellPlan.operations.length > 0) {
+                    await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogEmbeddedMediaOperations({
+                            actorUid: user.uid,
+                            role,
+                            itemId: armaturaDocRef.id,
+                            currentItem: catalogBefore || initialData || {},
+                            completedOperationKeys: completedEmbeddedOperationsRef.current,
+                            operations: embeddedSpellPlan.operations,
+                            signal,
+                        })
+                    ));
+                }
                 await deferredStorageCleanup.flush();
+                pendingCatalogCreateRef.current = null;
+                completedEmbeddedOperationsRef.current.clear();
+                completedRootUploadRef.current = null;
                 onClose(true);
             }
 
@@ -801,11 +868,12 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                             onChange={handleImageChange}
                             className="w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer mb-2"
                         />
-                        {(imagePreviewUrl) && (
+                        {imageEditor.hasImage && (
                             <button
                                 type="button"
                                 onClick={() => {
                                     setImageFile(null);
+                                    setImageRemoved(true);
                                     handleNestedChange('General.image_url', null);
                                 }}
                                 className="text-xs text-red-400 hover:text-red-300 mb-1"
@@ -814,10 +882,10 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                             </button>
                         )}
                         <div className="w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center bg-gray-700/50 overflow-hidden">
-                            {(imagePreviewUrl) ? (
+                            {imageEditor.hasImage ? (
                                 <MediaImage
-                                    compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
-                                    media={imageObjectUrl ? { imageUrl: imageObjectUrl } : (initialData || armaturaFormData)}
+                                    compatibilityMode={imageEditor.compatibilityMode}
+                                    media={imageEditor.media}
                                     mediaPurpose={imageObjectUrl ? "" : "item"}
                                     src={imagePreviewUrl}
                                     variant="thumbnail"

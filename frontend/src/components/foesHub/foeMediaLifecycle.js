@@ -190,6 +190,9 @@ const hasTask07DuplicateState = (foe) => {
   const nested = [
     ...(Array.isArray(root.tecniche) ? root.tecniche : []),
     ...(Array.isArray(root.spells) ? root.spells : []),
+    ...(isRecord(root.task07EmbeddedMedia)
+      ? Object.values(root.task07EmbeddedMedia)
+      : []),
   ];
   return [root, general, ...nested].some((container) => {
     if (!isRecord(container)) return false;

@@ -143,6 +143,116 @@ test("matching root and General descriptors resolve to one source asset", () => 
   assert.ok(buildClone(fixture));
 });
 
+test("nested foe clone plans bind a distinct destination entry and manifest", () => {
+  const sourceNestedTarget = {
+    schemaVersion: 1,
+    kind: "foe-technique",
+    entryId: "s".repeat(128),
+    entryKey: null,
+    entryIndex: 0,
+    slot: "media",
+  };
+  const destinationNestedTarget = {
+    ...sourceNestedTarget,
+    entryId: "d".repeat(128),
+  };
+  const sourcePlan = buildTask07MediaUploadPlan({
+    actorUid: "dm-source",
+    ownerUid: "dm-source",
+    entityId: "foe-source",
+    operationId: "nested_source_media_1234",
+    kind: "foe",
+    nestedTarget: sourceNestedTarget,
+    sourceContentType: "image/png",
+    sourceBytes: 2048,
+  });
+  const storagePlan = buildGeneratedMediaStoragePlan({
+    kind: "foe",
+    audienceScope: sourcePlan.audienceScope,
+    ownerKey: sourcePlan.ownerKey,
+    assetId: sourcePlan.assetId,
+    sourceGeneration: "9",
+  });
+  const object = (role, path, index) => ({
+    path,
+    contentType: role === "original" ? "image/png" : "image/webp",
+    bytes: role === "original" ? 2048 : 140 + index,
+    width: role === "original" ? 640 : 96,
+    height: role === "original" ? 480 : 96,
+    durationMs: null,
+    orientationDegrees: 0,
+    checksum: checksum(String(index + 4)),
+    role,
+    generation: String(30 + index),
+    cacheControl: "private, max-age=31536000, immutable",
+  });
+  const variants = Object.fromEntries(
+    Object.entries(storagePlan.variants).map(([role, path], index) => [
+      role, object(role, path, index + 1),
+    ])
+  );
+  const manifest = {
+    schemaVersion: MEDIA_SCHEMA_VERSION,
+    policyVersion: MEDIA_CONTRACT_VERSION,
+    assetId: sourcePlan.assetId,
+    state: "attached",
+    purpose: "foe",
+    audience: sourcePlan.audienceScope,
+    ownerUid: sourcePlan.ownerUid,
+    actorUid: sourcePlan.actorUid,
+    targetKind: "foe-technique",
+    targetId: "foe-source",
+    previousAssetId: null,
+    requestHash: sourcePlan.requestHash,
+    plan: sourcePlan,
+    generation: "9",
+    attachment: {
+      referencePath: "foes/foe-source",
+      targetSlot: "media",
+      nestedTarget: sourceNestedTarget,
+      revision: 1,
+    },
+    generated: {
+      generation: "9",
+      original: object("original", storagePlan.originalPath, 0),
+      variants,
+    },
+  };
+  const media = task07MediaValueFromReadyManifest(manifest, sourcePlan);
+  const source = {
+    tecniche: [{
+      name: "Slash",
+      task07MediaEntryId: sourceNestedTarget.entryId,
+    }],
+    task07EmbeddedMedia: {
+      [sourceNestedTarget.entryId]: {
+        targetKind: "foe-technique",
+        media,
+        task07MediaRevision: 1,
+      },
+    },
+  };
+  const clone = buildTask07FoeMediaClonePlan({
+    actorUid: "dm-destination",
+    backendReceiptId: "n".repeat(48),
+    destinationFoeId: "dup-destination",
+    sourceFoeId: "foe-source",
+    source,
+    sourceManifest: manifest,
+    sourceNestedTarget,
+    destinationNestedTarget,
+  });
+  assert.ok(clone);
+  assert.deepEqual(clone.destinationPlan.nestedTarget,
+    destinationNestedTarget);
+  assert.equal(clone.destinationPlan.targetKind, "foe-technique");
+  assert.ok(clone.mediaOperationId.length <= 128);
+  assert.equal(clone.mediaOperationId.includes(sourceNestedTarget.entryId), false);
+  assert.notEqual(clone.destinationAssetId, sourcePlan.assetId);
+  assert.ok(clone.entries.every(({destinationPath}) =>
+    destinationPath.includes(clone.destinationAssetId)));
+});
+
 test("legacy-only foes do not allocate a canonical clone", () => {
   assert.equal(buildTask07FoeMediaClonePlan({
     actorUid: "dm-destination",

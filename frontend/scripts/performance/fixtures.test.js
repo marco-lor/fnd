@@ -106,6 +106,10 @@ test('fixture generation is stable and contains the required scale', () => {
   ]) {
     assert.equal(boardState?.[field], '2026-01-01T00:00:00.000Z');
   }
+  const lightingMetadata = firstDocuments.find(({ path: documentPath }) => (
+    documentPath === 'grigliata_background_lighting/perf-map'
+  ))?.data;
+  assert.equal(lightingMetadata?.backgroundId, boardState?.activeBackgroundId);
 
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
   assert.equal(fixtureManifest.documentCount, first.documentCount);

@@ -20,9 +20,18 @@ import { persistCanonicalInventoryItem } from "../../../data/media/privateInvent
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
 import {
     isTask07CatalogItemWriterEnabled,
+    prepareTask07CatalogEmbeddedSpells,
+    retireTask07CatalogItemImage,
     runTask07CatalogItemWriter,
+    runTask07CatalogEmbeddedMediaOperations,
+    task07CatalogEmbeddedSpellEditorState,
+    task07CatalogItemImageEditorState,
     withTask07CatalogLegacyImageField,
 } from "../../../data/media/catalogItemMediaWriter";
+import {
+    resolveTask07CatalogCreateAttempt,
+    task07EmbeddedFileFingerprint,
+} from "../../../data/media/embeddedMediaRetry";
 import {
     describeTask07ConsumerOutcome,
     task07ConsumerNeedsAttention,
@@ -47,8 +56,13 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [imageFile, setImageFile] = useState(null);
+    const [imageRemoved, setImageRemoved] = useState(false);
     const imageObjectUrl = useObjectUrl(imageFile);
-    const imagePreviewUrl = imageObjectUrl || accessorioFormData.General?.image_url || null;
+    const imageEditor = task07CatalogItemImageEditorState(
+        initialData || accessorioFormData,
+        { objectUrl: imageObjectUrl, removed: imageRemoved }
+    );
+    const imagePreviewUrl = imageEditor.src;
     const [ridTecnicheList, setRidTecnicheList] = useState([]);
     const [ridSpellList, setRidSpellList] = useState([]);
     const [customSpells, setCustomSpells] = useState([]);
@@ -73,6 +87,9 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
 
     const prevInitialDataIdRef = useRef(null);
     const formInitializedForCurrentItem = useRef(false);
+    const pendingCatalogCreateRef = useRef(null);
+    const completedEmbeddedOperationsRef = useRef(new Set());
+    const completedRootUploadRef = useRef(null);
 
     // Nested change handler
     const handleNestedChange = useCallback((path, value) => {
@@ -94,6 +111,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         const file = e.target.files[0];
         if (file) {
             setImageFile(file);
+            setImageRemoved(false);
         }
     }, []);
 
@@ -223,23 +241,17 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }));
                 setRidSpellList(spellList);
             }            // Handle custom spells and linked spells
-            const initialLinkedSpells = [];
-            const initialCustomSpellsFromData = [];
-            if (currentItemData.General?.spells && typeof currentItemData.General.spells === 'object') {
-                Object.entries(currentItemData.General.spells).forEach(([name, data]) => {
-                    if (data === true) {
-                        initialLinkedSpells.push(name);
-                    } else if (typeof data === 'object') {
-                        initialCustomSpellsFromData.push({ spellData: data, imageFile: null, videoFile: null });
-                    }
-                });
-            }
-            setAccessorioSpellsList(initialLinkedSpells);
-            setCustomSpells(initialCustomSpellsFromData);
+            const embeddedEditorState = task07CatalogEmbeddedSpellEditorState(
+                currentItemData
+            );
+            setAccessorioSpellsList(embeddedEditorState.linkedSpells);
+            setCustomSpells(embeddedEditorState.customSpells);
 
         }
 
         setAccessorioFormData(initialFormState);
+        setImageFile(null);
+        setImageRemoved(false);
         console.log("FormData initialized:", initialFormState);
     }, [editMode]);    // Schema fetching
     useEffect(() => {
@@ -388,31 +400,63 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         let catalogWriteCommitted = false;
         
         try {
+            let catalogBefore = null;
+            let resumeCreate = false;
             if (!editMode) {
                 const existingDocSnap = await getDoc(accessorioDocRef);
-                if (existingDocSnap.exists()) {
+                const createAttempt = resolveTask07CatalogCreateAttempt({
+                    documentExists: existingDocSnap.exists(),
+                    documentId: docId,
+                    pendingDocumentId: pendingCatalogCreateRef.current,
+                });
+                if (createAttempt.blocked) {
                     if (showMessage) showMessage(`Un accessorio con nome "${accessorioName}" (ID: ${docId}) esiste già.`, "error");
                     setIsLoading(false);
                     return;
                 }
+                resumeCreate = createAttempt.resume;
+                catalogBefore = resumeCreate ? existingDocSnap.data() : null;
+            } else if (!inventoryEditMode) {
+                catalogBefore = (await getDoc(accessorioDocRef)).data() || null;
             }
-            const catalogBefore = !inventoryEditMode && editMode
-                ? (await getDoc(accessorioDocRef)).data()
+            const catalogIsExisting = editMode || resumeCreate;
+            const rootUploadKey = imageFile
+                ? task07EmbeddedFileFingerprint(imageFile)
                 : null;
+            const rootMediaAlreadyCommitted = Boolean(
+                rootUploadKey
+                && completedRootUploadRef.current === rootUploadKey
+                && (catalogBefore?.media?.assetId || catalogBefore?.General?.media?.assetId)
+            );
             const task07V1Write = await isTask07CatalogItemWriterEnabled({
                 actorUid: user?.uid,
                 role,
                 file: imageFile,
                 inventoryEditMode,
             });
-            if (customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
-                throw new Error("Embedded spell media has no canonical Task 07 slot yet. Remove those files before saving.");
+            if (inventoryEditMode && customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
+                throw new Error("Embedded spell media can only be changed on the catalog item.");
             }
 
+            const embeddedSpellPlan = inventoryEditMode
+                ? { operations: [], spells: Object.fromEntries(customSpells.map((entry) => [entry.spellData.Nome.trim(), {...entry.spellData}])) }
+                : await prepareTask07CatalogEmbeddedSpells({
+                    actorUid: user?.uid,
+                    role,
+                    itemId: accessorioDocRef.id,
+                    currentItem: catalogBefore || initialData || {},
+                    customSpells,
+                });
+
             let finalAccessorioData = JSON.parse(JSON.stringify(accessorioFormData));
+            if (!inventoryEditMode && catalogBefore?.task07EmbeddedMedia) {
+                finalAccessorioData.task07EmbeddedMedia = catalogBefore.task07EmbeddedMedia;
+            }
 
             // Handle image upload
-            let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
+            let newImageUrl = catalogIsExisting
+                ? (catalogBefore?.General?.image_url ?? initialData?.General?.image_url ?? null)
+                : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const accessorioImgFileName = `accessorio_${docId}_${Date.now()}_${imageFile.name}`;
                 uploadedLegacyImagePath = 'items/' + accessorioImgFileName;
@@ -425,33 +469,25 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 deferredStorageCleanup.addUrl(initialData.General.image_url);
             }
             finalAccessorioData = withTask07CatalogLegacyImageField(finalAccessorioData, {
-                editMode,
+                editMode: catalogIsExisting,
                 imageUrl: newImageUrl,
                 task07V1Write,
             });
 
             // Handle custom spells
-            let finalSpells = {};
+            let finalSpells = {...embeddedSpellPlan.spells};
             for (const customSpell of customSpells) {
                 const spellNameKey = customSpell.spellData.Nome.trim();
-                let createdSpellData = { ...customSpell.spellData };
-                
-                let spellImageUrlToSave = createdSpellData.image_url || '';
-                let spellVideoUrlToSave = createdSpellData.video_url || '';
-                
                 // Queue old files for cleanup only after the catalog document commits.
                 if (!inventoryEditMode && editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
-                    if (customSpell.imageFile && initialSpellFromData.image_url) {
+                    if (!embeddedSpellPlan.enabled && customSpell.imageFile && initialSpellFromData.image_url) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.image_url);
                     }
-                    if (customSpell.videoFile && initialSpellFromData.video_url) {
+                    if (!embeddedSpellPlan.enabled && customSpell.videoFile && initialSpellFromData.video_url) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.video_url);
                     }
                 }
-                createdSpellData.image_url = spellImageUrlToSave;
-                createdSpellData.video_url = spellVideoUrlToSave;
-                finalSpells[spellNameKey] = createdSpellData;
             }
 
             accessorioSpellsList.forEach(spellNameKey => {
@@ -504,7 +540,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
                 const removeCanonicalImage = Boolean(
                     !imageFile
-                    && !imagePreviewUrl
+                    && imageRemoved
                     && initialData?.media?.assetId
                 );
                 const inventorySnapshot = { ...finalAccessorioData };
@@ -540,7 +576,18 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
                 onClose(true);
             } else {
-                if (task07V1Write) {
+                if (imageRemoved) {
+                    await task07MediaOperationOwner.run(() => (
+                        retireTask07CatalogItemImage(catalogBefore)
+                    ));
+                }
+                const persistCatalogParent = async () => {
+                    if (catalogIsExisting) await updateDoc(accessorioDocRef, finalAccessorioData);
+                    else await setDoc(accessorioDocRef, finalAccessorioData);
+                    catalogWriteCommitted = true;
+                    if (!editMode) pendingCatalogCreateRef.current = docId;
+                };
+                if (task07V1Write && !rootMediaAlreadyCommitted) {
                     const outcome = await task07MediaOperationOwner.run((signal) => (
                         runTask07CatalogItemWriter({
                             actorUid: user.uid,
@@ -548,15 +595,21 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                             itemId: accessorioDocRef.id,
                             file: imageFile,
                             currentItem: catalogBefore || initialData || {},
-                            prepareEntity: () => editMode
-                                ? updateDoc(accessorioDocRef, finalAccessorioData)
-                                : setDoc(accessorioDocRef, finalAccessorioData),
-                            rollbackPreparedEntity: () => catalogBefore
-                                ? setDoc(accessorioDocRef, catalogBefore)
-                                : deleteDoc(accessorioDocRef),
+                            prepareEntity: persistCatalogParent,
+                            rollbackPreparedEntity: async () => {
+                                if (catalogBefore) await setDoc(accessorioDocRef, catalogBefore);
+                                else {
+                                    await deleteDoc(accessorioDocRef);
+                                    pendingCatalogCreateRef.current = null;
+                                    catalogWriteCommitted = false;
+                                }
+                            },
                             signal,
                         })
                     ));
+                    if (!task07ConsumerNeedsAttention(outcome)) {
+                        completedRootUploadRef.current = rootUploadKey;
+                    }
                     if (task07ConsumerNeedsAttention(outcome)) {
                         if (showMessage) showMessage(
                             describeTask07ConsumerOutcome(outcome, "Accessorio image"),
@@ -565,18 +618,32 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     } else if (showMessage) {
                         showMessage(`Accessorio "${accessorioName}" salvato!`, "success");
                     }
-                } else if (editMode) {
+                } else if (catalogIsExisting) {
                     console.log("Updating document:", docId, finalAccessorioData);
-                    await updateDoc(accessorioDocRef, finalAccessorioData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" aggiornato!`, "success");
                 } else {
                     console.log("Creating new document:", docId, finalAccessorioData);
-                    await setDoc(accessorioDocRef, finalAccessorioData);
-                    catalogWriteCommitted = true;
+                    await persistCatalogParent();
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" creato!`, "success");
                 }
+                if (embeddedSpellPlan.operations.length > 0) {
+                    await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogEmbeddedMediaOperations({
+                            actorUid: user.uid,
+                            role,
+                            itemId: accessorioDocRef.id,
+                            currentItem: catalogBefore || initialData || {},
+                            completedOperationKeys: completedEmbeddedOperationsRef.current,
+                            operations: embeddedSpellPlan.operations,
+                            signal,
+                        })
+                    ));
+                }
                 await deferredStorageCleanup.flush();
+                pendingCatalogCreateRef.current = null;
+                completedEmbeddedOperationsRef.current.clear();
+                completedRootUploadRef.current = null;
                 onClose(true);
             }
 
@@ -806,11 +873,12 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                         onChange={handleImageChange}
                         className="w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer mb-2"
                     />
-                    {(imagePreviewUrl) && (
+                    {imageEditor.hasImage && (
                         <button
                             type="button"
                             onClick={() => {
                                 setImageFile(null);
+                                setImageRemoved(true);
                                 handleNestedChange('General.image_url', null);
                             }}
                             className="text-xs text-red-400 hover:text-red-300 mb-1"
@@ -819,10 +887,10 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                         </button>
                     )}
                     <div className="w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center bg-gray-700/50 overflow-hidden">
-                        {(imagePreviewUrl) ? (
+                        {imageEditor.hasImage ? (
                             <MediaImage
-                                compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
-                                media={imageObjectUrl ? { imageUrl: imageObjectUrl } : (initialData || accessorioFormData)}
+                                compatibilityMode={imageEditor.compatibilityMode}
+                                media={imageEditor.media}
                                 mediaPurpose={imageObjectUrl ? "" : "item"}
                                 src={imagePreviewUrl}
                                 variant="thumbnail"

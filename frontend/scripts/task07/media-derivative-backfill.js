@@ -18,17 +18,27 @@ const {
 
 const DEMO_PROJECT_ID = 'demo-fnd-perf';
 const REPORT_SCHEMA_VERSION = 4;
-const PLAN_VERSION = 4;
+const PLAN_VERSION = 5;
+const CANONICAL_AUDIT_VERSION = 1;
 const RECEIPT_COLLECTION = 'task07_media_backfill_receipts';
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 50;
 const DEFAULT_MAX_PAGES = 20;
 const MAX_MAX_PAGES = 100;
 const MIGRATION_CONCURRENCY = 1;
+// A Firestore page is bounded by root documents. Catalog and foe roots expand
+// into renderer-active embedded media records, so bound that expansion
+// separately instead of incorrectly treating it as additional Firestore rows.
+const MAX_EXPANDED_MEDIA_RECORDS_PER_ROOT = 401;
 const DEFAULT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_PLACEMENT_REFERENCES = 500;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
-const OPERATIONS = new Set(['backfill', 'verify', 'rollback']);
+const OPERATIONS = new Set([
+  'backfill',
+  'verify',
+  'rollback',
+  'canonical-audit',
+]);
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
 const SUPPORTED_KINDS = new Set([
   'avatar', 'item', 'npc', 'foe', 'token',
@@ -207,29 +217,56 @@ const readJson = (filePath, label) => {
   }
 };
 
-const storagePathFromValue = (value) => {
+const storageReferenceFromValue = (value) => {
   const text = asString(value);
-  if (!text) return '';
-  if (!text.includes('://')) return text.replace(/^\/+/, '');
+  if (!text || /^(?:blob|data):/i.test(text)) return null;
+  if (!text.includes('://')) {
+    return {
+      bucket: '',
+      loopback: false,
+      path: text.replace(/^\/+/, ''),
+      url: false,
+    };
+  }
   try {
     const parsed = new URL(text);
-    if (![
-      'firebasestorage.googleapis.com',
-      'storage.googleapis.com',
-      ...LOOPBACK_HOSTS,
-    ].includes(parsed.hostname)) return '';
-    const encoded = parsed.pathname.split('/o/')[1];
-    if (encoded) return decodeURIComponent(encoded).replace(/^\/+/, '');
+    const loopback = LOOPBACK_HOSTS.has(parsed.hostname);
+    if (parsed.hostname === 'firebasestorage.googleapis.com' || loopback) {
+      const match = parsed.pathname.match(/\/b\/([^/]+)\/o\/(.+)$/);
+      if (!match) return null;
+      return {
+        bucket: decodeURIComponent(match[1]),
+        loopback,
+        path: decodeURIComponent(match[2]).replace(/^\/+/, ''),
+        url: true,
+      };
+    }
     if (parsed.hostname === 'storage.googleapis.com') {
       const parts = parsed.pathname.split('/').filter(Boolean);
-      return parts.length >= 2 ?
-        decodeURIComponent(parts.slice(1).join('/')) :
-        '';
+      if (parts.length < 2) return null;
+      return {
+        bucket: decodeURIComponent(parts[0]),
+        loopback: false,
+        path: decodeURIComponent(parts.slice(1).join('/')).replace(/^\/+/, ''),
+        url: true,
+      };
     }
-    return '';
+    return null;
   } catch {
-    return '';
+    return null;
   }
+};
+
+const storagePathFromValue = (value, {
+  expectedBucket = '',
+  allowLoopback = false,
+} = {}) => {
+  const reference = storageReferenceFromValue(value);
+  if (!reference?.path) return '';
+  if (!reference.url) return reference.path;
+  if (!expectedBucket || reference.bucket !== expectedBucket ||
+    (reference.loopback && allowLoopback !== true)) return '';
+  return reference.path;
 };
 
 const isCanonicalTask07Path = (value) => {
@@ -246,13 +283,13 @@ const isReservedTask07Path = (value) => (
   /^(?:media_assets|media_uploads)\//.test(storagePathFromValue(value))
 );
 
-const collectMediaPaths = (value) => {
+const collectMediaPaths = (value, storageContext = {}) => {
   const result = new Set();
   const visit = (entry, key = '') => {
     if (typeof entry === 'string') {
       if (/^(?:imagePath|imageUrl|image_url|posterPath|posterUrl|videoUrl|video_url|audioPath|audioUrl|storagePath|path|url)$/i
         .test(key)) {
-        const storagePath = storagePathFromValue(entry);
+        const storagePath = storagePathFromValue(entry, storageContext);
         if (storagePath) result.add(storagePath);
       }
       return;
@@ -272,9 +309,191 @@ const collectMediaPaths = (value) => {
   return [...result].sort();
 };
 
-const legacyPathsForKind = (data, kind) => {
+const VIDEO_REFERENCE_PATTERN =
+  /(?:^data:video\/|\.(?:mp4|webm|mov|m4v|ogv)(?:[?#].*)?$)/i;
+
+const declaresVideoReference = (value) => {
+  if (typeof value === 'string') {
+    return VIDEO_REFERENCE_PATTERN.test(value.trim());
+  }
+  if (!isRecord(value)) return false;
+  const contentType = normalizeContentType(
+    value.contentType || value.mime || value.original?.contentType
+  );
+  const kind = asString(value.kind || value.purpose).toLowerCase();
+  if (contentType.startsWith('video/') || kind.endsWith('-video')) return true;
+  return ['url', 'downloadUrl', 'imageUrl', 'image_url', 'path', 'storagePath']
+    .some((field) => declaresVideoReference(value[field]));
+};
+
+const rendererVideoLegacyProjection = (data) => {
+  const value = isRecord(data) ? data : {};
+  const ambiguousVideoValue = (candidate) => (
+    declaresVideoReference(candidate) ? candidate : undefined
+  );
+  const media = declaresVideoReference(value.media) ? value.media : undefined;
+  return {
+    video_url: value.video_url,
+    videoUrl: value.videoUrl,
+    videoMedia: value.videoMedia,
+    // `url` and `downloadUrl` are the resolver's generic video fallbacks. An
+    // image-specific alias is video intent only when it names a video object;
+    // this prevents image-only spell art from being invented as a video.
+    url: value.url,
+    downloadUrl: value.downloadUrl,
+    imageUrl: ambiguousVideoValue(value.imageUrl),
+    image_url: ambiguousVideoValue(value.image_url),
+    media,
+    General: {
+      video_url: value.General?.video_url,
+      videoUrl: value.General?.videoUrl,
+      videoMedia: value.General?.videoMedia,
+      url: value.General?.url,
+      downloadUrl: value.General?.downloadUrl,
+      imageUrl: ambiguousVideoValue(value.General?.imageUrl),
+      image_url: ambiguousVideoValue(value.General?.image_url),
+      media: declaresVideoReference(value.General?.media) ?
+        value.General.media : undefined,
+    },
+  };
+};
+
+const declaresRendererVideoMedia = (data) => {
+  const value = isRecord(data) ? data : {};
+  const explicitVideoDescriptor = [
+    value.videoMedia,
+    value.General?.videoMedia,
+  ].some((candidate) => (
+    candidate !== null && candidate !== undefined && candidate !== ''
+  ));
+  const explicitVideoAlias = [
+    value.videoUrl,
+    value.video_url,
+    value.General?.videoUrl,
+    value.General?.video_url,
+  ].some((candidate) => (
+    candidate !== null && candidate !== undefined && candidate !== ''
+  ));
+  const genericRendererFallback = [
+    value.url,
+    value.downloadUrl,
+    value.imageUrl,
+    value.image_url,
+    value.General?.url,
+    value.General?.downloadUrl,
+    value.General?.imageUrl,
+    value.General?.image_url,
+    value.media,
+    value.General?.media,
+  ].some(declaresVideoReference);
+  return explicitVideoDescriptor || explicitVideoAlias || genericRendererFallback;
+};
+
+const mediaReferenceProjectionForKind = (data, kind) => {
+  const imageUrlFields = (value) => ({
+    url: value?.url,
+    downloadUrl: value?.downloadUrl,
+    imageUrl: value?.imageUrl,
+    image_url: value?.image_url,
+  });
+  const videoUrlFields = (value) => ({
+    url: value?.url,
+    downloadUrl: value?.downloadUrl,
+    videoUrl: value?.videoUrl,
+    video_url: value?.video_url,
+    imageUrl: value?.imageUrl,
+    image_url: value?.image_url,
+  });
   if (kind === 'item') {
-    return collectMediaPaths({
+    return {
+      ...imageUrlFields(data),
+      imagePath: data?.imagePath,
+      media: data?.media,
+      General: {
+        ...imageUrlFields(data?.General),
+        imagePath: data?.General?.imagePath,
+        media: data?.General?.media,
+      },
+    };
+  }
+  if (kind === 'technique' || kind === 'spell') {
+    return {
+      ...imageUrlFields(data),
+      imagePath: data?.imagePath,
+      media: data?.media,
+      General: {
+        ...imageUrlFields(data?.General),
+        imagePath: data?.General?.imagePath,
+        media: data?.General?.media,
+      },
+    };
+  }
+  if (kind === 'technique-video' || kind === 'spell-video') {
+    return {
+      ...videoUrlFields(data),
+      videoMedia: data?.videoMedia,
+      media: data?.media,
+      General: {
+        ...videoUrlFields(data?.General),
+        videoMedia: data?.General?.videoMedia,
+        media: data?.General?.media,
+      },
+    };
+  }
+  if (kind === 'music') {
+    return {
+      url: data?.url,
+      downloadUrl: data?.downloadUrl,
+      audioPath: data?.audioPath,
+      audioUrl: data?.audioUrl,
+      media: data?.media,
+      General: {
+        url: data?.General?.url,
+        downloadUrl: data?.General?.downloadUrl,
+        audioPath: data?.General?.audioPath,
+        audioUrl: data?.General?.audioUrl,
+        media: data?.General?.media,
+      },
+    };
+  }
+  if (kind === 'map-video') {
+    return {
+      ...videoUrlFields(data),
+      imagePath: data?.imagePath,
+      videoMedia: data?.videoMedia,
+      media: data?.media,
+      posterPath: data?.posterPath,
+      posterUrl: data?.posterUrl,
+      General: {
+        ...videoUrlFields(data?.General),
+        imagePath: data?.General?.imagePath,
+        videoMedia: data?.General?.videoMedia,
+        media: data?.General?.media,
+        posterPath: data?.General?.posterPath,
+        posterUrl: data?.General?.posterUrl,
+      },
+    };
+  }
+  return {
+    ...imageUrlFields(data),
+    imagePath: data?.imagePath,
+    videoUrl: data?.videoUrl,
+    posterPath: data?.posterPath,
+    posterUrl: data?.posterUrl,
+    media: data?.media,
+    General: {
+      ...imageUrlFields(data?.General),
+      imagePath: data?.General?.imagePath,
+      posterPath: data?.General?.posterPath,
+      posterUrl: data?.General?.posterUrl,
+      media: data?.General?.media,
+    },
+  };
+};
+
+const legacyPathProjectionForKind = (data, kind) => {
+  if (kind === 'item') {
+    return {
       image_url: data?.image_url,
       imagePath: data?.imagePath,
       imageUrl: data?.imageUrl,
@@ -283,31 +502,37 @@ const legacyPathsForKind = (data, kind) => {
         image_url: data?.General?.image_url,
         media: data?.General?.media,
       },
-    });
+    };
   }
   if (kind === 'technique' || kind === 'spell') {
-    return collectMediaPaths({
+    return {
+      url: data?.url,
+      downloadUrl: data?.downloadUrl,
       image_url: data?.image_url,
       imagePath: data?.imagePath,
       imageUrl: data?.imageUrl,
       media: data?.media,
-    });
+      General: {
+        url: data?.General?.url,
+        downloadUrl: data?.General?.downloadUrl,
+        image_url: data?.General?.image_url,
+        imagePath: data?.General?.imagePath,
+        imageUrl: data?.General?.imageUrl,
+        media: data?.General?.media,
+      },
+    };
   }
   if (kind === 'technique-video' || kind === 'spell-video') {
-    return collectMediaPaths({
-      video_url: data?.video_url,
-      videoUrl: data?.videoUrl,
-      videoMedia: data?.videoMedia,
-    });
+    return rendererVideoLegacyProjection(data);
   }
   if (kind === 'music') {
-    return collectMediaPaths({
+    return {
       audioPath: data?.audioPath,
       audioUrl: data?.audioUrl,
       media: data?.media,
-    });
+    };
   }
-  return collectMediaPaths({
+  return {
     image_url: data?.image_url,
     imagePath: data?.imagePath,
     imageUrl: data?.imageUrl,
@@ -315,7 +540,64 @@ const legacyPathsForKind = (data, kind) => {
     posterPath: data?.posterPath,
     posterUrl: data?.posterUrl,
     media: data?.media,
-  });
+  };
+};
+
+const legacyPathsForKind = (data, kind, storageContext = {}) => (
+  collectMediaPaths(legacyPathProjectionForKind(data, kind), storageContext)
+);
+
+const MEDIA_REFERENCE_KEY_PATTERN =
+  /^(?:imagePath|imageUrl|image_url|posterPath|posterUrl|videoUrl|video_url|audioPath|audioUrl|storagePath|path|url|downloadUrl)$/i;
+
+const mediaReferenceDeclarationsForKind = (
+  data,
+  kind,
+  storageContext = {}
+) => {
+  const declarations = [];
+  const visit = (entry, key = '', fieldPath = '') => {
+    if (MEDIA_REFERENCE_KEY_PATTERN.test(key)) {
+      if (typeof entry === 'string') {
+        const value = entry.trim();
+        if (value) declarations.push({
+          fieldPath,
+          value,
+          storagePath: storagePathFromValue(value, storageContext),
+        });
+      } else if (entry !== null && entry !== undefined) {
+        declarations.push({
+          fieldPath,
+          value: canonicalize(entry),
+          storagePath: '',
+        });
+      }
+      return;
+    }
+    if (Array.isArray(entry)) {
+      entry.forEach((nested, index) => visit(
+        nested,
+        key,
+        `${fieldPath}[${index}]`
+      ));
+      return;
+    }
+    if (!isRecord(entry)) return;
+    Object.entries(entry).forEach(([nestedKey, nested]) => {
+      if (['media', 'videoMedia'].includes(nestedKey) &&
+        Number(nested?.schemaVersion) === 1) return;
+      visit(
+        nested,
+        nestedKey,
+        fieldPath ? `${fieldPath}.${nestedKey}` : nestedKey
+      );
+    });
+  };
+  visit(mediaReferenceProjectionForKind(data, kind));
+  return declarations.sort((left, right) => (
+    left.fieldPath.localeCompare(right.fieldPath) ||
+    String(left.value).localeCompare(String(right.value))
+  ));
 };
 
 const inferOwnerFromPath = (storagePath, kind) => {
@@ -369,7 +651,9 @@ const sourceObjectFingerprint = (source) => canonicalHash({
   checksum: source.checksum,
 });
 
-const referenceScopeFor = (record) => record.kind === 'item' ?
+const referenceScopeFor = (record) => (
+  record.kind === 'item' || record?.nestedTarget?.kind === 'catalog-item-spell'
+) ?
   (
     record.referenceScope === 'global-catalog' ?
       'global-catalog' :
@@ -383,7 +667,13 @@ const commonTechniqueForRecord = (record) => (
     .includes(asString(record?.sourceKey))
 );
 
-const targetKindFor = (kind, referenceScope, commonTechnique = false) => {
+const targetKindFor = (
+  kind,
+  referenceScope,
+  commonTechnique = false,
+  nestedTarget = null
+) => {
+  if (nestedTarget?.kind) return nestedTarget.kind;
   if (kind === 'avatar') return 'profile';
   if (kind === 'item') {
     return referenceScope === 'global-catalog' ?
@@ -409,8 +699,13 @@ const targetPathFor = (
   ownerUid,
   entityId,
   referenceScope,
-  commonTechnique = false
+  commonTechnique = false,
+  nestedTarget = null
 ) => {
+  if (nestedTarget?.kind === 'catalog-item-spell') return `items/${entityId}`;
+  if (['foe-technique', 'foe-spell'].includes(nestedTarget?.kind)) {
+    return `foes/${entityId}`;
+  }
   if (kind === 'avatar') return `users/${ownerUid}`;
   if (kind === 'item' && referenceScope === 'global-catalog') {
     return `items/${entityId}`;
@@ -435,7 +730,16 @@ const targetPathFor = (
   return '';
 };
 
-const audienceFor = (kind, referenceScope, commonTechnique = false) => {
+const audienceFor = (
+  kind,
+  referenceScope,
+  commonTechnique = false,
+  nestedTarget = null
+) => {
+  if (nestedTarget?.kind === 'catalog-item-spell') return 'signed-in';
+  if (['foe-technique', 'foe-spell'].includes(nestedTarget?.kind)) {
+    return 'dm-only';
+  }
   if (kind === 'foe') return 'dm-only';
   if (commonTechnique) return 'signed-in';
   if ((kind === 'item' && referenceScope === 'user-inventory') ||
@@ -445,7 +749,11 @@ const audienceFor = (kind, referenceScope, commonTechnique = false) => {
   return 'signed-in';
 };
 
-const roleAuthorizes = (kind, referenceScope, role) => {
+const roleAuthorizes = (kind, referenceScope, role, nestedTarget = null) => {
+  if (nestedTarget?.kind === 'catalog-item-spell' ||
+    ['foe-technique', 'foe-spell'].includes(nestedTarget?.kind)) {
+    return ['dm', 'webmaster'].includes(role);
+  }
   if (kind === 'avatar') return true;
   if (kind === 'item' && referenceScope === 'user-inventory') return true;
   if (kind === 'item' && referenceScope === 'global-catalog') {
@@ -461,8 +769,79 @@ const roleAuthorizes = (kind, referenceScope, role) => {
   return false;
 };
 
-const targetSlotForKind = (kind) => (
-  ['technique-video', 'spell-video'].includes(kind) ? 'videoMedia' : 'media'
+const PERSONAL_OWNER_SOURCE_KEYS = new Set([
+  'avatars',
+  'inventory-items',
+  'technique-art',
+  'technique-video',
+  'spell-art',
+  'spell-video',
+]);
+
+const ownerFromPersonalTargetPath = (sourceKey, targetPath, entityId) => {
+  const escapedEntityId = entityId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = {
+    avatars: /^users\/([^/]+)$/,
+    'inventory-items': new RegExp(
+      `^users/([^/]+)/inventory/${escapedEntityId}$`
+    ),
+    'technique-art': new RegExp(
+      `^users/([^/]+)/tecniche/${escapedEntityId}$`
+    ),
+    'technique-video': new RegExp(
+      `^users/([^/]+)/tecniche/${escapedEntityId}$`
+    ),
+    'spell-art': new RegExp(
+      `^users/([^/]+)/spells/${escapedEntityId}$`
+    ),
+    'spell-video': new RegExp(
+      `^users/([^/]+)/spells/${escapedEntityId}$`
+    ),
+  };
+  return asString(patterns[sourceKey]?.exec(targetPath)?.[1]);
+};
+
+const canonicalAuditOwner = ({
+  record,
+  sourceKey,
+  targetPath,
+  entityId,
+  catalogOwnerUid,
+  attachedOwnerUid,
+}) => {
+  const explicitOwnerUid = asString(record.ownerUid);
+  const issues = [];
+  let ownerUid = '';
+  let ownerResolution = 'missing';
+  if (PERSONAL_OWNER_SOURCE_KEYS.has(sourceKey)) {
+    ownerUid = ownerFromPersonalTargetPath(sourceKey, targetPath, entityId);
+    ownerResolution = ownerUid ? 'target-path' : 'missing';
+    if (!ownerUid || explicitOwnerUid !== ownerUid) {
+      issues.push('canonical-owner-target-mismatch');
+    }
+  } else if (['custom-token-templates', 'foe-tokens'].includes(sourceKey)) {
+    ownerUid = explicitOwnerUid;
+    ownerResolution = ownerUid ? 'explicit' : 'missing';
+    const targetOwnerUid = asString(record.data?.ownerUid);
+    if (!ownerUid || !targetOwnerUid || targetOwnerUid !== ownerUid) {
+      issues.push('canonical-owner-target-mismatch');
+    }
+  } else {
+    ownerUid = asString(attachedOwnerUid) || explicitOwnerUid;
+    ownerResolution = asString(attachedOwnerUid) ?
+      'attached-manifest' : ownerUid ? 'explicit' : 'missing';
+    if (!ownerUid && GLOBAL_FALLBACK_OWNER_SOURCES.has(sourceKey)) {
+      ownerUid = asString(catalogOwnerUid);
+      ownerResolution = ownerUid ? 'verified-global-fallback' : 'missing';
+    }
+  }
+  if (!ownerUid) issues.push('missing-owner');
+  return {issues, ownerResolution, ownerUid};
+};
+
+const targetSlotForKind = (kind, nestedTarget = null) => (
+  nestedTarget?.slot ||
+  (['technique-video', 'spell-video'].includes(kind) ? 'videoMedia' : 'media')
 );
 
 const revisionFieldForKind = (kind) => (
@@ -477,32 +856,133 @@ const updatedAtFieldForKind = (kind) => (
     'mediaUpdatedAt'
 );
 
-const previousAssetIdFromData = (data, kind) => {
-  const slot = targetSlotForKind(kind);
+const rawEmbeddedBindingFor = (data, nestedTarget) => {
+  if (!isRecord(nestedTarget)) return null;
+  const binding = data?.task07EmbeddedMedia?.[nestedTarget.entryId];
+  return isRecord(binding) ? binding : null;
+};
+
+const embeddedBindingFor = (data, nestedTarget) => {
+  const binding = rawEmbeddedBindingFor(data, nestedTarget);
+  return binding?.targetKind === nestedTarget?.kind ? binding : null;
+};
+
+const nestedTargetBindingIdentity = (value) => isRecord(value) ? {
+  schemaVersion: value.schemaVersion,
+  kind: value.kind,
+  entryId: value.entryId,
+  slot: value.slot,
+} : null;
+
+const nestedTargetBindingMatches = (left, right) => canonicalHash(
+  nestedTargetBindingIdentity(left)
+) === canonicalHash(nestedTargetBindingIdentity(right));
+
+const nestedEntryFor = (data, nestedTarget) => {
+  if (!isRecord(data) || !isRecord(nestedTarget)) return null;
+  const entries = nestedTarget.kind === 'catalog-item-spell' ?
+    Object.entries(isRecord(data.General?.spells) ? data.General.spells : {}) :
+    (Array.isArray(data[
+      nestedTarget.kind === 'foe-technique' ? 'tecniche' : 'spells'
+    ]) ? data[
+      nestedTarget.kind === 'foe-technique' ? 'tecniche' : 'spells'
+    ].map((entry, index) => [String(index), entry]) : []);
+  const matches = entries.filter(([, entry]) => (
+    isRecord(entry) && asString(entry.task07MediaEntryId) ===
+      nestedTarget.entryId
+  ));
+  const crossKindEntries = nestedTarget.kind === 'foe-technique' ?
+    (Array.isArray(data.spells) ? data.spells : []) :
+    (nestedTarget.kind === 'foe-spell' && Array.isArray(data.tecniche) ?
+      data.tecniche : []);
+  const crossKindConflict = crossKindEntries.some((entry) => (
+    isRecord(entry) && asString(entry.task07MediaEntryId) ===
+      nestedTarget.entryId
+  ));
+  if (matches.length > 1 || crossKindConflict) {
+    return {conflict: true, entry: null};
+  }
+  if (matches.length === 1) {
+    return {conflict: false, entry: matches[0][1]};
+  }
+  const fallback = nestedTarget.kind === 'catalog-item-spell' ?
+    data.General?.spells?.[nestedTarget.entryKey] :
+    data[
+      nestedTarget.kind === 'foe-technique' ? 'tecniche' : 'spells'
+    ]?.[nestedTarget.entryIndex];
+  if (!isRecord(fallback)) return {conflict: false, entry: null};
+  const storedEntryId = asString(fallback.task07MediaEntryId);
+  return {
+    conflict: Boolean(storedEntryId && storedEntryId !== nestedTarget.entryId),
+    entry: fallback,
+  };
+};
+
+const bindingDataFor = (data, record) => (
+  record?.nestedTarget ?
+    embeddedBindingFor(data, record.nestedTarget) || {} :
+    data
+);
+
+const previousAssetIdFromData = (data, kind, nestedTarget = null) => {
+  const slot = targetSlotForKind(kind, nestedTarget);
+  const binding = nestedTarget ? embeddedBindingFor(data, nestedTarget) || {} : data;
   const candidates = [
-    data?.[slot]?.assetId,
-    slot === 'media' ? data?.General?.media?.assetId : null,
+    binding?.[slot]?.assetId,
+    !nestedTarget && slot === 'media' ? data?.General?.media?.assetId : null,
   ].map(asString).filter((value) => /^m_[a-f0-9]{40}$/.test(value));
   const unique = [...new Set(candidates)];
   return unique.length === 1 ? unique[0] : null;
 };
 
-const expectedRevisionFromData = (data, kind) => {
+const expectedRevisionFromData = (data, kind, nestedTarget = null) => {
   const field = revisionFieldForKind(kind);
-  return Number.isSafeInteger(data?.[field]) && Number(data[field]) >= 0 ?
-    Number(data[field]) :
+  const binding = nestedTarget ? embeddedBindingFor(data, nestedTarget) || {} : data;
+  return Number.isSafeInteger(binding?.[field]) && Number(binding[field]) >= 0 ?
+    Number(binding[field]) :
     0;
 };
 
-const targetMediaFingerprint = (data, kind) => canonicalHash({
-  targetSlot: targetSlotForKind(kind),
-  sourcePaths: legacyPathsForKind(data, kind),
-  previousAssetId: previousAssetIdFromData(data, kind),
-  expectedRevision: expectedRevisionFromData(data, kind),
-  assetType: ['map', 'map-video'].includes(kind) ?
-    asString(data?.assetType) :
-    null,
-});
+const targetMediaFingerprint = (data, kind, record = {}) => {
+  const nestedTarget = isRecord(record.nestedTarget) ? record.nestedTarget : null;
+  if (nestedTarget) {
+    const resolution = nestedEntryFor(data, nestedTarget);
+    const entry = isRecord(resolution?.entry) ? resolution.entry : {};
+    const binding = embeddedBindingFor(data, nestedTarget) || {};
+    const slot = targetSlotForKind(kind, nestedTarget);
+    const revisionField = revisionFieldForSlot(slot);
+    const updatedAtField = updatedAtFieldForSlot(slot);
+    return canonicalHash({
+      nestedTarget,
+      entryConflict: resolution?.conflict === true,
+      sourcePaths: legacyPathsForKind(entry, kind),
+      mediaReferenceDeclarations: mediaReferenceDeclarationsForKind(entry, kind),
+      descriptorDeclarations: canonicalDescriptorSelection({
+        kind,
+        data: {[slot]: binding[slot]},
+      }).declarations.map(({fieldPath, value}) => ({fieldPath, value})),
+      previousAssetId: previousAssetIdFromData(data, kind, nestedTarget),
+      expectedRevision: expectedRevisionFromData(data, kind, nestedTarget),
+      updatedAt: binding[updatedAtField] ?? null,
+      deletionState: data.deletionState ?? null,
+      pendingDeletion: data.pendingDeletion === true,
+      deleted: data.deleted === true,
+      revisionField,
+    });
+  }
+  return canonicalHash({
+    targetSlot: targetSlotForKind(kind),
+    sourcePaths: legacyPathsForKind(data, kind),
+    mediaReferenceDeclarations: mediaReferenceDeclarationsForKind(data, kind),
+    descriptorDeclarations: canonicalDescriptorSelection({kind, data})
+      .declarations.map(({fieldPath, value}) => ({fieldPath, value})),
+    previousAssetId: previousAssetIdFromData(data, kind),
+    expectedRevision: expectedRevisionFromData(data, kind),
+    assetType: ['map', 'map-video'].includes(kind) ?
+      asString(data?.assetType) :
+      null,
+  });
+};
 
 const sourceKeyForRecord = (record) => {
   const explicit = asString(record?.sourceKey);
@@ -566,6 +1046,7 @@ const buildServerPlanProjection = (input) => {
     projectId: input.projectId,
     kind: input.kind,
     commonTechnique: input.commonTechnique === true,
+    nestedTarget: input.nestedTarget || null,
     targetPath: input.targetPath,
     sourceFingerprint: input.sourceFingerprint,
     policyHash: POLICY_HASH,
@@ -580,12 +1061,14 @@ const buildServerPlanProjection = (input) => {
     targetKind: targetKindFor(
       input.kind,
       input.referenceScope,
-      input.commonTechnique
+      input.commonTechnique,
+      input.nestedTarget
     ),
     audienceScope: audienceFor(
       input.kind,
       input.referenceScope,
-      input.commonTechnique
+      input.commonTechnique,
+      input.nestedTarget
     ),
     sourcePath: `media_uploads/${input.ownerUid}/${assetId}/source`,
   };
@@ -599,6 +1082,9 @@ const planFingerprintCore = (report) => ({
   policyVersion: report.policyVersion,
   policyHash: report.policyHash,
   operation: report.operation,
+  canonicalAuditVersion: report.operation === 'canonical-audit' ?
+    report.canonicalAuditVersion :
+    undefined,
   projectId: report.projectId,
   storageBucket: report.storageBucket,
   sourceKeys: report.sourceKeys,
@@ -608,6 +1094,7 @@ const planFingerprintCore = (report) => ({
   complete: report.complete,
   scan: report.scan,
   counts: report.counts,
+  scope: report.scope || null,
   entries: report.entries,
   excluded: report.excluded,
 });
@@ -628,6 +1115,7 @@ const finalizeReport = ({
   entries,
   excluded = [],
   records = 0,
+  scope = null,
 }) => {
   const counts = {
     records,
@@ -650,6 +1138,9 @@ const finalizeReport = ({
     policyVersion: mediaPolicy.policyVersion,
     policyHash: POLICY_HASH,
     operation,
+    ...(operation === 'canonical-audit' ? {
+      canonicalAuditVersion: CANONICAL_AUDIT_VERSION,
+    } : {}),
     projectId,
     storageBucket,
     sourceKeys: [...sourceKeys],
@@ -659,10 +1150,811 @@ const finalizeReport = ({
     complete: Boolean(complete),
     scan,
     counts,
+    ...(scope ? {scope} : {}),
     entries,
     excluded,
   };
   return {...report, planFingerprint: computePlanFingerprint(report)};
+};
+
+const declaredDescriptor = (container, key, fieldPath) => {
+  if (!isRecord(container) || !hasOwn(container, key)) return null;
+  const value = container[key];
+  if (value === null || value === undefined || value === '') return null;
+  return {fieldPath, value, validObject: isRecord(value)};
+};
+
+const canonicalDescriptorSelection = (record) => {
+  const rootData = isRecord(record?.data) ? record.data : {};
+  const data = isRecord(record?.nestedTarget) ?
+    rawEmbeddedBindingFor(rootData, record.nestedTarget) || {} :
+    isRecord(record?.mediaData) ? record.mediaData : rootData;
+  const kind = asString(record?.kind);
+  const videoRenderer = [
+    'map-video', 'technique-video', 'spell-video',
+  ].includes(kind);
+  const primary = videoRenderer ? [
+    declaredDescriptor(data, 'videoMedia', 'videoMedia'),
+    declaredDescriptor(data.General, 'videoMedia', 'General.videoMedia'),
+  ] : [
+    declaredDescriptor(data, 'media', 'media'),
+    declaredDescriptor(data.General, 'media', 'General.media'),
+  ];
+  const fallback = videoRenderer ? [
+    declaredDescriptor(data, 'media', 'media'),
+    declaredDescriptor(data.General, 'media', 'General.media'),
+  ] : [];
+  const primaryDeclarations = primary.filter(Boolean);
+  const fallbackDeclarations = fallback.filter(Boolean);
+  const primaryDescriptors = primaryDeclarations
+    .filter(({validObject}) => validObject)
+    .map(({value}) => value);
+  const selectedDeclarations = videoRenderer &&
+    !primaryDescriptors.length ? fallbackDeclarations : primaryDeclarations;
+  const validatedDeclarations = videoRenderer &&
+    !primaryDescriptors.length ?
+    [...primaryDeclarations, ...fallbackDeclarations] :
+    primaryDeclarations;
+  const descriptors = selectedDeclarations
+    .filter(({validObject}) => validObject)
+    .map(({value}) => value);
+  const declarations = [
+    ...primaryDeclarations,
+    ...fallbackDeclarations,
+  ];
+  const descriptor = descriptors[0] || null;
+  const issues = [];
+  validatedDeclarations.filter(({validObject}) => !validObject).forEach(() => {
+    issues.push('canonical-descriptor-malformed');
+  });
+  if (new Set(descriptors.map(canonicalHash)).size > 1) {
+    issues.push('canonical-descriptor-conflict');
+  }
+  return {declarations, descriptor, issues};
+};
+
+const canonicalDescriptorForRecord = (record) => (
+  canonicalDescriptorSelection(record).descriptor
+);
+
+const canonicalBackfillTargetState = (record) => {
+  const kind = asString(record?.kind);
+  const rootData = isRecord(record?.data) ? record.data : {};
+  const mediaData = isRecord(record?.mediaData) ? record.mediaData : rootData;
+  const attached = canonicalDescriptorSelection(record);
+  const direct = isRecord(record?.nestedTarget) ?
+    canonicalDescriptorSelection({kind, data: mediaData}) : attached;
+  const descriptor = attached.descriptor;
+  const valid = attached.issues.length === 0 &&
+    isRecord(descriptor) &&
+    descriptor.schemaVersion === 1 &&
+    /^m_[a-f0-9]{40}$/.test(asString(descriptor.assetId)) &&
+    asString(descriptor.kind) === kind &&
+    asString(descriptor.state) === 'ready';
+  const invalid = attached.declarations.length > 0 && !valid;
+  const directNested = isRecord(record?.nestedTarget) &&
+    direct.declarations.length > 0;
+  return {
+    descriptor,
+    valid,
+    invalid: invalid || (!attached.declarations.length && directNested),
+    directNested,
+  };
+};
+
+const canonicalBackfillExclusion = ({
+  record,
+  sourceKey,
+  kind,
+  data,
+  legacyPaths,
+  descriptor,
+}) => {
+  const nestedTarget = isRecord(record.nestedTarget) ? record.nestedTarget : null;
+  const core = {
+    schemaVersion: 1,
+    reason: 'already-canonical',
+    sourceKey,
+    kind,
+    entityId: asString(record.entityId),
+    ownerUid: asString(record.ownerUid),
+    targetPath: asString(record.targetPath),
+    targetVersion: asString(record.targetVersion),
+    targetSlot: targetSlotForKind(kind, nestedTarget),
+    nestedTarget,
+    assetId: asString(descriptor?.assetId),
+    descriptorFingerprint: canonicalHash(descriptor),
+    targetFingerprint: targetMediaFingerprint(record.data, kind, record),
+    legacyPaths: [...legacyPaths].sort(),
+    legacyGeneralImageUrlProof: generalImageUrlProof(data, kind),
+  };
+  const exclusionHash = canonicalHash(core);
+  return {
+    exclusionId: `x_${exclusionHash.slice(0, 40)}`,
+    ...core,
+    exclusionHash,
+  };
+};
+
+const canonicalAuditExclusion = (record, descriptor, legacyPaths) => {
+  const sourceFoeProof = isRecord(record.sourceFoeProof) ?
+    record.sourceFoeProof :
+    null;
+  const core = {
+    schemaVersion: 1,
+    reason: 'unplaced-foe-token-root',
+    sourceKey: 'foe-tokens',
+    kind: 'token',
+    entityId: asString(record.entityId),
+    ownerUid: asString(record.ownerUid),
+    targetPath: asString(record.targetPath),
+    targetVersion: asString(record.targetVersion),
+    targetFingerprint: targetMediaFingerprint(record.data || {}, 'token'),
+    placementReferenceCount: Number(record.placementReferenceCount),
+    placementReferenceHash: asString(record.placementReferenceHash),
+    sourceFoeProof,
+    sourceFoeFingerprint: sourceFoeProof ?
+      canonicalHash(sourceFoeProof) :
+      '',
+    canonicalAssetId: exactAttachedAssetId(record.data || {}, 'media'),
+    canonicalDescriptorFingerprint: descriptor ?
+      canonicalHash(descriptor) :
+      null,
+    legacyPaths: [...legacyPaths].sort(),
+  };
+  const exclusionHash = canonicalHash(core);
+  return {
+    exclusionId: `x_${exclusionHash.slice(0, 40)}`,
+    ...core,
+    exclusionHash,
+  };
+};
+
+const validCanonicalAuditExclusion = (entry) => {
+  if (!isRecord(entry)) return false;
+  const {exclusionId, exclusionHash, ...core} = entry;
+  return entry.schemaVersion === 1 &&
+    entry.reason === 'unplaced-foe-token-root' &&
+    entry.sourceKey === 'foe-tokens' &&
+    entry.kind === 'token' &&
+    asString(entry.entityId) !== '' &&
+    entry.targetPath === `grigliata_tokens/${entry.entityId}` &&
+    asString(entry.targetVersion) !== '' &&
+    Number(entry.placementReferenceCount) === 0 &&
+    /^[a-f0-9]{64}$/.test(asString(entry.placementReferenceHash)) &&
+    entry.sourceFoeProof?.scanned === true &&
+    typeof entry.sourceFoeProof?.exists === 'boolean' &&
+    /^foes\/[^/]+$/.test(asString(
+      entry.sourceFoeProof?.referencePath
+    )) &&
+    /^[a-f0-9]{64}$/.test(asString(
+      entry.sourceFoeProof?.dataFingerprint
+    )) &&
+    /^[a-f0-9]{64}$/.test(asString(entry.sourceFoeFingerprint)) &&
+    (entry.canonicalAssetId === null ||
+      /^m_[a-f0-9]{40}$/.test(asString(entry.canonicalAssetId))) &&
+    (entry.canonicalDescriptorFingerprint === null ||
+      /^[a-f0-9]{64}$/.test(asString(
+        entry.canonicalDescriptorFingerprint
+      ))) &&
+    Array.isArray(entry.legacyPaths) &&
+    entry.legacyPaths.every((value) => asString(value) === value) &&
+    /^[a-f0-9]{64}$/.test(asString(exclusionHash)) &&
+    exclusionId === `x_${exclusionHash.slice(0, 40)}` &&
+    canonicalHash(core) === exclusionHash;
+};
+
+const manifestProjectionForAudit = (data) => ({
+  schemaVersion: data?.schemaVersion,
+  policyVersion: data?.policyVersion,
+  assetId: data?.assetId,
+  generation: data?.generation,
+  state: data?.state,
+  purpose: data?.purpose,
+  audience: data?.audience,
+  ownerUid: data?.ownerUid,
+  actorUid: data?.actorUid,
+  targetKind: data?.targetKind,
+  targetId: data?.targetId,
+  previousAssetId: data?.previousAssetId ?? null,
+  requestHash: data?.requestHash,
+  plan: data?.plan,
+  generated: data?.generated,
+  attachment: isRecord(data?.attachment) ? {
+    referencePath: data.attachment.referencePath,
+    targetSlot: data.attachment.targetSlot,
+    nestedTarget: data.attachment.nestedTarget ?? null,
+    revision: data.attachment.revision,
+  } : data?.attachment,
+});
+
+const expectedCanonicalMediaFromManifest = (manifest) => ({
+  schemaVersion: 1,
+  contractVersion: mediaPolicy.policyVersion,
+  assetId: manifest.assetId,
+  kind: manifest.purpose,
+  state: 'ready',
+  generation: manifest.generated?.generation,
+  audience: manifest.audience,
+  ownerUid: manifest.ownerUid,
+  original: manifest.generated?.original,
+  variants: manifest.generated?.variants,
+  processing: {
+    authoritative: true,
+    fallbackCode: null,
+  },
+});
+
+const CANONICAL_OBJECT_DESCRIPTOR_FIELDS = Object.freeze([
+  'bytes',
+  'cacheControl',
+  'checksum',
+  'contentType',
+  'durationMs',
+  'generation',
+  'height',
+  'orientationDegrees',
+  'path',
+  'role',
+  'width',
+].sort());
+const CANONICAL_OBJECT_METADATA_FIELDS = Object.freeze([
+  'task07AssetId',
+  'task07Checksum',
+  'task07ContractVersion',
+  'task07EntityId',
+  'task07Kind',
+  'task07OwnerUid',
+  'task07Role',
+].sort());
+const VALID_ORIENTATIONS = new Set([0, 90, 180, 270]);
+
+const plannedCanonicalVariantDimensions = (source, contract) => {
+  if (!Number.isSafeInteger(source?.width) || source.width <= 0 ||
+    !Number.isSafeInteger(source?.height) || source.height <= 0) return null;
+  if (contract.fit === 'cover') {
+    return {
+      width: Math.min(source.width, contract.width),
+      height: Math.min(source.height, contract.height),
+    };
+  }
+  const scale = Math.min(
+    contract.width / source.width,
+    contract.height / source.height,
+    1
+  );
+  return {
+    width: Math.max(1, Math.round(source.width * scale)),
+    height: Math.max(1, Math.round(source.height * scale)),
+  };
+};
+
+const canonicalObjectPolicyIssues = ({descriptor, kind, role, source}) => {
+  const issues = [];
+  const contract = mediaPolicy.purposes[kind];
+  if (!contract || !isRecord(descriptor)) {
+    return ['canonical-object-policy-mismatch'];
+  }
+  if (canonicalHash(Object.keys(descriptor).sort()) !==
+    canonicalHash(CANONICAL_OBJECT_DESCRIPTOR_FIELDS) ||
+    descriptor.role !== role ||
+    !/^[1-9][0-9]*$/.test(asString(descriptor.generation)) ||
+    !Number.isSafeInteger(descriptor.bytes) || descriptor.bytes <= 0 ||
+    !/^[a-f0-9]{64}$/.test(asString(descriptor.checksum)) ||
+    descriptor.cacheControl !== mediaPolicy.privateCacheControl ||
+    !VALID_ORIENTATIONS.has(descriptor.orientationDegrees)) {
+    issues.push('canonical-object-policy-mismatch');
+  }
+  const contentType = normalizeContentType(descriptor.contentType);
+  if (role === 'original') {
+    if (!contract.contentTypes.includes(contentType) ||
+      descriptor.bytes > contract.maxBytes) {
+      issues.push('canonical-original-policy-mismatch');
+    }
+    if (contract.mediaType === 'audio') {
+      if (!Number.isSafeInteger(descriptor.width) || descriptor.width < 0 ||
+        !Number.isSafeInteger(descriptor.height) || descriptor.height < 0) {
+        issues.push('canonical-original-policy-mismatch');
+      }
+    } else if (!Number.isSafeInteger(descriptor.width) ||
+      descriptor.width <= 0 || !Number.isSafeInteger(descriptor.height) ||
+      descriptor.height <= 0 ||
+      (contract.maxWidth !== null && descriptor.width > contract.maxWidth) ||
+      (contract.maxHeight !== null && descriptor.height > contract.maxHeight) ||
+      (contract.maxPixels !== null &&
+        descriptor.width * descriptor.height > contract.maxPixels)) {
+      issues.push('canonical-original-policy-mismatch');
+    }
+    if (contract.mediaType === 'image') {
+      if (descriptor.durationMs !== null) {
+        issues.push('canonical-original-policy-mismatch');
+      }
+    } else if (!Number.isSafeInteger(descriptor.durationMs) ||
+      descriptor.durationMs <= 0 ||
+      (contract.maxDurationMs !== null &&
+        descriptor.durationMs > contract.maxDurationMs)) {
+      issues.push('canonical-original-policy-mismatch');
+    }
+  } else {
+    const variant = contract.variants?.[role];
+    const expectedDimensions = variant ?
+      plannedCanonicalVariantDimensions(source, variant) :
+      null;
+    if (!variant || contentType !== 'image/webp' ||
+      descriptor.bytes > (variant?.maxBytes ?? 0) ||
+      descriptor.durationMs !== null || descriptor.orientationDegrees !== 0 ||
+      !expectedDimensions || descriptor.width !== expectedDimensions.width ||
+      descriptor.height !== expectedDimensions.height) {
+      issues.push('canonical-variant-policy-mismatch');
+    }
+  }
+  return [...new Set(issues)];
+};
+
+const canonicalObjectIssues = ({
+  descriptor,
+  inspection,
+  assetId,
+  ownerUid,
+  entityId,
+  kind,
+  audience,
+  sourceGeneration,
+  role,
+  source,
+}) => {
+  if (!isRecord(descriptor) || !isRecord(inspection) ||
+    inspection.exists !== true) return ['canonical-object-missing'];
+  const issues = canonicalObjectPolicyIssues({
+    descriptor,
+    kind,
+    role,
+    source,
+  });
+  const expectedSuffix = role === 'original' ? 'original' : role;
+  const expectedPath = `media_assets/v1/${audience}/${ownerUid}/` +
+    `${assetId}/${sourceGeneration}/${expectedSuffix}`;
+  const metadata = isRecord(inspection.customMetadata) ?
+    inspection.customMetadata :
+    {};
+  const expectedMetadata = {
+    task07AssetId: assetId,
+    task07Checksum: asString(descriptor.checksum),
+    task07ContractVersion: String(mediaPolicy.policyVersion),
+    task07EntityId: entityId,
+    task07Kind: kind,
+    task07OwnerUid: ownerUid,
+    task07Role: role,
+  };
+  if (descriptor.path !== expectedPath || inspection.path !== expectedPath ||
+    String(descriptor.generation || '') !==
+      String(inspection.generation || '') ||
+    normalizeContentType(descriptor.contentType) !==
+      normalizeContentType(inspection.contentType) ||
+    Number(descriptor.bytes) !== Number(inspection.bytes) ||
+    asString(descriptor.cacheControl) !== mediaPolicy.privateCacheControl ||
+    asString(inspection.cacheControl) !== mediaPolicy.privateCacheControl ||
+    asString(inspection.contentDisposition) !== 'inline' ||
+    canonicalHash(Object.keys(metadata).sort()) !==
+      canonicalHash(CANONICAL_OBJECT_METADATA_FIELDS) ||
+    Object.entries(expectedMetadata).some(([key, value]) => (
+      metadata[key] !== value
+    ))) {
+    issues.push('canonical-object-contract-mismatch');
+  }
+  if (asString(inspection.sha256) !== asString(descriptor.checksum)) {
+    issues.push('canonical-object-checksum-mismatch');
+  }
+  return [...new Set(issues)];
+};
+
+const validatedStoredTask07Plan = (value) => {
+  try {
+    return loadCompiledTask07Contracts()
+      .core.asStoredTask07MediaUploadPlan(value);
+  } catch {
+    return null;
+  }
+};
+
+const storedTask07PlanMatchesRebuild = (stored, rebuilt) => (
+  isRecord(stored) && isRecord(rebuilt) &&
+  canonicalHash({...stored, commonTechnique: stored.commonTechnique === true}) ===
+    canonicalHash({...rebuilt, commonTechnique: rebuilt.commonTechnique === true})
+);
+
+const buildCanonicalMediaAudit = async (
+  records,
+  {
+    projectId = DEMO_PROJECT_ID,
+    storageBucket = `${projectId}.appspot.com`,
+    sourceKeys = SOURCE_KEYS,
+    catalogOwnerUid = '',
+    expectedCandidates = null,
+    inspectCanonicalRecord = async () => ({
+      manifest: {exists: false, version: '', data: null},
+      objects: [],
+      legacyObjects: [],
+    }),
+    readOwner = async () => null,
+    scan = {complete: true, pageSize: DEFAULT_PAGE_SIZE, maxPages: 1},
+  } = {}
+) => {
+  const entries = [];
+  const excluded = [];
+  const seenTargets = new Set();
+  const ownerCache = new Map();
+  const storageContext = {
+    expectedBucket: storageBucket,
+    allowLoopback: projectId === DEMO_PROJECT_ID,
+  };
+  for (const record of records) {
+    const kind = asString(record.kind);
+    const sourceKey = sourceKeyForRecord(record);
+    const entityId = asString(record.entityId);
+    if (!SUPPORTED_KINDS.has(kind) || !SOURCE_KEY_SET.has(sourceKey) ||
+      !sourceKeys.includes(sourceKey) || !entityId) continue;
+    const rootData = isRecord(record.data) ? record.data : {};
+    const data = isRecord(record.mediaData) ? record.mediaData : rootData;
+    const commonTechnique = commonTechniqueForRecord(record);
+    const referenceScope = referenceScopeFor(record);
+    const targetPath = asString(record.targetPath);
+    const nestedTarget = isRecord(record.nestedTarget) ? record.nestedTarget : null;
+    const targetSlot = targetSlotForKind(kind, nestedTarget);
+    const descriptorSelection = canonicalDescriptorSelection(record);
+    const descriptor = descriptorSelection.descriptor;
+    const directNestedDescriptorSelection = nestedTarget ?
+      canonicalDescriptorSelection({kind, data}) :
+      {declarations: [], descriptor: null, issues: []};
+    const mediaReferenceDeclarations = mediaReferenceDeclarationsForKind(
+      data,
+      kind,
+      storageContext
+    );
+    const mediaReferencePaths = [...new Set(mediaReferenceDeclarations
+      .map(({storagePath}) => storagePath)
+      .filter(Boolean))].sort();
+    const legacyPaths = mediaReferencePaths
+      .filter((value) => !isCanonicalTask07Path(value));
+    const videoSlot = ['technique-video', 'spell-video'].includes(kind);
+    const hasVideoDescriptor = descriptorSelection.declarations.some(
+      ({fieldPath}) => ['videoMedia', 'General.videoMedia'].includes(fieldPath)
+    );
+    const hasExplicitVideoReference = mediaReferenceDeclarations.some(
+      ({fieldPath}) => /(?:^|\.)(?:videoUrl|video_url)$/.test(fieldPath)
+    );
+    const fallbackMediaDeclarations = descriptorSelection.declarations
+      .filter(({fieldPath}) => ['media', 'General.media'].includes(fieldPath));
+    const fallbackDeclaresVideo = fallbackMediaDeclarations.some(({value}) => (
+      asString(value?.kind).endsWith('-video') ||
+      normalizeContentType(value?.contentType).startsWith('video/') ||
+      normalizeContentType(value?.original?.contentType).startsWith('video/')
+    ));
+    const hasGenericVideoReference = mediaReferenceDeclarations.some(
+      ({fieldPath}) => (
+        /(?:^|\.)(?:url|downloadUrl|imageUrl|image_url)$/.test(fieldPath)
+      )
+    ) && (!fallbackMediaDeclarations.length || fallbackDeclaresVideo);
+    const hasMedia = videoSlot ?
+      Boolean(
+        hasVideoDescriptor || hasExplicitVideoReference ||
+        hasGenericVideoReference || fallbackDeclaresVideo
+      ) :
+      Boolean(
+        descriptorSelection.declarations.length ||
+        directNestedDescriptorSelection.declarations.length ||
+        mediaReferenceDeclarations.length
+      );
+    if (!hasMedia) continue;
+    if (sourceKey === 'foe-tokens' &&
+      Number(record.placementReferenceCount) === 0) {
+      excluded.push(canonicalAuditExclusion(
+        record,
+        descriptor,
+        legacyPaths
+      ));
+      continue;
+    }
+    const targetIdentity = [
+      targetPath,
+      entityId,
+      nestedTarget?.kind || '',
+      nestedTarget?.entryId || '',
+      targetSlot,
+    ].join('\u0000');
+    if (seenTargets.has(targetIdentity)) continue;
+    seenTargets.add(targetIdentity);
+    const inspection = await inspectCanonicalRecord(record);
+    const manifest = isRecord(inspection?.manifest) ?
+      inspection.manifest :
+      {exists: false, version: '', data: null};
+    const manifestData = isRecord(manifest.data) ? manifest.data : {};
+    const assetId = descriptor ? asString(descriptor.assetId) : '';
+    const targetVersion = asString(record.targetVersion);
+    const targetRevision = expectedRevisionFromData(rootData, kind, nestedTarget);
+    const expectedTargetKind = targetKindFor(
+      kind,
+      referenceScope,
+      commonTechnique,
+      nestedTarget
+    );
+    const expectedAudience = audienceFor(
+      kind,
+      referenceScope,
+      commonTechnique,
+      nestedTarget
+    );
+    const ownerResolution = canonicalAuditOwner({
+      record,
+      sourceKey,
+      targetPath,
+      entityId,
+      catalogOwnerUid,
+      attachedOwnerUid: manifestData.ownerUid,
+    });
+    const ownerUid = ownerResolution.ownerUid;
+    if (!ownerCache.has(ownerUid)) {
+      ownerCache.set(ownerUid, ownerUid ? await readOwner(ownerUid) : null);
+    }
+    const owner = ownerCache.get(ownerUid);
+    const ownerRole = asString(owner?.role).toLowerCase();
+    const ownerVersion = asString(owner?.version);
+    const expectedTargetPath = targetPathFor(
+      kind,
+      ownerUid,
+      entityId,
+      referenceScope,
+      commonTechnique,
+      nestedTarget
+    );
+    const issues = [
+      ...descriptorSelection.issues.map((code) => issue(code)),
+      ...ownerResolution.issues.map((code) => issue(code)),
+    ];
+    if (nestedTarget) {
+      if (!descriptorSelection.declarations.length &&
+        directNestedDescriptorSelection.declarations.length) {
+        issues.push(issue('nested-canonical-descriptor-outside-registry'));
+      }
+      const nestedResolution = nestedEntryFor(rootData, nestedTarget);
+      if (!isRecord(nestedResolution?.entry) ||
+        nestedResolution?.conflict === true) {
+        issues.push(issue('canonical-nested-target-conflict'));
+      }
+      const rawBinding = rootData?.task07EmbeddedMedia?.[
+        nestedTarget.entryId
+      ];
+      if (isRecord(rawBinding) && rawBinding.targetKind !== nestedTarget.kind) {
+        issues.push(issue('canonical-nested-binding-kind-mismatch'));
+      }
+    }
+    if (mediaReferenceDeclarations.some(({storagePath}) => !storagePath)) {
+      issues.push(issue('media-reference-unclassifiable'));
+    }
+    if (!descriptor) issues.push(issue('canonical-descriptor-missing'));
+    if (!targetPath || !targetVersion) {
+      issues.push(issue('canonical-target-binding-missing'));
+    }
+    if (!expectedTargetPath || targetPath !== expectedTargetPath) {
+      issues.push(issue('canonical-target-identity-mismatch'));
+    }
+    if (descriptor && asString(descriptor.ownerUid) !== ownerUid) {
+      issues.push(issue('canonical-owner-binding-mismatch'));
+    }
+    if (ownerUid && (!owner?.exists || owner?.deletionState === 'pending')) {
+      issues.push(issue('owner-not-active'));
+    }
+    if (ownerUid && owner?.exists &&
+      !roleAuthorizes(kind, referenceScope, ownerRole, nestedTarget)) {
+      issues.push(issue('owner-role-not-authorized'));
+    }
+    if (ownerResolution.ownerResolution === 'verified-global-fallback' &&
+      ownerRole !== 'webmaster') {
+      issues.push(issue('fallback-owner-not-webmaster'));
+    }
+    if (rootData.deletionState === 'pending' ||
+      rootData.pendingDeletion === true || rootData.deleted === true) {
+      issues.push(issue('target-unavailable'));
+    }
+    if (!/^m_[a-f0-9]{40}$/.test(assetId) || targetRevision < 1) {
+      issues.push(issue('canonical-target-contract-mismatch'));
+    }
+    const plan = isRecord(manifestData.plan) ? manifestData.plan : {};
+    const validatedPlan = validatedStoredTask07Plan(plan);
+    const attachment = isRecord(manifestData.attachment) ?
+      manifestData.attachment :
+      {};
+    if (manifest.exists !== true || !asString(manifest.version)) {
+      issues.push(issue('canonical-manifest-missing'));
+    } else if (manifestData.schemaVersion !== 1 ||
+      manifestData.policyVersion !== mediaPolicy.policyVersion ||
+      manifestData.assetId !== assetId ||
+      manifestData.state !== 'attached' ||
+      manifestData.purpose !== kind ||
+      manifestData.audience !== expectedAudience ||
+      manifestData.ownerUid !== ownerUid ||
+      manifestData.targetKind !== expectedTargetKind ||
+      manifestData.targetId !== entityId ||
+      manifestData.actorUid !== plan.actorUid ||
+      manifestData.requestHash !== plan.requestHash ||
+      (manifestData.previousAssetId ?? null) !==
+        (plan.previousAssetId ?? null) ||
+      !validatedPlan || !storedTask07PlanMatchesRebuild(plan, validatedPlan) ||
+      plan.schemaVersion !== 1 ||
+      plan.contractVersion !== mediaPolicy.policyVersion ||
+      plan.policyVersion !== mediaPolicy.policyVersion ||
+      plan.assetId !== assetId ||
+      plan.kind !== kind ||
+      plan.targetKind !== expectedTargetKind ||
+      plan.ownerUid !== ownerUid ||
+      plan.ownerKey !== ownerUid ||
+      plan.entityId !== entityId ||
+      Boolean(plan.commonTechnique) !== commonTechnique ||
+      !nestedTargetBindingMatches(plan.nestedTarget, nestedTarget) ||
+      (plan.referenceScope ?? null) !== referenceScope ||
+      plan.audienceScope !== expectedAudience ||
+      attachment.referencePath !== targetPath ||
+      attachment.targetSlot !== targetSlot ||
+      !nestedTargetBindingMatches(attachment.nestedTarget, nestedTarget) ||
+      Number(attachment.revision) !== targetRevision) {
+      issues.push(issue('canonical-manifest-contract-mismatch'));
+    }
+    const generated = isRecord(manifestData.generated) ?
+      manifestData.generated :
+      {};
+    if (asString(manifestData.generation) !==
+      asString(generated.generation)) {
+      issues.push(issue('canonical-manifest-contract-mismatch'));
+    }
+    const expectedVariants = Object.keys(
+      mediaPolicy.purposes[kind]?.variants || {}
+    ).sort();
+    const actualVariants = isRecord(generated.variants) ?
+      Object.keys(generated.variants).sort() :
+      [];
+    if (!/^[1-9][0-9]*$/.test(asString(generated.generation)) ||
+      !isRecord(generated.original) ||
+      canonicalHash(actualVariants) !== canonicalHash(expectedVariants) ||
+      !descriptor || canonicalHash(descriptor) !== canonicalHash(
+        expectedCanonicalMediaFromManifest(manifestData)
+      )) {
+      issues.push(issue('canonical-generated-contract-mismatch'));
+    }
+    const inspectedObjects = new Map(
+      (Array.isArray(inspection?.objects) ? inspection.objects : [])
+        .map((object) => [asString(object?.path), object])
+    );
+    const generatedObjects = [
+      ['original', generated.original],
+      ...expectedVariants.map((variant) => [
+        variant,
+        generated.variants?.[variant],
+      ]),
+    ];
+    const objectProofs = generatedObjects.map(([role, object]) => {
+      const objectInspection = inspectedObjects.get(asString(object?.path));
+      const objectIssues = canonicalObjectIssues({
+        descriptor: object,
+        inspection: objectInspection,
+        assetId,
+        ownerUid,
+        entityId,
+        kind,
+        audience: expectedAudience,
+        sourceGeneration: asString(generated.generation),
+        role,
+        source: generated.original,
+      });
+      objectIssues.forEach((code) => issues.push(issue(code)));
+      return {
+        role,
+        path: asString(object?.path),
+        descriptorFingerprint: canonicalHash(object ?? null),
+        objectFingerprint: canonicalHash(objectInspection ?? null),
+        validationErrors: objectIssues,
+        verified: objectIssues.length === 0,
+      };
+    });
+    const inspectedLegacy = new Map(
+      (Array.isArray(inspection?.legacyObjects) ?
+        inspection.legacyObjects : [])
+        .map((object) => [asString(object?.path), object])
+    );
+    const legacySources = legacyPaths.sort().map((legacyPath) => {
+      const normalized = normalizeSourceObject(
+        legacyPath,
+        inspectedLegacy.get(legacyPath)
+      );
+      if (!normalized.exists ||
+        !Number.isSafeInteger(normalized.bytes) || normalized.bytes <= 0 ||
+        !/^[1-9][0-9]*$/.test(normalized.generation)) {
+        issues.push(issue('legacy-source-object-missing'));
+      }
+      return {
+        ...normalized,
+        fingerprint: sourceObjectFingerprint(normalized),
+      };
+    });
+    const sourceFoeProof = isRecord(record.sourceFoeProof) ?
+      record.sourceFoeProof :
+      null;
+    if (sourceKey === 'foe-tokens' && (
+      !Number.isSafeInteger(Number(record.placementReferenceCount)) ||
+      Number(record.placementReferenceCount) < 1 ||
+      !/^[a-f0-9]{64}$/.test(asString(
+        record.placementReferenceHash
+      )) || sourceFoeProof?.scanned !== true ||
+      !/^foes\/[^/]+$/.test(asString(sourceFoeProof?.referencePath)) ||
+      !/^[a-f0-9]{64}$/.test(asString(
+        sourceFoeProof?.dataFingerprint
+      )))) {
+      issues.push(issue('foe-token-relationship-proof-missing'));
+    }
+    const manifestProjection = manifestProjectionForAudit(manifestData);
+    const core = {
+      sourceKey,
+      kind,
+      commonTechnique,
+      nestedTarget,
+      referenceScope,
+      entityId,
+      ownerUid,
+      ownerResolution: ownerResolution.ownerResolution,
+      ownerRole,
+      ownerVersion,
+      targetPath,
+      targetVersion,
+      targetSlot,
+      targetRevision,
+      targetFingerprint: targetMediaFingerprint(rootData, kind, record),
+      assetId,
+      manifestPath: assetId ? `media_assets/${assetId}` : '',
+      manifestVersion: asString(manifest.version),
+      manifestFingerprint: canonicalHash(manifestProjection),
+      descriptorFingerprint: canonicalHash(descriptor ?? null),
+      objectProofs,
+      legacySources,
+      placementReferenceCount: sourceKey === 'foe-tokens' ?
+        Number(record.placementReferenceCount) :
+        null,
+      placementReferenceHash: sourceKey === 'foe-tokens' ?
+        asString(record.placementReferenceHash) :
+        null,
+      sourceFoeFingerprint: sourceKey === 'foe-tokens' ?
+        canonicalHash(sourceFoeProof) :
+        null,
+    };
+    const auditHash = canonicalHash(core);
+    entries.push({
+      auditId: `a_${auditHash.slice(0, 40)}`,
+      ...core,
+      auditHash,
+      status: issues.length ? 'blocked' : 'verified',
+      issues,
+    });
+  }
+  entries.sort((left, right) => (
+    left.targetPath.localeCompare(right.targetPath) ||
+    left.entityId.localeCompare(right.entityId) ||
+    left.targetSlot.localeCompare(right.targetSlot)
+  ));
+  excluded.sort((left, right) => (
+    left.targetPath.localeCompare(right.targetPath) ||
+    left.entityId.localeCompare(right.entityId)
+  ));
+  return finalizeReport({
+    operation: 'canonical-audit',
+    projectId,
+    storageBucket,
+    sourceKeys,
+    catalogOwnerUid,
+    expectedCandidates,
+    complete: scan.complete,
+    scan,
+    entries,
+    excluded,
+    records: records.length,
+  });
 };
 
 const buildLegacyMediaBackfillPlan = async (
@@ -682,6 +1974,11 @@ const buildLegacyMediaBackfillPlan = async (
   const excluded = [];
   const seen = new Set();
   const ownerCache = new Map();
+  const invalidMediaReferences = new Set();
+  const storageContext = {
+    expectedBucket: storageBucket,
+    allowLoopback: projectId === DEMO_PROJECT_ID,
+  };
   for (const record of records) {
     const kind = asString(record.kind);
     const sourceKey = sourceKeyForRecord(record);
@@ -689,10 +1986,34 @@ const buildLegacyMediaBackfillPlan = async (
     const entityId = asString(record.entityId);
     if (!SUPPORTED_KINDS.has(kind) || !SOURCE_KEY_SET.has(sourceKey) ||
       !sourceKeys.includes(sourceKey) || !entityId) continue;
-    const data = isRecord(record.data) ? record.data : {};
+    const rootData = isRecord(record.data) ? record.data : {};
+    const data = isRecord(record.mediaData) ? record.mediaData : rootData;
+    const nestedTarget = isRecord(record.nestedTarget) ? record.nestedTarget : null;
     const referenceScope = referenceScopeFor(record);
-    const candidatePaths = legacyPathsForKind(data, kind)
+    const mediaReferenceDeclarations = mediaReferenceDeclarationsForKind(
+      data,
+      kind,
+      storageContext
+    );
+    mediaReferenceDeclarations
+      .filter(({storagePath}) => !storagePath)
+      .forEach(({fieldPath, value}) => invalidMediaReferences.add(
+        canonicalHash({sourceKey, entityId, kind, fieldPath, value})
+      ));
+    const candidatePaths = legacyPathsForKind(data, kind, storageContext)
       .filter((sourcePath) => !isCanonicalTask07Path(sourcePath));
+    const canonicalState = canonicalBackfillTargetState(record);
+    if (candidatePaths.length && canonicalState.valid) {
+      excluded.push(canonicalBackfillExclusion({
+        record,
+        sourceKey,
+        kind,
+        data,
+        legacyPaths: candidatePaths,
+        descriptor: canonicalState.descriptor,
+      }));
+      continue;
+    }
     for (const sourcePath of candidatePaths) {
       const explicitOwnerUid = asString(record.ownerUid);
       const inferredOwnerUid = commonTechnique ||
@@ -711,10 +2032,12 @@ const buildLegacyMediaBackfillPlan = async (
           ownerUid,
           entityId,
           referenceScope,
-          commonTechnique
+          commonTechnique,
+          nestedTarget
         );
       const dedupeKey = [
-        kind, referenceScope, targetPath, entityId, sourcePath,
+        kind, referenceScope, targetPath, entityId,
+        nestedTarget?.entryId || '', nestedTarget?.slot || '', sourcePath,
       ].join('\u0000');
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
@@ -740,7 +2063,7 @@ const buildLegacyMediaBackfillPlan = async (
           ownerUid: asString(record.ownerUid),
           targetPath: asString(record.targetPath),
           targetVersion: asString(record.targetVersion),
-          targetFingerprint: targetMediaFingerprint(data, kind),
+          targetFingerprint: targetMediaFingerprint(rootData, kind, record),
           placementReferenceCount,
           placementReferenceHash,
           sourceFoeProof,
@@ -767,6 +2090,11 @@ const buildLegacyMediaBackfillPlan = async (
       const owner = ownerCache.get(ownerUid);
       const role = asString(owner?.role).toLowerCase();
       const issues = [];
+      if (canonicalState.invalid) {
+        issues.push(issue(canonicalState.directNested ?
+          'nested-canonical-descriptor-outside-registry' :
+          'existing-canonical-descriptor-invalid'));
+      }
       const contract = mediaPolicy.purposes[kind];
       if (sourceKey === 'foe-tokens' && (
         !Number.isSafeInteger(placementReferenceCount) ||
@@ -792,7 +2120,7 @@ const buildLegacyMediaBackfillPlan = async (
         issues.push(issue('owner-not-active'));
       }
       if (ownerUid && owner?.exists &&
-        !roleAuthorizes(kind, referenceScope, role)) {
+        !roleAuthorizes(kind, referenceScope, role, nestedTarget)) {
         issues.push(issue('owner-role-not-authorized'));
       }
       if (ownerResolution === 'verified-global-fallback' &&
@@ -800,9 +2128,9 @@ const buildLegacyMediaBackfillPlan = async (
         issues.push(issue('fallback-owner-not-webmaster'));
       }
       if (!targetPath) issues.push(issue('unsupported-target'));
-      if (data.deletionState === 'pending' ||
-        data.pendingDeletion === true ||
-        data.deleted === true) {
+      if (rootData.deletionState === 'pending' ||
+        rootData.pendingDeletion === true ||
+        rootData.deleted === true) {
         issues.push(issue('target-unavailable'));
       }
       if (['map', 'map-video'].includes(kind)) {
@@ -838,6 +2166,7 @@ const buildLegacyMediaBackfillPlan = async (
           projectId,
           kind,
           commonTechnique,
+          nestedTarget,
           referenceScope,
           ownerUid,
           targetPath,
@@ -855,15 +2184,16 @@ const buildLegacyMediaBackfillPlan = async (
         policyHash: POLICY_HASH,
         kind,
         commonTechnique,
+        nestedTarget,
         referenceScope,
         ownerUid,
         entityId,
         targetPath,
         targetVersion: asString(record.targetVersion),
-        targetFingerprint: targetMediaFingerprint(data, kind),
-        targetSlot: targetSlotForKind(kind),
-        expectedRevision: expectedRevisionFromData(data, kind),
-        previousAssetId: previousAssetIdFromData(data, kind),
+        targetFingerprint: targetMediaFingerprint(rootData, kind, record),
+        targetSlot: targetSlotForKind(kind, nestedTarget),
+        expectedRevision: expectedRevisionFromData(rootData, kind, nestedTarget),
+        previousAssetId: previousAssetIdFromData(rootData, kind, nestedTarget),
         sourceFingerprint,
         sourceKey,
         ownerResolution,
@@ -881,16 +2211,17 @@ const buildLegacyMediaBackfillPlan = async (
         kind,
         sourceKey,
         commonTechnique,
+        nestedTarget,
         referenceScope,
         ownerUid,
         ownerResolution,
         entityId,
         targetPath,
         targetVersion: asString(record.targetVersion),
-        targetFingerprint: targetMediaFingerprint(data, kind),
-        targetSlot: targetSlotForKind(kind),
-        expectedRevision: expectedRevisionFromData(data, kind),
-        previousAssetId: previousAssetIdFromData(data, kind),
+        targetFingerprint: targetMediaFingerprint(rootData, kind, record),
+        targetSlot: targetSlotForKind(kind, nestedTarget),
+        expectedRevision: expectedRevisionFromData(rootData, kind, nestedTarget),
+        previousAssetId: previousAssetIdFromData(rootData, kind, nestedTarget),
         sourcePath,
         sourceContentType: source.contentType,
         sourceBytes: source.bytes,
@@ -920,6 +2251,7 @@ const buildLegacyMediaBackfillPlan = async (
     const targetSlotKey = [
       entry.targetPath,
       entry.entityId,
+      entry.nestedTarget?.entryId || '',
       entry.targetSlot,
     ].join('\u0000');
     if (!pathsByTarget.has(targetSlotKey)) {
@@ -931,6 +2263,7 @@ const buildLegacyMediaBackfillPlan = async (
     const targetSlotKey = [
       entry.targetPath,
       entry.entityId,
+      entry.nestedTarget?.entryId || '',
       entry.targetSlot,
     ].join('\u0000');
     if (pathsByTarget.get(targetSlotKey).size <= 1) return;
@@ -939,7 +2272,7 @@ const buildLegacyMediaBackfillPlan = async (
   });
   excluded.sort((left, right) => (
     left.targetPath.localeCompare(right.targetPath) ||
-    left.sourcePath.localeCompare(right.sourcePath) ||
+    asString(left.sourcePath).localeCompare(asString(right.sourcePath)) ||
     left.exclusionId.localeCompare(right.exclusionId)
   ));
   entries.sort((left, right) => (
@@ -947,6 +2280,11 @@ const buildLegacyMediaBackfillPlan = async (
     left.sourcePath.localeCompare(right.sourcePath) ||
     left.receiptId.localeCompare(right.receiptId)
   ));
+  const effectiveScan = {
+    ...scan,
+    complete: scan.complete === true && invalidMediaReferences.size === 0,
+    invalidMediaReferences: invalidMediaReferences.size,
+  };
   return finalizeReport({
     operation: 'backfill',
     projectId,
@@ -954,8 +2292,8 @@ const buildLegacyMediaBackfillPlan = async (
     sourceKeys,
     catalogOwnerUid,
     expectedCandidates,
-    complete: scan.complete,
-    scan,
+    complete: effectiveScan.complete,
+    scan: effectiveScan,
     entries,
     excluded,
     records: records.length,
@@ -977,8 +2315,12 @@ const loadPaged = async ({
     pagesBySource[sourceKey] = 0;
     while (!exhausted && pagesBySource[sourceKey] < maxPages) {
       const page = await readPage(sourceKey, cursor, pageSize);
+      const rootRecordCount = Number(page?.rootRecordCount ?? page?.records?.length);
+      const expandedLimit = Math.max(1, rootRecordCount) *
+        MAX_EXPANDED_MEDIA_RECORDS_PER_ROOT;
       if (!isRecord(page) || !Array.isArray(page.records) ||
-        page.records.length > pageSize) {
+        !Number.isSafeInteger(rootRecordCount) || rootRecordCount < 0 ||
+        rootRecordCount > pageSize || page.records.length > expandedLimit) {
         throw new Error(`Invalid bounded page returned for ${sourceKey}.`);
       }
       records.push(...page.records);
@@ -1030,16 +2372,71 @@ const buildReceiptOperationPlan = async ({
   expectedCandidates = null,
   pageSize = DEFAULT_PAGE_SIZE,
   maxPages = DEFAULT_MAX_PAGES,
+  approvedBackfillReport = null,
 }) => {
   if (!['verify', 'rollback'].includes(operation)) {
     throw new TypeError('Receipt plans support only verify or rollback.');
   }
-  const loaded = await loadPaged({
-    sourceKeys: ['receipts'],
-    readPage: backend.readReceiptPage,
-    pageSize,
-    maxPages,
-  });
+  let scope = null;
+  let approvedEntriesById = null;
+  let loaded;
+  if (approvedBackfillReport) {
+    assertApprovedBackfillScope(approvedBackfillReport, {
+      projectId,
+      storageBucket,
+      sourceKeys,
+      catalogOwnerUid,
+      expectedCandidates,
+    });
+    const approvedEntries = approvedBackfillReport.entries;
+    if (approvedEntries.length > MAX_PAGE_SIZE * MAX_MAX_PAGES ||
+      typeof backend.readReceiptsByIds !== 'function') {
+      throw new Error('Approved receipt verification scope is not bounded.');
+    }
+    const receiptIds = approvedEntries.map(({receiptId}) => asString(receiptId));
+    approvedEntriesById = new Map(
+      approvedEntries.map((entry) => [asString(entry.receiptId), entry])
+    );
+    const found = await backend.readReceiptsByIds(receiptIds);
+    const foundById = new Map(found.map((receipt) => [
+      asString(receipt.receiptId || receipt.id),
+      receipt,
+    ]));
+    loaded = {
+      records: receiptIds.map((receiptId) => (
+        foundById.get(receiptId) || {
+          ...approvedEntriesById.get(receiptId),
+          id: receiptId,
+          receiptId,
+          __receiptMissing: true,
+        }
+      )),
+      scan: {
+        complete: true,
+        pageSize,
+        maxPages,
+        concurrency: MIGRATION_CONCURRENCY,
+        pagesBySource: {
+          approvedBackfillReceipts: Math.ceil(receiptIds.length / pageSize),
+        },
+        truncatedSources: [],
+      },
+    };
+    scope = {
+      schemaVersion: 1,
+      type: 'approved-backfill-plan',
+      planFingerprint: approvedBackfillReport.planFingerprint,
+      receiptIdsHash: canonicalHash(receiptIds),
+      expectedReceipts: receiptIds.length,
+    };
+  } else {
+    loaded = await loadPaged({
+      sourceKeys: ['receipts'],
+      readPage: backend.readReceiptPage,
+      pageSize,
+      maxPages,
+    });
+  }
   const entries = [];
   const receipts = exactSourceKeys(sourceKeys) ?
     loaded.records :
@@ -1049,8 +2446,23 @@ const buildReceiptOperationPlan = async ({
   for (const receipt of receipts) {
     const receiptId = asString(receipt.receiptId || receipt.id);
     const sourceKey = sourceKeyForReceipt(receipt);
-    const inspection = await backend.inspectReceipt(receipt);
+    const inspection = receipt.__receiptMissing === true ? {} :
+      await backend.inspectReceipt(receipt);
     const issues = [];
+    const approvedEntry = approvedEntriesById?.get(receiptId) || null;
+    if (receipt.__receiptMissing === true) {
+      issues.push(issue('receipt-missing'));
+    }
+    if (scope && receipt.__receiptMissing !== true && (
+      receipt.approvedPlanFingerprint !== scope.planFingerprint ||
+      !approvedEntry ||
+      receipt.subjectHash !== approvedEntry.subjectHash ||
+      receipt.assetId !== approvedEntry.assetId ||
+      receipt.targetPath !== approvedEntry.targetPath ||
+      receipt.targetSlot !== approvedEntry.targetSlot
+    )) {
+      issues.push(issue('receipt-approved-plan-mismatch'));
+    }
     if (receipt.schemaVersion !== REPORT_SCHEMA_VERSION ||
       receipt.planVersion !== PLAN_VERSION ||
       receipt.policyVersion !== mediaPolicy.policyVersion ||
@@ -1090,6 +2502,7 @@ const buildReceiptOperationPlan = async ({
       inspection.generatedObjectsPresent !== true ||
       inspection.legacySourceUnchanged !== true ||
       inspection.legacyGeneralImageUrlUnchanged !== true ||
+      (receipt.nestedTarget && inspection.nestedEntryPresent !== true) ||
       (sourceKey === 'foe-tokens' && (
         inspection.placementReferenceCount !==
           receipt.placementReferenceCount ||
@@ -1109,6 +2522,7 @@ const buildReceiptOperationPlan = async ({
       !['cleanup-pending', 'deleted'].includes(inspection.manifestState) ||
       inspection.legacySourceUnchanged !== true ||
       inspection.legacyGeneralImageUrlUnchanged !== true ||
+      (receipt.nestedTarget && inspection.nestedEntryPresent !== true) ||
       (sourceKey === 'foe-tokens' && (
         inspection.placementReferenceCount !==
           receipt.placementReferenceCount ||
@@ -1133,6 +2547,8 @@ const buildReceiptOperationPlan = async ({
       kind: asString(receipt.kind),
       entityId: asString(receipt.entityId),
       commonTechnique: receipt.commonTechnique === true,
+      nestedTarget: isRecord(receipt.nestedTarget) ?
+        receipt.nestedTarget : null,
       assetId: asString(receipt.assetId),
       previousAssetId: asString(receipt.previousAssetId) || null,
       targetPath: asString(receipt.targetPath),
@@ -1145,6 +2561,9 @@ const buildReceiptOperationPlan = async ({
         legacySourceUnchanged: inspection.legacySourceUnchanged === true,
         legacyGeneralImageUrlUnchanged:
           inspection.legacyGeneralImageUrlUnchanged === true,
+        ...(receipt.nestedTarget ? {
+          nestedEntryPresent: inspection.nestedEntryPresent === true,
+        } : {}),
         itemOriginalGenerated: inspection.itemOriginalGenerated === true,
         itemCardGenerated: inspection.itemCardGenerated === true,
         itemCard2xGenerated: inspection.itemCard2xGenerated === true,
@@ -1172,6 +2591,7 @@ const buildReceiptOperationPlan = async ({
     scan: loaded.scan,
     entries,
     records: receipts.length,
+    scope,
   });
 };
 
@@ -1185,6 +2605,7 @@ const buildMigrationPlan = async ({
   expectedCandidates = null,
   pageSize,
   maxPages,
+  approvedBackfillReport = null,
 }) => {
   if (operation === 'backfill') {
     const loaded = await loadLegacyMediaRecords(backend, {
@@ -1203,6 +2624,23 @@ const buildMigrationPlan = async ({
       readOwner: backend.readOwner,
     });
   }
+  if (operation === 'canonical-audit') {
+    const loaded = await loadLegacyMediaRecords(backend, {
+      pageSize,
+      maxPages,
+      sourceKeys,
+    });
+    return buildCanonicalMediaAudit(loaded.records, {
+      projectId,
+      storageBucket,
+      sourceKeys,
+      catalogOwnerUid,
+      expectedCandidates,
+      scan: loaded.scan,
+      inspectCanonicalRecord: backend.inspectCanonicalRecord,
+      readOwner: backend.readOwner,
+    });
+  }
   return buildReceiptOperationPlan({
     backend,
     operation,
@@ -1213,6 +2651,7 @@ const buildMigrationPlan = async ({
     expectedCandidates,
     pageSize,
     maxPages,
+    approvedBackfillReport,
   });
 };
 
@@ -1248,6 +2687,7 @@ const parseOptions = (argv = []) => {
     approveFingerprint: '',
     reportPath: '',
     checkpointPath: '',
+    approvedBackfillReportPath: '',
     resume: false,
     pageSize: DEFAULT_PAGE_SIZE,
     maxPages: DEFAULT_MAX_PAGES,
@@ -1278,6 +2718,7 @@ const parseOptions = (argv = []) => {
       '--approve-fingerprint',
       '--report',
       '--checkpoint',
+      '--approved-backfill-report',
       '--page-size',
       '--max-pages',
       '--poll-timeout-ms',
@@ -1313,6 +2754,9 @@ const parseOptions = (argv = []) => {
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--checkpoint') {
         options.checkpointPath = path.resolve(value);
+      }
+      if (argument === '--approved-backfill-report') {
+        options.approvedBackfillReportPath = path.resolve(value);
       }
       if (argument === '--page-size') {
         options.pageSize = parsePositiveInteger(
@@ -1363,8 +2807,11 @@ const parseOptions = (argv = []) => {
   options.sourceKeys = options.sourcesExplicit ?
     SOURCE_KEYS.filter((sourceKey) => requestedSources.has(sourceKey)) :
     [...SOURCE_KEYS];
-  if (options.operation === 'verify' && options.execute) {
-    throw new TypeError('Verification is always read-only.');
+  if (['verify', 'canonical-audit'].includes(options.operation) &&
+    options.execute) {
+    throw new TypeError(
+      `${options.operation} is always read-only.`
+    );
   }
   if (options.resume && !options.execute) {
     throw new TypeError('--resume requires --execute or --apply.');
@@ -1378,6 +2825,18 @@ const parseOptions = (argv = []) => {
   if (options.execute && options.expectedCandidates === null) {
     throw new TypeError(
       'Execution requires the reviewed --expected-candidates count.'
+    );
+  }
+  if (options.approvedBackfillReportPath && options.operation !== 'verify') {
+    throw new TypeError(
+      '--approved-backfill-report is supported only with --operation verify.'
+    );
+  }
+  if (options.operation === 'verify' &&
+    options.projectId === PRODUCTION_PROJECT_ID &&
+    !options.approvedBackfillReportPath) {
+    throw new TypeError(
+      'Live receipt verification requires --approved-backfill-report.'
     );
   }
   options.reportPath ||= defaultResultPath(options.operation, 'plan');
@@ -1541,6 +3000,33 @@ const validFoeTokenExclusion = (entry) => {
     canonicalHash(core) === exclusionHash;
 };
 
+const validAlreadyCanonicalExclusion = (entry) => {
+  if (!isRecord(entry)) return false;
+  const {exclusionId, exclusionHash, ...core} = entry;
+  return entry.schemaVersion === 1 &&
+    entry.reason === 'already-canonical' &&
+    SOURCE_KEY_SET.has(entry.sourceKey) &&
+    SUPPORTED_KINDS.has(entry.kind) &&
+    asString(entry.entityId) !== '' &&
+    asString(entry.targetPath) !== '' &&
+    asString(entry.targetVersion) !== '' &&
+    ['media', 'videoMedia'].includes(entry.targetSlot) &&
+    /^m_[a-f0-9]{40}$/.test(asString(entry.assetId)) &&
+    /^[a-f0-9]{64}$/.test(asString(entry.descriptorFingerprint)) &&
+    /^[a-f0-9]{64}$/.test(asString(entry.targetFingerprint)) &&
+    Array.isArray(entry.legacyPaths) && entry.legacyPaths.length > 0 &&
+    entry.legacyPaths.every((value) => (
+      asString(value) && !isCanonicalTask07Path(value)
+    )) &&
+    /^[a-f0-9]{64}$/.test(asString(exclusionHash)) &&
+    exclusionId === `x_${exclusionHash.slice(0, 40)}` &&
+    canonicalHash(core) === exclusionHash;
+};
+
+const validBackfillExclusion = (entry) => (
+  validFoeTokenExclusion(entry) || validAlreadyCanonicalExclusion(entry)
+);
+
 const assertApprovedReport = (report, options) => {
   if (!isRecord(report) ||
     report.schemaVersion !== REPORT_SCHEMA_VERSION ||
@@ -1574,7 +3060,7 @@ const assertApprovedReport = (report, options) => {
     report.counts?.excluded !== report.excluded.length ||
     report.counts?.discovered !==
       report.entries.length + report.excluded.length ||
-    !report.excluded.every(validFoeTokenExclusion) ||
+    !report.excluded.every(validBackfillExclusion) ||
     report.planFingerprint !== computePlanFingerprint(report)) {
     throw new Error(
       'Execution requires the exact completed, error-free Task 07 plan.'
@@ -1592,7 +3078,9 @@ const assertApprovedReport = (report, options) => {
         entry.ownerUid !== options.catalogOwnerUid)
     )) ||
     report.excluded.some((entry) => (
-      entry.sourceKey !== 'foe-tokens'
+      entry.reason === 'unplaced-foe-token-root' ?
+        entry.sourceKey !== 'foe-tokens' :
+        entry.reason !== 'already-canonical'
     ))
   )) {
     throw new Error('The live Task 07 plan escaped its all-source binding.');
@@ -1603,6 +3091,25 @@ const assertApprovedReport = (report, options) => {
     );
   }
   return report;
+};
+
+const assertApprovedBackfillScope = (report, options) => {
+  if (!isRecord(report) || report.operation !== 'backfill' ||
+    !Number.isSafeInteger(report.expectedCandidates) ||
+    report.expectedCandidates < 0 ||
+    report.expectedCandidates !== options.expectedCandidates) {
+    throw new Error(
+      'Receipt verification requires the exact count-bound backfill plan.'
+    );
+  }
+  return assertApprovedReport(report, {
+    operation: 'backfill',
+    projectId: options.projectId,
+    sourceKeys: options.sourceKeys,
+    catalogOwnerUid: options.catalogOwnerUid,
+    expectedCandidates: options.expectedCandidates,
+    approveFingerprint: report.planFingerprint,
+  });
 };
 
 const assertCheckpoint = (checkpoint, report, options) => {
@@ -1766,15 +3273,7 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       entityId: snapshot.id,
       targetPath: snapshot.ref.path,
       targetVersion: snapshotVersion(snapshot),
-      data: {
-        imagePath: data.imagePath,
-        imageUrl: data.imageUrl,
-        media: data.media,
-        task07MediaRevision: data.task07MediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      },
+      data,
     };
   }
   if (sourceKey === 'catalog-items') {
@@ -1835,21 +3334,7 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       entityId: snapshot.id,
       targetPath: snapshot.ref.path,
       targetVersion: snapshotVersion(snapshot),
-      data: {
-        ownerUid: data.ownerUid,
-        tokenType: data.tokenType,
-        foeSourceId: data.foeSourceId,
-        customTokenRole: data.customTokenRole,
-        customTemplateId: data.customTemplateId,
-        image_url: data.image_url,
-        imagePath: data.imagePath,
-        imageUrl: data.imageUrl,
-        media: data.media,
-        task07MediaRevision: data.task07MediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      },
+      data,
     };
   }
   if (['technique-art', 'technique-video'].includes(sourceKey)) {
@@ -1860,24 +3345,7 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       entityId: snapshot.id,
       targetPath: snapshot.ref.path,
       targetVersion: snapshotVersion(snapshot),
-      data: video ? {
-        video_url: data.video_url,
-        videoUrl: data.videoUrl,
-        videoMedia: data.videoMedia,
-        task07VideoMediaRevision: data.task07VideoMediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      } : {
-        image_url: data.image_url,
-        imagePath: data.imagePath,
-        imageUrl: data.imageUrl,
-        media: data.media,
-        task07MediaRevision: data.task07MediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      },
+      data,
     };
   }
   if (['spell-art', 'spell-video'].includes(sourceKey)) {
@@ -1888,30 +3356,14 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       entityId: snapshot.id,
       targetPath: snapshot.ref.path,
       targetVersion: snapshotVersion(snapshot),
-      data: video ? {
-        video_url: data.video_url,
-        videoUrl: data.videoUrl,
-        videoMedia: data.videoMedia,
-        task07VideoMediaRevision: data.task07VideoMediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      } : {
-        image_url: data.image_url,
-        imagePath: data.imagePath,
-        imageUrl: data.imageUrl,
-        media: data.media,
-        task07MediaRevision: data.task07MediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      },
+      data,
     };
   }
   if (sourceKey === 'backgrounds') {
     return {
       kind: data.assetType === 'video' ||
-        normalizeContentType(data.contentType).startsWith('video/') ?
+        normalizeContentType(data.contentType).startsWith('video/') ||
+        declaresRendererVideoMedia(data) ?
         'map-video' :
         'map',
       ownerUid: asString(data.ownerUid) ||
@@ -1932,18 +3384,7 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       entityId: snapshot.id,
       targetPath: snapshot.ref.path,
       targetVersion: snapshotVersion(snapshot),
-      data: {
-        ownerUid: data.ownerUid,
-        createdBy: data.createdBy,
-        updatedBy: data.updatedBy,
-        audioPath: data.audioPath,
-        audioUrl: data.audioUrl,
-        media: data.media,
-        task07MediaRevision: data.task07MediaRevision,
-        deletionState: data.deletionState,
-        pendingDeletion: data.pendingDeletion,
-        deleted: data.deleted,
-      },
+      data,
     };
   }
   throw new Error(`Unknown legacy media source: ${sourceKey}`);
@@ -1984,6 +3425,80 @@ const captureCompatibilityFields = (data, kind) => Object.fromEntries(
       {exists: false},
   ])
 );
+
+const restoreCompatibilityFieldsIntoData = (current, beforeFields) => {
+  const restored = {...(isRecord(current) ? current : {})};
+  Object.entries(beforeFields || {}).forEach(([field, descriptor]) => {
+    if (!TARGET_COMPATIBILITY_FIELDS.includes(field)) {
+      throw new Error('Rollback receipt contains an unsupported target field.');
+    }
+    if (descriptor?.exists === true) {
+      restored[field] = descriptor.value;
+    } else {
+      delete restored[field];
+    }
+  });
+  return restored;
+};
+
+const backfillTargetFenceIssue = ({
+  targetExists,
+  targetAvailable,
+  targetFingerprintMatches,
+  legacyReferenceMatches,
+  legacyGeneralImageUrlMatches,
+  previousAssetMatches,
+}) => {
+  if (!targetExists || !targetFingerprintMatches) {
+    return 'Media target changed after planning. Re-plan.';
+  }
+  if (!targetAvailable) return 'Media target is no longer available.';
+  if (!legacyReferenceMatches) {
+    return 'Legacy media reference changed after planning.';
+  }
+  if (!legacyGeneralImageUrlMatches) {
+    return 'Legacy General.image_url changed after planning.';
+  }
+  if (!previousAssetMatches) {
+    return 'Previous media reference changed after planning.';
+  }
+  return null;
+};
+
+const buildNestedRollbackRegistry = ({
+  current,
+  nestedTarget,
+  beforeFields,
+  revision,
+  timestamp,
+}) => {
+  if (!isRecord(nestedTarget) ||
+    !['catalog-item-spell', 'foe-technique', 'foe-spell']
+      .includes(nestedTarget.kind) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(
+      asString(nestedTarget.entryId)
+    ) ||
+    !['media', 'videoMedia'].includes(nestedTarget.slot)) {
+    throw new Error('Rollback receipt contains an invalid nested target.');
+  }
+  const root = isRecord(current) ? current : {};
+  const registry = isRecord(root.task07EmbeddedMedia) ?
+    root.task07EmbeddedMedia : {};
+  const binding = isRecord(registry[nestedTarget.entryId]) ?
+    registry[nestedTarget.entryId] : {};
+  const restored = restoreCompatibilityFieldsIntoData(binding, beforeFields);
+  const revisionField = revisionFieldForSlot(nestedTarget.slot);
+  const updatedAtField = updatedAtFieldForSlot(nestedTarget.slot);
+  return {
+    ...registry,
+    [nestedTarget.entryId]: {
+      ...restored,
+      targetKind: nestedTarget.kind,
+      [revisionField]: revision,
+      [updatedAtField]: timestamp,
+    },
+  };
+};
 
 const approvedSourceFoeBackfillMatches = ({
   currentData,
@@ -2046,6 +3561,145 @@ const approvedSourceFoeBackfillMatches = ({
   return canonicalHash(reconstructed) === expectedProof.dataFingerprint;
 };
 
+const deterministicNestedEntryId = ({
+  sourceKey,
+  entityId,
+  targetKind,
+  locator,
+  entry,
+}) => {
+  const existing = asString(entry?.task07MediaEntryId);
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(existing)) return existing;
+  return `n_${canonicalHash({
+    sourceKey,
+    entityId,
+    targetKind,
+    locator: String(locator),
+  }).slice(0, 40)}`;
+};
+
+const entryDeclaresMediaForSlot = (entry, kind, binding = {}) => {
+  if (!isRecord(entry)) return false;
+  if (kind === 'spell-video') {
+    const descriptors = [
+      entry.videoMedia,
+      entry.General?.videoMedia,
+      binding.videoMedia,
+    ].filter((value) => value !== undefined && value !== null && value !== '');
+    const explicitUrls = mediaReferenceDeclarationsForKind(
+      rendererVideoLegacyProjection(entry),
+      kind
+    ).length > 0;
+    const fallback = [entry.media, entry.General?.media, binding.media]
+      .filter(isRecord)
+      .some((value) => (
+        asString(value.kind).endsWith('-video') ||
+        normalizeContentType(value.contentType).startsWith('video/') ||
+        normalizeContentType(value.original?.contentType).startsWith('video/')
+      ));
+    return descriptors.length > 0 || explicitUrls || fallback;
+  }
+  return mediaReferenceDeclarationsForKind(entry, kind).length > 0 ||
+    canonicalDescriptorSelection({kind, data: entry}).declarations.length > 0 ||
+    canonicalDescriptorSelection({kind, data: binding}).declarations.length > 0;
+};
+
+const nestedMediaRecordsForRecord = (record) => {
+  if (!isRecord(record) || !isRecord(record.data)) return [];
+  const records = [];
+  if (record.sourceKey === 'catalog-items' ||
+    (record.kind === 'item' && record.referenceScope === 'global-catalog')) {
+    const spells = isRecord(record.data.General?.spells) ?
+      record.data.General.spells : {};
+    Object.entries(spells).forEach(([entryKey, entry]) => {
+      if (!isRecord(entry)) return;
+      const entryId = deterministicNestedEntryId({
+        sourceKey: 'catalog-items',
+        entityId: record.entityId,
+        targetKind: 'catalog-item-spell',
+        locator: entryKey,
+        entry,
+      });
+      const binding = rawEmbeddedBindingFor(record.data, {
+        entryId,
+        kind: 'catalog-item-spell',
+      }) || {};
+      [
+        {kind: 'spell', slot: 'media'},
+        {kind: 'spell-video', slot: 'videoMedia'},
+      ].forEach(({kind, slot}) => {
+        if (!entryDeclaresMediaForSlot(entry, kind, binding)) return;
+        records.push({
+          ...record,
+          kind,
+          sourceKey: 'catalog-items',
+          referenceScope: 'global-catalog',
+          mediaData: entry,
+          nestedTarget: {
+            schemaVersion: 1,
+            kind: 'catalog-item-spell',
+            entryId,
+            entryKey,
+            entryIndex: null,
+            slot,
+          },
+        });
+      });
+    });
+  }
+  if (record.sourceKey === 'foes' || record.kind === 'foe') {
+    [
+      {field: 'tecniche', targetKind: 'foe-technique'},
+      {field: 'spells', targetKind: 'foe-spell'},
+    ].forEach(({field, targetKind}) => {
+      const entries = Array.isArray(record.data[field]) ?
+        record.data[field] : [];
+      entries.forEach((entry, entryIndex) => {
+        const provisionalEntryId = deterministicNestedEntryId({
+          sourceKey: 'foes',
+          entityId: record.entityId,
+          targetKind,
+          locator: entryIndex,
+          entry,
+        });
+        const binding = rawEmbeddedBindingFor(
+          record.data,
+          {entryId: provisionalEntryId, kind: targetKind}
+        ) || {};
+        if (!isRecord(entry) ||
+          !entryDeclaresMediaForSlot(entry, 'foe', binding)) return;
+        const entryId = deterministicNestedEntryId({
+          sourceKey: 'foes',
+          entityId: record.entityId,
+          targetKind,
+          locator: entryIndex,
+          entry,
+        });
+        records.push({
+          ...record,
+          kind: 'foe',
+          sourceKey: 'foes',
+          mediaData: entry,
+          nestedTarget: {
+            schemaVersion: 1,
+            kind: targetKind,
+            entryId,
+            entryKey: null,
+            entryIndex,
+            slot: 'media',
+          },
+        });
+      });
+    });
+  }
+  return records;
+};
+
+const expandMediaRecords = (record) => [
+  record,
+  ...nestedMediaRecordsForRecord(record),
+];
+
 const exactAttachedAssetId = (data, targetSlot = 'media') => (
   /^m_[a-f0-9]{40}$/.test(asString(data?.[targetSlot]?.assetId)) ?
     asString(data[targetSlot].assetId) :
@@ -2054,6 +3708,11 @@ const exactAttachedAssetId = (data, targetSlot = 'media') => (
 
 const targetDataForBinding = (data, binding) => {
   const root = isRecord(data) ? data : {};
+  if (isRecord(binding?.nestedTarget)) {
+    return isRecord(
+      root.task07EmbeddedMedia?.[binding.nestedTarget.entryId]
+    ) ? root.task07EmbeddedMedia[binding.nestedTarget.entryId] : {};
+  }
   if (binding?.commonTechnique !== true &&
     binding?.targetKind !== 'common-technique') return root;
   const entityId = asString(binding?.entityId);
@@ -2342,18 +4001,37 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
         };
       });
     }
+    const rootRecordCount = records.length;
+    records = records.flatMap(expandMediaRecords);
     return {
       records,
+      rootRecordCount,
       cursor: page.at(-1) || null,
       hasMore: snapshot.docs.length > pageSize,
     };
   };
 
-  const readSourceObject = async (sourcePath) => {
+  const readSourceObject = async (
+    sourcePath,
+    {includeSha256 = false} = {}
+  ) => {
     try {
       const [metadata] = await bucket.file(sourcePath).getMetadata();
+      let sha256 = '';
+      if (includeSha256) {
+        const digest = crypto.createHash('sha256');
+        const generation = String(metadata.generation || '');
+        const immutableObject = bucket.file(sourcePath, generation ? {
+          generation,
+        } : undefined);
+        for await (const chunk of immutableObject.createReadStream()) {
+          digest.update(chunk);
+        }
+        sha256 = digest.digest('hex');
+      }
       return {
         exists: true,
+        path: sourcePath,
         contentType: metadata.contentType,
         bytes: Number(metadata.size),
         generation: String(metadata.generation || ''),
@@ -2363,11 +4041,60 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
           metadata.metageneration ||
           ''
         ),
+        ...(includeSha256 ? {sha256} : {}),
+        cacheControl: String(metadata.cacheControl || ''),
+        contentDisposition: String(metadata.contentDisposition || ''),
+        customMetadata: isRecord(metadata.metadata) ?
+          {...metadata.metadata} :
+          {},
       };
     } catch (error) {
-      if ([404, '404'].includes(error?.code)) return {exists: false};
+      if ([404, '404'].includes(error?.code)) {
+        return {exists: false, path: sourcePath};
+      }
       throw error;
     }
+  };
+
+  const inspectCanonicalRecord = async (record) => {
+    const kind = asString(record?.kind);
+    const data = isRecord(record?.mediaData) ? record.mediaData :
+      isRecord(record?.data) ? record.data : {};
+    const descriptor = canonicalDescriptorForRecord(record);
+    const assetId = descriptor ? asString(descriptor.assetId) : '';
+    const manifest = /^m_[a-f0-9]{40}$/.test(assetId) ?
+      await db.doc(`media_assets/${assetId}`).get() :
+      null;
+    const objectDescriptors = descriptor ? [
+      descriptor.original,
+      ...Object.values(isRecord(descriptor.variants) ?
+        descriptor.variants : {}),
+    ].filter(isRecord) : [];
+    const legacyPaths = [...new Set(mediaReferenceDeclarationsForKind(
+      data,
+      kind,
+      {
+        expectedBucket: storageBucket,
+        allowLoopback: projectId === DEMO_PROJECT_ID,
+      }
+    ).map(({storagePath}) => storagePath).filter(Boolean))]
+      .filter((value) => !isCanonicalTask07Path(value))
+      .sort();
+    const [objects, legacyObjects] = await Promise.all([
+      Promise.all(objectDescriptors.map((object) => (
+        readSourceObject(asString(object.path), {includeSha256: true})
+      ))),
+      Promise.all(legacyPaths.map(readSourceObject)),
+    ]);
+    return {
+      manifest: manifest ? {
+        exists: manifest.exists,
+        version: manifest.exists ? snapshotVersion(manifest) : '',
+        data: manifest.exists ? manifest.data() || {} : null,
+      } : {exists: false, version: '', data: null},
+      objects,
+      legacyObjects,
+    };
   };
 
   const readOwner = async (ownerUid) => {
@@ -2376,6 +4103,7 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       exists: snapshot.exists,
       role: asString(snapshot.get('role')).toLowerCase(),
       deletionState: asString(snapshot.get('deletionState')),
+      version: snapshot.exists ? snapshotVersion(snapshot) : '',
     };
   };
 
@@ -2414,6 +4142,24 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       cursor: page.at(-1) || null,
       hasMore: snapshot.docs.length > pageSize,
     };
+  };
+
+  const readReceiptsByIds = async (receiptIds) => {
+    const records = [];
+    for (let index = 0; index < receiptIds.length; index += 100) {
+      const batchIds = receiptIds.slice(index, index + 100);
+      const snapshots = batchIds.length ? await db.getAll(
+        ...batchIds.map((receiptId) => (
+          db.doc(`${RECEIPT_COLLECTION}/${receiptId}`)
+        ))
+      ) : [];
+      snapshots.forEach((snapshot) => {
+        if (snapshot.exists) {
+          records.push({id: snapshot.id, ...snapshot.data()});
+        }
+      });
+    }
+    return records;
   };
 
   const generatedObjectPresent = async (descriptor) => {
@@ -2474,7 +4220,10 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       asString(receipt.sourcePath),
       await readSourceObject(asString(receipt.sourcePath))
     );
-    const targetData = targetDataForBinding(target.data(), receipt);
+    const rootTargetData = target.data() || {};
+    const targetData = targetDataForBinding(rootTargetData, receipt);
+    const nestedResolution = isRecord(receipt.nestedTarget) ?
+      nestedEntryFor(rootTargetData, receipt.nestedTarget) : null;
     const currentGeneralProof = generalImageUrlProof(
       targetData,
       asString(receipt.kind)
@@ -2532,6 +4281,9 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       legacyGeneralImageUrlUnchanged:
         canonicalHash(currentGeneralProof) ===
           canonicalHash(receipt.legacyGeneralImageUrlProof ?? null),
+      nestedEntryPresent: nestedResolution ?
+        nestedResolution.conflict !== true &&
+          isRecord(nestedResolution.entry) : true,
       placementReferenceCount: placementProof?.count ?? null,
       placementReferenceHash: placementProof?.hash ?? null,
       sourceFoeFingerprint: currentSourceFoeProof ?
@@ -2557,6 +4309,7 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       ownerUid: entry.ownerUid,
       entityId: entry.entityId,
       commonTechnique: entry.commonTechnique,
+      nestedTarget: entry.nestedTarget,
       referenceScope: entry.referenceScope,
       previousAssetId: entry.previousAssetId,
       operationId: entry.operationId,
@@ -2589,6 +4342,8 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       receipt.get('sourceKey') !== entry.sourceKey ||
       receipt.get('entityId') !== entry.entityId ||
       receipt.get('commonTechnique') !== entry.commonTechnique ||
+      canonicalHash(receipt.get('nestedTarget') ?? null) !==
+        canonicalHash(entry.nestedTarget ?? null) ||
       receipt.get('ownerUid') !== entry.ownerUid ||
       receipt.get('sourcePath') !== entry.sourcePath ||
       (receipt.get('sourceGeneration') !== undefined &&
@@ -2690,36 +4445,8 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       }
       const recoveryCandidate = receipt.exists && manifest.exists &&
         manifest.get('state') === 'deleted';
-      if (receipt.exists && !recoveryCandidate) {
-        if (!manifest.exists) {
-          throw new Error('Receipt exists without its Task 07 manifest.');
-        }
-        return;
-      }
-      const targetData = targetDataForBinding(target.data(), entry);
-      if (!target.exists ||
-        targetMediaFingerprint(targetData, entry.kind) !==
-          entry.targetFingerprint) {
-        throw new Error('Media target changed after planning. Re-plan.');
-      }
-      if (target.get('deletionState') === 'pending' ||
-        target.get('pendingDeletion') === true ||
-        target.get('deleted') === true ||
-        targetData.deletionState === 'pending' ||
-        targetData.pendingDeletion === true ||
-        targetData.deleted === true) {
-        throw new Error('Media target is no longer available.');
-      }
-      if (!legacyPathsForKind(targetData, entry.kind)
-        .includes(entry.sourcePath)) {
-        throw new Error('Legacy media reference changed after planning.');
-      }
-      if (canonicalHash(generalImageUrlProof(
-        targetData,
-        entry.kind
-      )) !== canonicalHash(entry.legacyGeneralImageUrlProof ?? null)) {
-        throw new Error('Legacy General.image_url changed after planning.');
-      }
+      const rootTargetData = target.data() || {};
+      const targetData = targetDataForBinding(rootTargetData, entry);
       const ownerRole = asString(owner.get('role')).toLowerCase();
       if (!owner.exists || owner.get('deletionState') === 'pending' ||
         !compiled.core.isTask07MediaRequestAuthorized({
@@ -2728,19 +4455,75 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
           ownerUid: plan.ownerUid,
           referenceScope: plan.referenceScope,
           actorRole: ownerRole,
+          targetKind: plan.targetKind,
         })) {
         throw new Error('Media owner is no longer active and authorized.');
       }
-      if (exactAttachedAssetId(targetData, entry.targetSlot) !==
-        entry.previousAssetId) {
-        throw new Error('Previous media reference changed after planning.');
+      if (receipt.exists && !manifest.exists) {
+        throw new Error('Receipt exists without its Task 07 manifest.');
       }
+      if (receipt.exists && receipt.get('state') === 'attached' &&
+        !recoveryCandidate) {
+        const attachment = isRecord(manifest.get('attachment')) ?
+          manifest.get('attachment') : {};
+        const attachedRevision = Number(receipt.get('attachedRevision'));
+        if (manifest.get('state') !== 'attached' ||
+          exactAttachedAssetId(targetData, entry.targetSlot) !== entry.assetId ||
+          Number(targetData[revisionFieldForSlot(entry.targetSlot)]) !==
+            attachedRevision ||
+          attachment.referencePath !== entry.targetPath ||
+          attachment.targetSlot !== entry.targetSlot ||
+          Number(attachment.revision) !== attachedRevision) {
+          throw new Error(
+            'Attached receipt no longer matches its exact target and manifest.'
+          );
+        }
+        return;
+      }
+      if (receipt.exists && receipt.get('state') !== 'intent' &&
+        !recoveryCandidate) {
+        throw new Error('Existing Task 07 receipt is not resumable.');
+      }
+      const mediaSourceData = entry.nestedTarget ?
+        nestedEntryFor(rootTargetData, entry.nestedTarget)?.entry || {} :
+        targetData;
+      const targetFenceIssue = backfillTargetFenceIssue({
+        targetExists: target.exists,
+        targetAvailable: !(
+          target.get('deletionState') === 'pending' ||
+          target.get('pendingDeletion') === true ||
+          target.get('deleted') === true ||
+          targetData.deletionState === 'pending' ||
+          targetData.pendingDeletion === true ||
+          targetData.deleted === true
+        ),
+        targetFingerprintMatches:
+          targetMediaFingerprint(rootTargetData, entry.kind, entry) ===
+            entry.targetFingerprint,
+        legacyReferenceMatches: legacyPathsForKind(
+          mediaSourceData,
+          entry.kind,
+          {
+            expectedBucket: storageBucket,
+            allowLoopback: projectId === DEMO_PROJECT_ID,
+          }
+        ).includes(entry.sourcePath),
+        legacyGeneralImageUrlMatches: canonicalHash(generalImageUrlProof(
+          targetData,
+          entry.kind
+        )) === canonicalHash(entry.legacyGeneralImageUrlProof ?? null),
+        previousAssetMatches:
+          exactAttachedAssetId(targetData, entry.targetSlot) ===
+            entry.previousAssetId,
+      });
+      if (targetFenceIssue) throw new Error(targetFenceIssue);
       if (manifest.exists && (
         manifest.get('requestHash') !== plan.requestHash ||
         manifest.get('actorUid') !== entry.ownerUid
       )) {
         throw new Error('Task 07 asset identity is already bound.');
       }
+      if (receipt.exists && !recoveryCandidate) return;
       const now = Timestamp.now();
       const cleanupAfter = Timestamp.fromMillis(
         Date.now() + mediaPolicy.retention.unattachedHours * 60 * 60 * 1000
@@ -2815,8 +4598,9 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
         targetSlot: entry.targetSlot,
         kind: entry.kind,
         sourceKey: entry.sourceKey,
-        entityId: entry.entityId,
-        commonTechnique: entry.commonTechnique,
+      entityId: entry.entityId,
+      commonTechnique: entry.commonTechnique,
+      nestedTarget: entry.nestedTarget,
         referenceScope: entry.referenceScope,
         ownerUid: entry.ownerUid,
         ownerResolution: entry.ownerResolution,
@@ -2965,21 +4749,6 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
     return patch;
   };
 
-  const restoreFieldsIntoData = (current, beforeFields) => {
-    const restored = {...(isRecord(current) ? current : {})};
-    Object.entries(beforeFields || {}).forEach(([field, descriptor]) => {
-      if (!TARGET_COMPATIBILITY_FIELDS.includes(field)) {
-        throw new Error('Rollback receipt contains an unsupported target field.');
-      }
-      if (descriptor?.exists === true) {
-        restored[field] = descriptor.value;
-      } else {
-        delete restored[field];
-      }
-    });
-    return restored;
-  };
-
   const rollbackEntry = async (entry) => {
     const receiptRef = db.doc(`${RECEIPT_COLLECTION}/${entry.receiptId}`);
     const receiptBefore = await receiptRef.get();
@@ -3015,10 +4784,20 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       const revisionField = revisionFieldForSlot(entry.targetSlot);
       const updatedAtField = updatedAtFieldForSlot(entry.targetSlot);
       const revision = (Number(targetData[revisionField]) || 0) + 1;
-      if (entry.commonTechnique) {
+      if (entry.nestedTarget) {
+        transaction.update(targetRef, {
+          task07EmbeddedMedia: buildNestedRollbackRegistry({
+            current: target.data() || {},
+            nestedTarget: entry.nestedTarget,
+            beforeFields: receipt.get('beforeFields'),
+            revision,
+            timestamp: now,
+          }),
+        });
+      } else if (entry.commonTechnique) {
         transaction.set(targetRef, {
           [entry.entityId]: {
-            ...restoreFieldsIntoData(
+            ...restoreCompatibilityFieldsIntoData(
               targetData,
               receipt.get('beforeFields')
             ),
@@ -3058,6 +4837,7 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
           attachment: {
             referencePath: entry.targetPath,
             targetSlot: entry.targetSlot,
+            ...(entry.nestedTarget ? {nestedTarget: entry.nestedTarget} : {}),
             revision,
             attachedAt: now,
           },
@@ -3090,9 +4870,11 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
   return {
     readLegacyPage,
     readSourceObject,
+    inspectCanonicalRecord,
     readOwner,
     verifyCatalogOwner,
     readReceiptPage,
+    readReceiptsByIds,
     inspectReceipt,
     applyBackfillEntry,
     rollbackEntry,
@@ -3112,11 +4894,13 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
 };
 
 const printHelp = () => console.log([
-  'Task 07 legacy-media migration plan, verification, and rollback.',
+  'Task 07 legacy-media migration, active canonical audit, and rollback.',
   '',
   'Usage:',
   '  node scripts/task07/media-derivative-backfill.js --project demo-fnd-perf',
-  '    [--operation backfill|verify|rollback] [--report <path>]',
+  '    [--operation backfill|verify|rollback|canonical-audit]',
+  '    [--report <path>]',
+  '    [--approved-backfill-report <count-bound-plan>  # verify only]',
   '    [--page-size 1..50] [--max-pages 1..100] [--json]',
   '  node scripts/task07/media-derivative-backfill.js --project demo-fnd-perf',
   '    --operation backfill|rollback --execute',
@@ -3129,10 +4913,11 @@ const printHelp = () => console.log([
   '    --confirm-catalog-owner-uid <same-uid>',
   ...SOURCE_KEYS.map((sourceKey) => `    --source ${sourceKey}`),
   '    [--expected-candidates <reviewed-count>]',
-  '    [--operation backfill|verify|rollback] [--report <path>]',
+  '    [--operation backfill|verify|rollback|canonical-audit]',
+  '    [--report <path>]',
   '',
   'Safety:',
-  '  - Planning and verification are read-only and are the default.',
+  '  - Planning, verification, and canonical-audit are read-only.',
   `  - Live access is allowed only for ${PRODUCTION_PROJECT_ID}.`,
   '  - Emulator behavior remains restricted to demo-fnd-perf loopback hosts.',
   `  - Live access is hard-locked to ${PRODUCTION_PROJECT_ID} and ${PRODUCTION_STORAGE_BUCKET}.`,
@@ -3160,6 +4945,11 @@ const main = async (argv = process.argv.slice(2)) => {
       await backend.verifyCatalogOwner(options.catalogOwnerUid);
     }
     if (!options.execute) {
+      const approvedBackfillReport = options.approvedBackfillReportPath ?
+        readJson(
+          options.approvedBackfillReportPath,
+          'Approved Task 07 backfill plan'
+        ) : null;
       const report = await buildMigrationPlan({
         backend,
         operation: options.operation,
@@ -3170,6 +4960,7 @@ const main = async (argv = process.argv.slice(2)) => {
         expectedCandidates: options.expectedCandidates,
         pageSize: options.pageSize,
         maxPages: options.maxPages,
+        approvedBackfillReport,
       });
       assertCandidateCountBinding(report, options.expectedCandidates);
       writeJsonAtomic(options.reportPath, report);
@@ -3235,6 +5026,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CANONICAL_AUDIT_VERSION,
   DEFAULT_MAX_PAGES,
   DEFAULT_PAGE_SIZE,
   DEMO_PROJECT_ID,
@@ -3253,15 +5045,20 @@ module.exports = {
   assertCheckpoint,
   assertReadOnlyTarget,
   assertSafeTarget,
+  buildCanonicalMediaAudit,
+  backfillTargetFenceIssue,
   buildLegacyMediaBackfillPlan,
   buildLegacyMapBackfillMarker,
+  buildNestedRollbackRegistry,
   buildMigrationPlan,
   buildReceiptOperationPlan,
   canonicalHash,
+  canonicalObjectIssues,
   collectMediaPaths,
   computePlanFingerprint,
   createAdminBackend,
   executeMigrationPlan,
+  expandMediaRecords,
   exactSourceKeys,
   expectedStorageBucket,
   generalImageUrlProof,
@@ -3271,6 +5068,10 @@ module.exports = {
   loadTask07AdminSdk,
   legacyMapRecoveryIssue,
   parseOptions,
+  nestedMediaRecordsForRecord,
+  nestedTargetBindingMatches,
+  recordFromSnapshot,
   stagingActionForManifest,
   storagePathFromValue,
+  validCanonicalAuditExclusion,
 };

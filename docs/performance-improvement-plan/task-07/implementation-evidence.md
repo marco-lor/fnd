@@ -2,6 +2,12 @@
 
 Evidence date: 2026-07-29
 
+> Historical implementation snapshot. Later releases completed the missing
+> pipeline, production-safe backfill tooling, and fatin-test `v1-write`
+> activation. Current activation and rollback instructions live in
+> `activation-runbook.md`; the dated validation claims below must not be used
+> as current release evidence.
+
 Integration target: `devs`
 
 Verdict: the fundamental Task 07 media and global-shell implementation is in

@@ -347,6 +347,15 @@ describe('foe media lifecycle ownership', () => {
       spells: [{media: {}}],
     })).toBe(true);
     expect(shouldUseDurableFoeDuplication({
+      spells: [{task07MediaEntryId: 'spell-entry'}],
+      task07EmbeddedMedia: {
+        'spell-entry': {
+          targetKind: 'foe-spell',
+          media: canonicalFoe.media,
+        },
+      },
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
       General: {videoUrl: 'https://legacy.example/video.mp4'},
     })).toBe(true);
     expect(shouldUseDurableFoeDuplication({name: 'No media'})).toBe(false);

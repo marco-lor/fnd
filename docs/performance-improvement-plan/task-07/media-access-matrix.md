@@ -2,8 +2,9 @@
 
 Date: 2026-07-26
 
-Status: implemented and emulator-tested for the default-off local candidate;
-production activation blocked
+Status: canonical contract implemented. The default-off activation note in the
+original matrix is historical; use `activation-runbook.md` for the current
+loss-preserving `canonical-only` gate and production replication procedure.
 
 ## Terminology
 
