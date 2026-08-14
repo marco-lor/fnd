@@ -81,12 +81,30 @@ describe('Task 07 Grigliata board token media projection', () => {
     })).toBe(templateMedia);
   });
 
+  test('uses the sanitized placement resolver for peer custom and foe tokens', () => {
+    const customMedia = canonicalMedia('f', 'token', 'player-2');
+    const foeMedia = canonicalMedia('1', 'token', 'dm-1');
+
+    expect(resolveTask07BoardTokenCanonicalMedia({
+      tokenType: 'custom',
+      profile: null,
+      customTokenProjection: null,
+      placedMedia: customMedia,
+    })).toBe(customMedia);
+    expect(resolveTask07BoardTokenCanonicalMedia({
+      tokenType: 'foe',
+      profile: null,
+      foeSource: null,
+      placedMedia: foeMedia,
+    })).toBe(foeMedia);
+  });
+
   test('rejects incomplete canonical-looking objects', () => {
     expect(resolveTask07BoardTokenCanonicalMedia({
       tokenType: 'foe',
       profile: {
         media: {
-          assetId: `m_${'f'.repeat(40)}`,
+          assetId: `m_${'9'.repeat(40)}`,
           kind: 'token',
           state: 'ready',
         },

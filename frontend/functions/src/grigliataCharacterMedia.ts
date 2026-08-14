@@ -4,6 +4,7 @@ import {
   assertTask07DemoEmulatorBypassIsExact,
   TASK07_CALLABLE_OPTIONS,
 } from "./task07CallableOptions";
+import {assertActiveCaller} from "./callerAuthorization";
 
 const MAX_CHARACTER_TOKEN_IDS = 60;
 const ASSET_ID_PATTERN = /^m_[a-f0-9]{40}$/;
@@ -14,6 +15,12 @@ const IMAGE_CONTENT_TYPES = new Set([
   "image/webp",
 ]);
 const AVATAR_VARIANTS = ["thumbnail", "thumbnail2x", "card"] as const;
+const TOKEN_VARIANTS = [
+  "thumbnail",
+  "thumbnail2x",
+  "card",
+  "card2x",
+] as const;
 
 type Data = Record<string, unknown>;
 
@@ -64,8 +71,7 @@ const readEntityMedia = (data: Data): unknown => {
 
 const sanitizeObjectDescriptor = (
   value: unknown,
-  expectedPath: string,
-  expectedGeneration: string
+  expectedPath: string
 ): Data | null => {
   if (!isRecord(value)) return null;
   const path = asString(value.path);
@@ -74,22 +80,24 @@ const sanitizeObjectDescriptor = (
   const width = positiveInteger(value.width);
   const height = positiveInteger(value.height);
   const contentType = asString(value.contentType).toLowerCase();
-  if (path !== expectedPath || generation !== expectedGeneration || !bytes ||
+  if (path !== expectedPath || !GENERATION_PATTERN.test(generation) || !bytes ||
     !width || !height || !IMAGE_CONTENT_TYPES.has(contentType)) {
     return null;
   }
   return {path, generation, bytes, contentType, width, height};
 };
 
-export const sanitizeTask07CanonicalAvatarMedia = (
+const sanitizeTask07CanonicalImageMedia = (
   value: unknown,
-  expectedOwnerUid: string
+  expectedOwnerUid: string,
+  expectedKind: "avatar" | "token",
+  expectedVariants: readonly string[]
 ): Data | null => {
   if (!isRecord(value)) return null;
   const assetId = asString(value.assetId);
   const generation = asString(String(value.generation || ""));
   if (value.schemaVersion !== 1 || value.contractVersion !== 1 ||
-    value.kind !== "avatar" || value.state !== "ready" ||
+    value.kind !== expectedKind || value.state !== "ready" ||
     value.audience !== "signed-in" ||
     asString(value.ownerUid) !== expectedOwnerUid ||
     !ASSET_ID_PATTERN.test(assetId) ||
@@ -105,18 +113,16 @@ export const sanitizeTask07CanonicalAvatarMedia = (
   ].join("/");
   const original = sanitizeObjectDescriptor(
     value.original,
-    `${prefix}/original`,
-    generation
+    `${prefix}/original`
   );
   if (!original) return null;
 
   const sourceVariants = isRecord(value.variants) ? value.variants : {};
   const variants: Data = {};
-  AVATAR_VARIANTS.forEach((variant) => {
+  expectedVariants.forEach((variant) => {
     const descriptor = sanitizeObjectDescriptor(
       sourceVariants[variant],
-      `${prefix}/${variant}`,
-      generation
+      `${prefix}/${variant}`
     );
     if (descriptor) variants[variant] = descriptor;
   });
@@ -126,7 +132,7 @@ export const sanitizeTask07CanonicalAvatarMedia = (
     schemaVersion: 1,
     contractVersion: 1,
     assetId,
-    kind: "avatar",
+    kind: expectedKind,
     state: "ready",
     generation,
     audience: "signed-in",
@@ -135,6 +141,26 @@ export const sanitizeTask07CanonicalAvatarMedia = (
     variants,
   };
 };
+
+export const sanitizeTask07CanonicalAvatarMedia = (
+  value: unknown,
+  expectedOwnerUid: string
+): Data | null => sanitizeTask07CanonicalImageMedia(
+  value,
+  expectedOwnerUid,
+  "avatar",
+  AVATAR_VARIANTS
+);
+
+export const sanitizeTask07CanonicalTokenMedia = (
+  value: unknown,
+  expectedOwnerUid: string
+): Data | null => sanitizeTask07CanonicalImageMedia(
+  value,
+  expectedOwnerUid,
+  "token",
+  TOKEN_VARIANTS
+);
 
 export const resolveTask07CharacterMediaEntry = (input: {
   tokenId: string;
@@ -176,11 +202,98 @@ const relatedUserIds = (tokenData: Data): string[] => {
   return [...new Set([characterId, ownerUid])].filter(isSafeDocumentId);
 };
 
+const resolvedPlacementTokenId = (placementData: Data): string => (
+  asString(placementData.tokenId) || asString(placementData.ownerUid)
+);
+
+export const isTask07PlacementMediaVisible = (input: {
+  placementId: string;
+  backgroundId: string;
+  tokenId: string;
+  placementData: Data;
+  actorRole: string;
+}): boolean => {
+  const {placementData} = input;
+  return isSafeDocumentId(input.backgroundId) &&
+    isSafeDocumentId(input.tokenId) &&
+    input.placementId === `${input.backgroundId}__${input.tokenId}` &&
+    asString(placementData.backgroundId) === input.backgroundId &&
+    resolvedPlacementTokenId(placementData) === input.tokenId &&
+    isSafeDocumentId(asString(placementData.ownerUid)) &&
+    (
+      placementData.isVisibleToPlayers !== false ||
+      asString(input.actorRole).toLowerCase() === "dm"
+    );
+};
+
+const resolvedCustomTemplate = (input: {
+  tokenId: string;
+  tokenData: Data;
+  templatesById: ReadonlyMap<string, Data>;
+}): Data | null => {
+  const ownerUid = asString(input.tokenData.ownerUid);
+  const role = asString(input.tokenData.customTokenRole) || "template";
+  if (role !== "instance") return input.tokenData;
+  const templateId = asString(input.tokenData.customTemplateId);
+  const template = input.templatesById.get(templateId);
+  if (!isSafeDocumentId(templateId) || templateId === input.tokenId ||
+    !template || template.tokenType !== "custom" ||
+    asString(template.customTokenRole) === "instance" ||
+    asString(template.ownerUid) !== ownerUid ||
+    (asString(template.customTemplateId) || templateId) !== templateId) {
+    return null;
+  }
+  return template;
+};
+
+export const resolveTask07PlacedTokenMediaEntry = (input: {
+  tokenId: string;
+  tokenData: Data;
+  templatesById: ReadonlyMap<string, Data>;
+  usersById: ReadonlyMap<string, Data>;
+}): CharacterMediaEntry | null => {
+  const {tokenId, tokenData} = input;
+  const ownerUid = asString(tokenData.ownerUid);
+  if (!isSafeDocumentId(tokenId) || !isSafeDocumentId(ownerUid)) return null;
+
+  if (tokenData.tokenType === "character") {
+    return resolveTask07CharacterMediaEntry({
+      tokenId,
+      tokenData,
+      usersById: input.usersById,
+    });
+  }
+
+  if (tokenData.tokenType === "custom") {
+    const source = resolvedCustomTemplate({
+      tokenId,
+      tokenData,
+      templatesById: input.templatesById,
+    });
+    const media = source ? sanitizeTask07CanonicalTokenMedia(
+      readEntityMedia(source),
+      ownerUid
+    ) : null;
+    return media ? {tokenId, media} : null;
+  }
+
+  if (tokenData.tokenType === "foe") {
+    const media = sanitizeTask07CanonicalTokenMedia(
+      readEntityMedia(tokenData),
+      ownerUid
+    );
+    return media ? {tokenId, media} : null;
+  }
+
+  return null;
+};
+
 export const task07ResolveCharacterMedia = onCall(
   {...TASK07_CALLABLE_OPTIONS, timeoutSeconds: 30},
   async (request: CallableRequest<{tokenIds?: unknown}>) => {
     assertTask07DemoEmulatorBypassIsExact();
-    if (!asString(request.auth?.uid)) {
+    const actorUid = asString(request.auth?.uid);
+    if (!actorUid) {
       throw new HttpsError("unauthenticated", "Authentication required.");
     }
     const tokenIds = normalizeTask07CharacterTokenIds(request.data?.tokenIds);
@@ -193,28 +306,95 @@ export const task07ResolveCharacterMedia = onCall(
     if (!tokenIds.length) return {schemaVersion: 1, entries: []};
 
     const db = admin.firestore();
-    const tokenSnapshots = await db.getAll(...tokenIds.map((tokenId) => (
+    const actor = await db.doc(`users/${actorUid}`).get();
+    assertActiveCaller(actor);
+    const actorRole = asString(actor.get("role")).toLowerCase();
+    const backgroundId = asString(
+      (request.data as {backgroundId?: unknown})?.backgroundId
+    );
+    if (backgroundId && !isSafeDocumentId(backgroundId)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A valid Grigliata background ID is required."
+      );
+    }
+
+    let accessibleTokenIds = tokenIds;
+    const placementOwnersByTokenId = new Map<string, string>();
+    if (backgroundId) {
+      const placementSnapshots = await db.getAll(...tokenIds.map((tokenId) => (
+        db.doc(`grigliata_token_placements/${backgroundId}__${tokenId}`)
+      )));
+      accessibleTokenIds = tokenIds.filter((tokenId, index) => {
+        const placement = placementSnapshots[index];
+        const placementData = placement.exists ? placement.data() || {} : {};
+        const visible = placement.exists && isTask07PlacementMediaVisible({
+          placementId: placement.id,
+          backgroundId,
+          tokenId,
+          placementData,
+          actorRole,
+        });
+        if (visible) {
+          placementOwnersByTokenId.set(
+            tokenId,
+            asString(placementData.ownerUid)
+          );
+        }
+        return visible;
+      });
+    }
+    if (!accessibleTokenIds.length) {
+      return {schemaVersion: 1, entries: []};
+    }
+
+    const tokenSnapshots = await db.getAll(...accessibleTokenIds.map((tokenId) => (
       db.doc(`grigliata_tokens/${tokenId}`)
     )));
     const tokens = tokenSnapshots.flatMap((snapshot) => (
-      snapshot.exists ? [[snapshot.id, snapshot.data() || {}] as const] : []
+      snapshot.exists && (
+        !backgroundId ||
+        asString(snapshot.get("ownerUid")) ===
+          placementOwnersByTokenId.get(snapshot.id)
+      ) ?
+        [[snapshot.id, snapshot.data() || {}] as const] : []
     ));
+    const templatesById = new Map<string, Data>(tokens);
+    const missingTemplateIds = [...new Set(tokens.flatMap(([, data]) => {
+      const templateId = data.tokenType === "custom" &&
+        asString(data.customTokenRole) === "instance" ?
+        asString(data.customTemplateId) : "";
+      return isSafeDocumentId(templateId) && !templatesById.has(templateId) ?
+        [templateId] : [];
+    }))];
+    if (missingTemplateIds.length) {
+      const templateSnapshots = await db.getAll(...missingTemplateIds.map(
+        (templateId) => db.doc(`grigliata_tokens/${templateId}`)
+      ));
+      templateSnapshots.forEach((snapshot) => {
+        if (snapshot.exists) {
+          templatesById.set(snapshot.id, snapshot.data() || {});
+        }
+      });
+    }
     const userIds = [...new Set(tokens.flatMap(([, data]) => (
       relatedUserIds(data)
     )))];
-    if (!userIds.length) return {schemaVersion: 1, entries: []};
-
-    const userSnapshots = await db.getAll(...userIds.map((userId) => (
-      db.doc(`users/${userId}`)
-    )));
     const usersById = new Map<string, Data>();
-    userSnapshots.forEach((snapshot) => {
-      if (snapshot.exists) usersById.set(snapshot.id, snapshot.data() || {});
-    });
+    if (userIds.length) {
+      const userSnapshots = await db.getAll(...userIds.map((userId) => (
+        db.doc(`users/${userId}`)
+      )));
+      userSnapshots.forEach((snapshot) => {
+        if (snapshot.exists) usersById.set(snapshot.id, snapshot.data() || {});
+      });
+    }
     const entries = tokens.flatMap(([tokenId, tokenData]) => {
-      const entry = resolveTask07CharacterMediaEntry({
+      if (!backgroundId && tokenData.tokenType !== "character") return [];
+      const entry = resolveTask07PlacedTokenMediaEntry({
         tokenId,
         tokenData,
+        templatesById,
         usersById,
       });
       return entry ? [entry] : [];

@@ -65,12 +65,13 @@ import {
   normalizeNarrationPlacements,
 } from './narrationScene';
 import { resolveTask07CustomTokenMediaProjection } from './customTokenMedia';
-import { resolveTask07CharacterCanonicalMedia } from './characterTokenMedia';
+import { resolveTask07PlacedCanonicalMedia } from './characterTokenMedia';
 import {
   resolveTask07BoardTokenCanonicalMedia,
 } from './tokenMediaProjection';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+const PLACED_CANONICAL_MEDIA_RETRY_DELAYS_MS = Object.freeze([500, 1500]);
 // A document-ID disjunction is expanded while Firestore evaluates the read
 // rule for every candidate. Ten IDs keeps that evaluation below the emulator
 // and production rules expression ceiling; the overall visible-peer bound is
@@ -159,7 +160,8 @@ export default function useGrigliataPageData({
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [tokenProfilesReadyUserId, setTokenProfilesReadyUserId] = useState('');
   const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
-  const [characterCanonicalMediaByTokenId, setCharacterCanonicalMediaByTokenId] = useState({});
+  const [placedCanonicalMediaByTokenId, setPlacedCanonicalMediaByTokenId] = useState({});
+  const placedCanonicalMediaScopeRef = useRef('');
   const [activePlacementState, setActivePlacementState] = useState({
     backgroundId: '',
     status: 'idle',
@@ -234,7 +236,7 @@ export default function useGrigliataPageData({
       setTokenProfiles([]);
       setTokenProfilesReadyUserId('');
       setSharedCharacterProfilesById({});
-      setCharacterCanonicalMediaByTokenId({});
+      setPlacedCanonicalMediaByTokenId({});
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
       setMusicFolders([]);
@@ -1093,36 +1095,77 @@ export default function useGrigliataPageData({
     };
   }, [currentUserId, sharedCharacterProfileIdsKey]);
 
-  const characterCanonicalTokenIdsKey = useMemo(() => JSON.stringify(
-    Object.keys(sharedCharacterProfilesById).sort()
-  ), [sharedCharacterProfilesById]);
+  const placedCanonicalMediaRequestKey = useMemo(() => JSON.stringify({
+    backgroundId: activeBackgroundId,
+    placements: activePlacements
+      .map((placement) => ({
+        tokenId: typeof placement?.tokenId === 'string' && placement.tokenId
+          ? placement.tokenId
+          : placement?.ownerUid || '',
+        ownerUid: placement?.ownerUid || '',
+        imageUrl: typeof placement?.imageUrl === 'string' ? placement.imageUrl : '',
+      }))
+      .filter((placement) => placement.tokenId && placement.ownerUid)
+      .sort((left, right) => left.tokenId.localeCompare(right.tokenId)),
+  }), [activeBackgroundId, activePlacements]);
 
   useEffect(() => {
-    const tokenIds = JSON.parse(characterCanonicalTokenIdsKey);
-    if (!currentUserId || !tokenIds.length) {
-      setCharacterCanonicalMediaByTokenId({});
+    const request = JSON.parse(placedCanonicalMediaRequestKey);
+    const tokenIds = request.placements.map((placement) => placement.tokenId);
+    if (!currentUserId || !request.backgroundId || !tokenIds.length) {
+      placedCanonicalMediaScopeRef.current = '';
+      setPlacedCanonicalMediaByTokenId({});
       return undefined;
     }
 
     let active = true;
-    setCharacterCanonicalMediaByTokenId({});
-    resolveTask07CharacterCanonicalMedia(tokenIds)
-      .then((mediaByTokenId) => {
-        if (active) setCharacterCanonicalMediaByTokenId(mediaByTokenId);
+    let retryTimerId = null;
+    const scope = `${currentUserId}:${request.backgroundId}`;
+    const scopeChanged = placedCanonicalMediaScopeRef.current !== scope;
+    placedCanonicalMediaScopeRef.current = scope;
+    const expectedOwnersByTokenId = new Map(request.placements.map((placement) => (
+      [placement.tokenId, placement.ownerUid]
+    )));
+
+    setPlacedCanonicalMediaByTokenId((current) => {
+      if (scopeChanged) return {};
+      const retainedEntries = Object.entries(current).filter(([tokenId, media]) => (
+        expectedOwnersByTokenId.get(tokenId) === media?.ownerUid
+      ));
+      if (retainedEntries.length === Object.keys(current).length) return current;
+      return Object.fromEntries(retainedEntries);
+    });
+
+    const resolvePlacedMedia = (attempt = 0) => {
+      resolveTask07PlacedCanonicalMedia({
+        backgroundId: request.backgroundId,
+        tokenIds,
       })
-      .catch((error) => {
-        if (!active) return;
-        console.error(
-          'Failed to resolve shared Grigliata character canonical media:',
-          error
-        );
-        setCharacterCanonicalMediaByTokenId({});
-      });
+        .then((mediaByTokenId) => {
+          if (active) setPlacedCanonicalMediaByTokenId(mediaByTokenId);
+        })
+        .catch((error) => {
+          if (!active) return;
+          if (attempt < PLACED_CANONICAL_MEDIA_RETRY_DELAYS_MS.length) {
+            retryTimerId = setTimeout(
+              () => resolvePlacedMedia(attempt + 1),
+              PLACED_CANONICAL_MEDIA_RETRY_DELAYS_MS[attempt]
+            );
+            return;
+          }
+          console.error(
+            'Failed to resolve visible Grigliata token canonical media:',
+            error
+          );
+        });
+    };
+    resolvePlacedMedia();
 
     return () => {
       active = false;
+      if (retryTimerId !== null) clearTimeout(retryTimerId);
     };
-  }, [characterCanonicalTokenIdsKey, currentUserId]);
+  }, [currentUserId, placedCanonicalMediaRequestKey]);
 
   const normalizedTokenProfiles = useMemo(
     () => [
@@ -1300,15 +1343,17 @@ export default function useGrigliataPageData({
           ? (
             isCurrentUserCharacter
               ? currentMedia
-              : characterCanonicalMediaByTokenId[placement.tokenId] || null
+              : placedCanonicalMediaByTokenId[placement.tokenId] || null
           )
           : null;
+        const placedMedia = placedCanonicalMediaByTokenId[placement.tokenId] || null;
         const projectedMedia = resolveTask07BoardTokenCanonicalMedia({
           tokenType,
           profile,
           foeSource,
           customTokenProjection,
           characterMedia,
+          placedMedia,
         });
         const profileImageUrl = typeof profile?.imageUrl === 'string'
           ? profile.imageUrl.trim()
@@ -1379,7 +1424,6 @@ export default function useGrigliataPageData({
       }),
     [
       currentCharacterId,
-      characterCanonicalMediaByTokenId,
       currentMedia,
       currentImagePath,
       currentImageUrl,
@@ -1387,6 +1431,7 @@ export default function useGrigliataPageData({
       currentUserId,
       foeSourcesById,
       normalizedActivePlacements,
+      placedCanonicalMediaByTokenId,
       tokenProfilesByTokenId,
     ]
   );

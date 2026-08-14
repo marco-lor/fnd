@@ -45,6 +45,7 @@ export const resolveTask07BoardTokenCanonicalMedia = ({
   foeSource,
   customTokenProjection,
   characterMedia,
+  placedMedia,
 }) => {
   if (tokenType === 'character') {
     if (isTask07ReadyCanonicalMedia(characterMedia, ['avatar'])) {
@@ -54,11 +55,16 @@ export const resolveTask07BoardTokenCanonicalMedia = ({
   }
 
   if (tokenType === 'foe') {
-    return readyEntityMedia(profile, ['token', 'foe'])
+    return isTask07ReadyCanonicalMedia(placedMedia, ['token'])
+      ? placedMedia
+      : readyEntityMedia(profile, ['token', 'foe'])
       || readyEntityMedia(foeSource, ['foe']);
   }
 
   if (tokenType === 'custom') {
+    if (isTask07ReadyCanonicalMedia(placedMedia, ['token'])) {
+      return placedMedia;
+    }
     const media = customTokenProjection?.media;
     return isTask07ReadyCanonicalMedia(media, ['token']) ? media : null;
   }

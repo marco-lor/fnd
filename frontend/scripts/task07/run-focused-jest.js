@@ -10,6 +10,7 @@ const focusedTestNames = [
   'useObjectUrl.test.js',
   'userOwnedMedia.test.js',
   'GlobalGrigliataMusicPlayer.test.js',
+  'GrigliataPage.test.js',
   'GrigliataBoard.test.js',
   'BackgroundGalleryOrganizerOverlay.test.js',
   'BackgroundGalleryPanel.test.js',
@@ -18,6 +19,7 @@ const focusedTestNames = [
   'catalogItemMedia.test.js',
   'catalogItemMediaWriter.test.js',
   'characterCreationAvatarMedia.test.js',
+  'characterTokenMedia.test.js',
   'customTokenMedia.test.js',
   'configRepository.test.js',
   'backendOperationIntentStore.test.js',
@@ -37,6 +39,7 @@ const focusedTestNames = [
   'personalMediaWriter.test.js',
   'privateInventoryMediaWriter.test.js',
   'task07MediaControl.test.js',
+  'tokenMediaProjection.test.js',
   'useTask07MediaOperationOwner.test.js',
   'useTask07MediaReadMode.test.js',
 ];
