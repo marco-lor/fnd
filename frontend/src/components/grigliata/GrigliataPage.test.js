@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import {
   useProgression,
   useResources,
@@ -36,6 +36,7 @@ const mockTask05UpdateGrigliataCharacterResourcesCallable = jest.fn(() => Promis
 const mockTask07ResolveCharacterMediaCallable = jest.fn(() => Promise.resolve({
   data: { schemaVersion: 1, entries: [] },
 }));
+let mockGrigliataBoardMountCounter = 0;
 const mockLogGrigliataFogDebug = jest.fn();
 const mockRunWithDurableOperationIntent = jest.fn(({
   kind,
@@ -292,6 +293,7 @@ const mockRunFirestoreTransaction = (callback, completionPromise = Promise.resol
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
+  useAuthSession: jest.fn(() => ({ repositoryAccessGeneration: 0 })),
   useOptionalAuth: jest.fn(() => null),
 }));
 
@@ -470,6 +472,11 @@ jest.mock('./GrigliataBoard', () => {
   const React = require('react');
 
     return function MockGrigliataBoard(props) {
+    const mountIdRef = React.useRef(0);
+    if (!mountIdRef.current) {
+      mockGrigliataBoardMountCounter += 1;
+      mountIdRef.current = mockGrigliataBoardMountCounter;
+    }
     const [initiativeRollResult, setInitiativeRollResult] = React.useState('');
     React.useEffect(() => (
       () => {
@@ -479,6 +486,7 @@ jest.mock('./GrigliataBoard', () => {
 
     return (
       <div data-testid="grigliata-board">
+        <div data-testid="board-mount-id">{String(mountIdRef.current)}</div>
         <div data-testid="board-background-name">{props.activeBackground?.name || ''}</div>
         <div data-testid="board-combat-background-name">{props.combatBackgroundName || ''}</div>
         <div data-testid="board-narration-active">{String(props.isNarrationOverlayActive)}</div>
@@ -1089,6 +1097,8 @@ describe('GrigliataPage', () => {
     mockBatchInstances.splice(0, mockBatchInstances.length);
     mockTransactionInstances.splice(0, mockTransactionInstances.length);
     mockGeneratedDocCounter = 0;
+    mockGrigliataBoardMountCounter = 0;
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 0 });
     mockFirestoreState.collections = {
       grigliata_backgrounds: [
         {
@@ -1392,6 +1402,23 @@ describe('GrigliataPage', () => {
     expect(querySelectorSpy).not.toHaveBeenCalledWith('[data-navbar]');
 
     querySelectorSpy.mockRestore();
+  });
+
+  test('keeps the board mounted across active-map changes so its outgoing layer can crossfade', async () => {
+    render(<GrigliataPage />);
+
+    expect(await screen.findByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+    const initialMountId = screen.getByTestId('board-mount-id').textContent;
+
+    act(() => {
+      setDocData('grigliata_state/current', { activeBackgroundId: 'map-2' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-background-name')).toHaveTextContent('Iron Keep');
+    });
+    expect(screen.getByTestId('board-mount-id')).toHaveTextContent(initialMountId);
+    expect(mockGrigliataBoardMountCounter).toBe(1);
   });
 
   test('writes and refreshes non-DM page presence for users with character names', async () => {
@@ -5589,10 +5616,11 @@ describe('GrigliataPage', () => {
       updatedBy: 'user-1',
     }]);
 
-    render(<GrigliataPage />);
+    const { container } = render(<GrigliataPage />);
 
     await waitFor(() => {
       expect(screen.getByText('Aldor')).toBeInTheDocument();
+      expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
     });
     expect(firestore.setDoc.mock.calls.filter(([target]) => (
       target?.path === 'grigliata_tokens/user-1'
@@ -5916,6 +5944,96 @@ describe('GrigliataPage', () => {
         refreshedThumbnailPath
       );
     });
+  });
+
+  test('ignores canonical media resolved under an earlier access generation', async () => {
+    const createTokenMedia = (assetCharacter, generation) => {
+      const assetId = `m_${assetCharacter.repeat(40)}`;
+      const prefix = `media_assets/v1/signed-in/user-2/${assetId}/${generation}`;
+      return {
+        schemaVersion: 1,
+        contractVersion: 1,
+        assetId,
+        kind: 'token',
+        state: 'ready',
+        generation,
+        audience: 'signed-in',
+        ownerUid: 'user-2',
+        original: {
+          path: `${prefix}/original`,
+          generation,
+          bytes: 4,
+          contentType: 'image/png',
+          width: 512,
+          height: 512,
+        },
+        variants: {
+          thumbnail: {
+            path: `${prefix}/thumbnail`,
+            generation,
+            bytes: 4,
+            contentType: 'image/webp',
+            width: 96,
+            height: 96,
+          },
+        },
+      };
+    };
+    const staleMedia = createTokenMedia('c', '40');
+    const currentMedia = createTokenMedia('d', '41');
+    const staleResolution = createDeferred();
+    const responseFor = (media) => ({
+      data: {
+        schemaVersion: 1,
+        entries: [{ tokenId: 'custom-instance-2', media }],
+      },
+    });
+    mockTask07ResolveCharacterMediaCallable
+      .mockReturnValueOnce(staleResolution.promise)
+      .mockResolvedValueOnce(responseFor(currentMedia));
+    setCollectionData('grigliata_tokens', []);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    const view = render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(1);
+    });
+
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 1 });
+    view.rerender(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+        currentMedia.variants.thumbnail.path
+      );
+    });
+
+    await act(async () => {
+      staleResolution.resolve(responseFor(staleMedia));
+      await staleResolution.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+      currentMedia.variants.thumbnail.path
+    );
+    expect(screen.getByTestId('board-token-media-paths')).not.toHaveTextContent(
+      staleMedia.variants.thumbnail.path
+    );
   });
 
   test('caps visible peer character profile reads at six deterministic 10-id queries', async () => {

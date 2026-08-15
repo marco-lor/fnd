@@ -132,6 +132,35 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
+  test('records bounded callback diagnostics for route-owned animation frames', () => {
+    const originalAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    window.requestAnimationFrame = jest.fn(() => 73);
+    window.cancelAnimationFrame = jest.fn();
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'frame-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const frame = window.requestAnimationFrame(function routeRenderFrame() {});
+
+      expect(window.__FND_PERF__.snapshot().activeResourceDiagnostics).toContainEqual(
+        expect.objectContaining({
+          callback: 'function routeRenderFrame() {}',
+          ownerRoute: '/grigliata',
+          type: 'animation-frame',
+        })
+      );
+
+      window.cancelAnimationFrame(frame);
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+      window.requestAnimationFrame = originalAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
   test('propagates Firestore ownership without claiming an uncorrelated WebChannel-shaped timer', async () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-timer-test', actorRole: 'dm' };

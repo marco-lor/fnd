@@ -132,9 +132,8 @@ describe("Firebase async bootstrap", () => {
       expect(firestore.initializeFirestore).toHaveBeenCalledTimes(1);
       const [initializedApp, settings] = firestore.initializeFirestore.mock.calls[0];
       expect(initializedApp.config.projectId).toBe("demo-fnd-perf");
-      expect(settings).toEqual({
-        experimentalAutoDetectLongPolling: false,
-      });
+      expect(settings).toEqual({});
+      expect(settings).not.toHaveProperty("experimentalAutoDetectLongPolling");
       expect(settings).not.toHaveProperty("experimentalForceLongPolling");
 
       firebaseConfig.__resetFirebaseForTests();
@@ -158,6 +157,29 @@ describe("Firebase async bootstrap", () => {
       } else {
         process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY = previousAppCheckSiteKey;
       }
+    }
+  });
+
+  test("permits the owned WebKit emulator probe to force long polling", () => {
+    const previousPerformanceMode = process.env.REACT_APP_FND_PERF;
+    const previousProjectId = process.env.REACT_APP_FND_PERF_PROJECT_ID;
+    process.env.REACT_APP_FND_PERF = "1";
+    process.env.REACT_APP_FND_PERF_PROJECT_ID = "demo-fnd-perf";
+    window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
+
+    try {
+      loadModule();
+      const firestore = require("../performance/firestore");
+      expect(firestore.initializeFirestore).toHaveBeenCalledWith(
+        expect.anything(),
+        { experimentalForceLongPolling: true }
+      );
+    } finally {
+      delete window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__;
+      if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
+      else process.env.REACT_APP_FND_PERF = previousPerformanceMode;
+      if (previousProjectId === undefined) delete process.env.REACT_APP_FND_PERF_PROJECT_ID;
+      else process.env.REACT_APP_FND_PERF_PROJECT_ID = previousProjectId;
     }
   });
 });

@@ -6518,6 +6518,57 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('15');
   });
 
+  test('resets a dirty initiative draft when the same token appears on another map', () => {
+    const buildEntry = (initiative) => ({
+      tokenId: 'current-user',
+      ownerUid: 'current-user',
+      label: 'Alya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative,
+      joinedAt: null,
+      joinedAtMs: 50,
+    });
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+          currentUserId: 'current-user',
+          turnOrderEntries: [buildEntry(15)],
+        })}
+      />
+    );
+
+    fireEvent.change(screen.getByTestId('turn-order-initiative-input-current-user'), {
+      target: { value: '22' },
+    });
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('22');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          currentUserId: 'current-user',
+          turnOrderEntries: [buildEntry(7)],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('7');
+  });
+
   test('renders a remote shared ruler with the broadcaster color', () => {
     render(
       <GrigliataBoard

@@ -913,6 +913,14 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   tracker.begin(finiteFetch);
   tracker.begin(firestoreStream);
   assert.equal(tracker.pendingCount(), 2);
+  assert.deepEqual(tracker.snapshot(), {
+    pendingCount: 2,
+    quietForMs: 0,
+    pending: [
+      { ageMs: 0, path: 'unknown', resourceType: 'script' },
+      { ageMs: 0, path: '/api/config', resourceType: 'fetch' },
+    ],
+  });
   now = 460;
   tracker.complete(script);
   assert.equal(tracker.pendingCount(), 1);
@@ -920,6 +928,11 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   assert.equal(tracker.isQuiet(), false);
   now = 959;
   assert.equal(tracker.isQuiet(), false);
+  assert.deepEqual(tracker.snapshot(), {
+    pendingCount: 0,
+    quietForMs: 499,
+    pending: [],
+  });
   now = 960;
   assert.equal(tracker.isQuiet(), true);
   tracker.beginQuietWindow();

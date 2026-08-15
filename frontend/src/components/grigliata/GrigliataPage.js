@@ -25,7 +25,7 @@ import {
   where,
   writeBatch,
 } from '../../performance/firestore';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import {
   useProgression,
   useResources,
@@ -659,6 +659,7 @@ export default function GrigliataPage() {
   }, []);
 
   const { user, userData: userShell, loading } = useAuth();
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
   const { data: userProgressionDomain } = useProgression();
   const { data: userResourcesDomain } = useResources();
   const { data: userSettingsDomain } = useUserSettings();
@@ -937,6 +938,7 @@ export default function GrigliataPage() {
     currentUserHiddenTokenIdsByBackground,
     currentUserId,
     isManager,
+    repositoryAccessGeneration,
     preferredSelectedBackgroundId,
     selectedBackgroundPreferenceKey: workspacePreferenceKey,
     selectedGalleryFolderId,
@@ -7265,7 +7267,6 @@ export default function GrigliataPage() {
             <div className="h-full min-h-[480px] xl:min-h-0">
               <PerformanceProfiler id="grigliata-board">
                 <GrigliataBoard
-                key={activeBackgroundId || '__grid__'}
                 activeBackground={displayBackground}
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}

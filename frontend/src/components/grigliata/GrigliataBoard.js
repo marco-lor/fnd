@@ -3537,8 +3537,10 @@ export default function GrigliataBoard({
 
   useEffect(() => {
     interactionRef.current = null;
+    suppressNextTokenContextMenuRef.current = false;
     clearPingHoldTimer();
     clearPingBroadcastTimer();
+    setIsDropActive(false);
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setTokenDragState(null);
@@ -3559,6 +3561,14 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     setHoveredTokenTooltipId('');
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setTurnOrderInitiativeRollState({
+      tokenId: '',
+      status: 'idle',
+      config: null,
+    });
+    setTurnOrderInitiativeRoller(null);
   }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
@@ -6743,6 +6753,7 @@ export default function GrigliataBoard({
                 transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_DRAWER_TRANSITION}
               >
                 <TurnOrderPanel
+                  key={resolvedBackground?.id || '__grid__'}
                   currentUserId={currentUserId}
                   entries={sortedTurnOrderEntries}
                   isManager={isManager}

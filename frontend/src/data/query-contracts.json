@@ -39,14 +39,14 @@
       "sources": [{ "file": "components/bazaar/Bazaar.js", "occurrence": 2 }]
     },
     {
-      "id": "home-inventory-catalog-item-document",
-      "kind": "document",
-      "queryKey": "catalog.item.subscribe.v1",
+      "id": "home-inventory-catalog-item-batches",
+      "kind": "collection",
+      "queryKey": "catalog.items-batch.subscribe.v1",
       "ownerTask": "Task 05 / Task 07",
-      "currentScope": "One item document for each proven _task05.catalogItemId displayed by Home inventory and equipment",
+      "currentScope": "Stable groups of at most 10 proven _task05.catalogItemId values displayed by Home inventory and equipment",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Actor-scoped and ref-counted by catalog item ID across Inventory and EquippedInventory; closes after the last consumer",
+      "realtimePolicy": "Actor-scoped and ref-counted across Inventory and EquippedInventory; startup is limited to four physical listeners until each initial snapshot settles",
       "activation": "active",
       "sources": [{ "file": "data/catalogItemRepository.js", "occurrence": 1 }]
     },
@@ -604,6 +604,7 @@
     { "id": "user-directory-role-page", "ownerTask": "Task 04", "activation": "active", "requiredIndexId": "user-directory-role-normalized-label" },
     { "id": "task05-user-domain-documents", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
     { "id": "task05-inventory-complete-listener", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
+    { "id": "task05-home-catalog-item-batches", "ownerTask": "Task 05 / Task 07", "activation": "active", "indexMode": "automatic" },
     { "id": "task05-personal-content-normalized-listener", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
     { "id": "task05-inventory-kind-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-inventory-kind-normalized-acquired" },
     { "id": "task05-spells-updated-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-spells-normalized-updated" },

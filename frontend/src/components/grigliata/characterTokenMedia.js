@@ -5,6 +5,7 @@ import {
 import { isTask07ReadyCanonicalMedia } from './tokenMediaProjection';
 
 const MAX_CHARACTER_TOKEN_IDS = 60;
+const CHARACTER_MEDIA_RESOLVE_CONCURRENCY = 2;
 const AVATAR_VARIANTS = Object.freeze([
   'thumbnail',
   'thumbnail2x',
@@ -35,8 +36,38 @@ const isSafeTokenId = (value) => (
 
 export const normalizeTask07CharacterTokenIds = (value) => {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.map(normalizeString).filter(isSafeTokenId))]
-    .slice(0, MAX_CHARACTER_TOKEN_IDS);
+  return [...new Set(value.map(normalizeString).filter(isSafeTokenId))];
+};
+
+const resolveTask07CharacterMediaChunks = async ({
+  tokenIds,
+  buildPayload,
+  normalizeResponse,
+  invoke,
+}) => {
+  const chunks = [];
+  for (let index = 0; index < tokenIds.length; index += MAX_CHARACTER_TOKEN_IDS) {
+    chunks.push(tokenIds.slice(index, index + MAX_CHARACTER_TOKEN_IDS));
+  }
+  const results = new Array(chunks.length);
+  let nextChunkIndex = 0;
+  const worker = async () => {
+    while (nextChunkIndex < chunks.length) {
+      const chunkIndex = nextChunkIndex;
+      nextChunkIndex += 1;
+      const chunk = chunks[chunkIndex];
+      const allowedTokenIds = new Set(chunk);
+      const response = normalizeResponse(await invoke(buildPayload(chunk)));
+      results[chunkIndex] = Object.fromEntries(Object.entries(response).filter(([tokenId]) => (
+        allowedTokenIds.has(tokenId)
+      )));
+    }
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(CHARACTER_MEDIA_RESOLVE_CONCURRENCY, chunks.length) },
+    () => worker()
+  ));
+  return Object.assign({}, ...results);
 };
 
 const sanitizeDescriptor = (value, expectedPath) => {
@@ -141,8 +172,12 @@ export const resolveTask07CharacterCanonicalMedia = async (
 ) => {
   const normalizedTokenIds = normalizeTask07CharacterTokenIds(tokenIds);
   if (!normalizedTokenIds.length) return {};
-  const result = await invoke({ tokenIds: normalizedTokenIds });
-  return normalizeTask07CharacterMediaResponse(result);
+  return resolveTask07CharacterMediaChunks({
+    tokenIds: normalizedTokenIds,
+    buildPayload: (chunk) => ({ tokenIds: chunk }),
+    normalizeResponse: normalizeTask07CharacterMediaResponse,
+    invoke,
+  });
 };
 
 export const resolveTask07PlacedCanonicalMedia = async ({
@@ -154,9 +189,13 @@ export const resolveTask07PlacedCanonicalMedia = async ({
   if (!isSafeTokenId(normalizedBackgroundId) || !normalizedTokenIds.length) {
     return {};
   }
-  const result = await invoke({
-    backgroundId: normalizedBackgroundId,
+  return resolveTask07CharacterMediaChunks({
     tokenIds: normalizedTokenIds,
+    buildPayload: (chunk) => ({
+      backgroundId: normalizedBackgroundId,
+      tokenIds: chunk,
+    }),
+    normalizeResponse: normalizeTask07PlacedTokenMediaResponse,
+    invoke,
   });
-  return normalizeTask07PlacedTokenMediaResponse(result);
 };

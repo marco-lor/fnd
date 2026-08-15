@@ -23,6 +23,14 @@ const {
 } = require('../scripts/performance/emulators');
 
 const TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS = 180_000;
+const formatAggregateGateErrorMessage = (prefix, errors) => [
+  prefix,
+  ...errors.map((error, index) => (
+    `[${index + 1}] ${String(error?.message || error || 'Unknown error')}`
+      .replace(/\s+/g, ' ')
+      .slice(0, 500)
+  )),
+].join(' ');
 
 const reenableBackgroundTriggers = ({
   lifecycleProjectId = projectId,
@@ -189,10 +197,17 @@ module.exports = async () => {
 
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) {
-    throw new global.AggregateError(errors, 'Performance emulator teardown failed multiple gates.');
+    throw new global.AggregateError(
+      errors,
+      formatAggregateGateErrorMessage(
+        'Performance emulator teardown failed multiple gates.',
+        errors
+      )
+    );
   }
 };
 
 module.exports.collectTeardownEvidence = collectTeardownEvidence;
+module.exports.formatAggregateGateErrorMessage = formatAggregateGateErrorMessage;
 module.exports.reenableBackgroundTriggers = reenableBackgroundTriggers;
 module.exports.TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS = TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS;

@@ -136,6 +136,16 @@ const getEntityMedia = (entity) => {
   return null;
 };
 
+const areCanonicalMediaMapsEqual = (left = {}, right = {}) => {
+  if (left === right) return true;
+  const leftIds = Object.keys(left);
+  const rightIds = Object.keys(right);
+  return leftIds.length === rightIds.length && leftIds.every((tokenId) => (
+    Object.prototype.hasOwnProperty.call(right, tokenId)
+    && JSON.stringify(left[tokenId]) === JSON.stringify(right[tokenId])
+  ));
+};
+
 export default function useGrigliataPageData({
   currentUserId = '',
   currentCharacterId = '',
@@ -146,6 +156,7 @@ export default function useGrigliataPageData({
   currentUserHiddenBackgroundIds = [],
   currentUserHiddenTokenIdsByBackground = {},
   isManager = false,
+  repositoryAccessGeneration = 0,
   activeGridSizeOverride = null,
   selectedGalleryFolderId = '',
   selectedMusicFolderId = '',
@@ -161,7 +172,9 @@ export default function useGrigliataPageData({
   const [tokenProfilesReadyUserId, setTokenProfilesReadyUserId] = useState('');
   const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
   const [placedCanonicalMediaByTokenId, setPlacedCanonicalMediaByTokenId] = useState({});
+  const placedCanonicalMediaByTokenIdRef = useRef({});
   const placedCanonicalMediaScopeRef = useRef('');
+  const placedCanonicalMediaRequestGenerationRef = useRef(0);
   const [activePlacementState, setActivePlacementState] = useState({
     backgroundId: '',
     status: 'idle',
@@ -236,6 +249,8 @@ export default function useGrigliataPageData({
       setTokenProfiles([]);
       setTokenProfilesReadyUserId('');
       setSharedCharacterProfilesById({});
+      placedCanonicalMediaByTokenIdRef.current = {};
+      placedCanonicalMediaRequestGenerationRef.current += 1;
       setPlacedCanonicalMediaByTokenId({});
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
@@ -1096,6 +1111,7 @@ export default function useGrigliataPageData({
   }, [currentUserId, sharedCharacterProfileIdsKey]);
 
   const placedCanonicalMediaRequestKey = useMemo(() => JSON.stringify({
+    accessGeneration: repositoryAccessGeneration,
     backgroundId: activeBackgroundId,
     placements: activePlacements
       .map((placement) => ({
@@ -1107,34 +1123,52 @@ export default function useGrigliataPageData({
       }))
       .filter((placement) => placement.tokenId && placement.ownerUid)
       .sort((left, right) => left.tokenId.localeCompare(right.tokenId)),
-  }), [activeBackgroundId, activePlacements]);
+  }), [activeBackgroundId, activePlacements, repositoryAccessGeneration]);
 
   useEffect(() => {
     const request = JSON.parse(placedCanonicalMediaRequestKey);
     const tokenIds = request.placements.map((placement) => placement.tokenId);
+    const requestGeneration = placedCanonicalMediaRequestGenerationRef.current + 1;
+    placedCanonicalMediaRequestGenerationRef.current = requestGeneration;
+    let active = true;
+    const isCurrentRequest = () => (
+      active
+      && placedCanonicalMediaRequestGenerationRef.current === requestGeneration
+    );
+    const publishMedia = (nextMediaByTokenId) => {
+      if (!isCurrentRequest()) return;
+      const current = placedCanonicalMediaByTokenIdRef.current;
+      if (areCanonicalMediaMapsEqual(current, nextMediaByTokenId)) return;
+      placedCanonicalMediaByTokenIdRef.current = nextMediaByTokenId;
+      setPlacedCanonicalMediaByTokenId(nextMediaByTokenId);
+    };
     if (!currentUserId || !request.backgroundId || !tokenIds.length) {
       placedCanonicalMediaScopeRef.current = '';
-      setPlacedCanonicalMediaByTokenId({});
-      return undefined;
+      publishMedia({});
+      return () => {
+        active = false;
+      };
     }
 
-    let active = true;
     let retryTimerId = null;
-    const scope = `${currentUserId}:${request.backgroundId}`;
+    const scope = JSON.stringify([
+      currentUserId,
+      request.accessGeneration,
+      request.backgroundId,
+    ]);
     const scopeChanged = placedCanonicalMediaScopeRef.current !== scope;
     placedCanonicalMediaScopeRef.current = scope;
     const expectedOwnersByTokenId = new Map(request.placements.map((placement) => (
       [placement.tokenId, placement.ownerUid]
     )));
 
-    setPlacedCanonicalMediaByTokenId((current) => {
-      if (scopeChanged) return {};
-      const retainedEntries = Object.entries(current).filter(([tokenId, media]) => (
+    const currentMediaByTokenId = placedCanonicalMediaByTokenIdRef.current;
+    const retainedMediaByTokenId = scopeChanged ? {} : Object.fromEntries(
+      Object.entries(currentMediaByTokenId).filter(([tokenId, media]) => (
         expectedOwnersByTokenId.get(tokenId) === media?.ownerUid
-      ));
-      if (retainedEntries.length === Object.keys(current).length) return current;
-      return Object.fromEntries(retainedEntries);
-    });
+      ))
+    );
+    publishMedia(retainedMediaByTokenId);
 
     const resolvePlacedMedia = (attempt = 0) => {
       resolveTask07PlacedCanonicalMedia({
@@ -1142,10 +1176,10 @@ export default function useGrigliataPageData({
         tokenIds,
       })
         .then((mediaByTokenId) => {
-          if (active) setPlacedCanonicalMediaByTokenId(mediaByTokenId);
+          publishMedia(mediaByTokenId);
         })
         .catch((error) => {
-          if (!active) return;
+          if (!isCurrentRequest()) return;
           if (attempt < PLACED_CANONICAL_MEDIA_RETRY_DELAYS_MS.length) {
             retryTimerId = setTimeout(
               () => resolvePlacedMedia(attempt + 1),
@@ -1163,6 +1197,9 @@ export default function useGrigliataPageData({
 
     return () => {
       active = false;
+      if (placedCanonicalMediaRequestGenerationRef.current === requestGeneration) {
+        placedCanonicalMediaRequestGenerationRef.current += 1;
+      }
       if (retryTimerId !== null) clearTimeout(retryTimerId);
     };
   }, [currentUserId, placedCanonicalMediaRequestKey]);

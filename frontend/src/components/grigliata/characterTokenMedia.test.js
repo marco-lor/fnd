@@ -152,4 +152,55 @@ describe('Task 07 character-token canonical media resolver', () => {
       await invoke.mock.results[0].value
     ))).not.toContain('https://');
   });
+
+  test('resolves every placement through bounded 60-ID chunks without silent loss', async () => {
+    const tokenIds = Array.from({ length: 125 }, (_, index) => `character-${index}`);
+    let activeInvocations = 0;
+    let maxActiveInvocations = 0;
+    const invoke = jest.fn(async ({ tokenIds: chunk }) => {
+      activeInvocations += 1;
+      maxActiveInvocations = Math.max(maxActiveInvocations, activeInvocations);
+      await Promise.resolve();
+      activeInvocations -= 1;
+      return {
+        data: {
+          schemaVersion: 1,
+          entries: [
+            ...chunk.map((tokenId) => ({ tokenId, media: avatarMedia(tokenId) })),
+            { tokenId: 'unexpected-token', media: avatarMedia('unexpected-token') },
+          ],
+        },
+      };
+    });
+
+    const result = await resolveTask07PlacedCanonicalMedia({
+      backgroundId: 'map-1',
+      tokenIds,
+    }, { invoke });
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke.mock.calls.map(([payload]) => payload.tokenIds.length)).toEqual([60, 60, 5]);
+    expect(invoke.mock.calls.every(([payload]) => payload.backgroundId === 'map-1')).toBe(true);
+    expect(maxActiveInvocations).toBeLessThanOrEqual(2);
+    expect(Object.keys(result)).toHaveLength(125);
+    expect(result['character-124']).toEqual(expect.objectContaining({ ownerUid: 'character-124' }));
+    expect(result['unexpected-token']).toBeUndefined();
+  });
+
+  test('rejects an entire multi-chunk result when any bounded callable fails', async () => {
+    const invoke = jest.fn(async ({ tokenIds }) => {
+      if (tokenIds.includes('character-60')) throw new Error('chunk failed');
+      return {
+        data: {
+          schemaVersion: 1,
+          entries: tokenIds.map((tokenId) => ({ tokenId, media: avatarMedia(tokenId) })),
+        },
+      };
+    });
+
+    await expect(resolveTask07CharacterCanonicalMedia(
+      Array.from({ length: 61 }, (_, index) => `character-${index}`),
+      { invoke }
+    )).rejects.toThrow('chunk failed');
+  });
 });

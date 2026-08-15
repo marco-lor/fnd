@@ -36,6 +36,7 @@ const PROBE_PLACEMENT_PATH = 'grigliata_token_placements/perf-map__perf-token-00
 const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
+const FIVE_PEER_ASSET_SETTLEMENT_TIMEOUT_MS = 15_000;
 const FIVE_PEER_TEST_TIMEOUT_MS = 240_000;
 const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
@@ -231,13 +232,43 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       } catch (error) {
         throw new Error(`Five-peer readiness failed for ${role}: ${error.message}`, { cause: error });
       }
-      await expect.poll(
-        () => pageAssets.isQuiet(),
-        {
-          timeout: 10_000,
-          message: `Finite page assets did not settle before five-peer measurement for ${role}.`,
-        }
-      ).toBe(true);
+      pageAssets.beginQuietWindow();
+      let latestAssetSettlement = null;
+      try {
+        await expect.poll(
+          async () => {
+            const registry = await page.evaluate(() => {
+              const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
+              if (typeof getStats !== 'function') return null;
+              const stats = getStats();
+              return {
+                activeRequestCount: Number(stats?.activeRequestCount || 0),
+                queuedRequestCount: Number(stats?.queuedRequestCount || 0),
+              };
+            });
+            latestAssetSettlement = {
+              network: pageAssets.snapshot(),
+              registry,
+            };
+            return Boolean(
+              pageAssets.isQuiet()
+              && registry
+              && registry.activeRequestCount === 0
+              && registry.queuedRequestCount === 0
+            );
+          },
+          {
+            timeout: FIVE_PEER_ASSET_SETTLEMENT_TIMEOUT_MS,
+            message: `Finite page assets did not settle before five-peer measurement for ${role}.`,
+          }
+        ).toBe(true);
+      } catch (error) {
+        throw new Error(
+          `Finite page assets did not settle for ${role}: ${JSON.stringify(latestAssetSettlement)}`,
+          { cause: error }
+        );
+      }
+      diagnostics.assetSettlement = latestAssetSettlement;
       diagnostics.ready = true;
     }
 

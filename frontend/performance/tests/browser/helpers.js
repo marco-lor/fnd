@@ -655,7 +655,7 @@ const createPageAssetTracker = ({
     const requestUrl = typeof request.url === 'function' ? request.url() : '';
     return !demoFirestoreStreamOperation(requestUrl);
   };
-  const pending = new Set();
+  const pending = new Map();
   let lastActivityAt = now();
   const touch = () => {
     lastActivityAt = now();
@@ -663,7 +663,7 @@ const createPageAssetTracker = ({
   return {
     begin(request) {
       if (!shouldTrack(request)) return;
-      pending.add(request);
+      pending.set(request, { startedAt: now() });
       touch();
     },
     complete(request) {
@@ -678,6 +678,29 @@ const createPageAssetTracker = ({
     },
     pendingCount() {
       return pending.size;
+    },
+    snapshot() {
+      const capturedAt = now();
+      return {
+        pendingCount: pending.size,
+        quietForMs: Math.max(0, capturedAt - lastActivityAt),
+        pending: [...pending.entries()].map(([request, metadata]) => {
+          const rawUrl = typeof request?.url === 'function' ? request.url() : '';
+          let path = 'unknown';
+          try {
+            path = new URL(rawUrl).pathname || '/';
+          } catch (_error) {
+            // Diagnostics intentionally omit malformed or non-URL request text.
+          }
+          return {
+            ageMs: Math.max(0, capturedAt - metadata.startedAt),
+            path,
+            resourceType: typeof request?.resourceType === 'function'
+              ? request.resourceType()
+              : 'unknown',
+          };
+        }),
+      };
     },
   };
 };
