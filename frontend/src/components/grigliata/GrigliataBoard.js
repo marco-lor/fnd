@@ -176,6 +176,7 @@ const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
 const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
+const TOKEN_MEDIA_MIN_SCREEN_SIZE_PX = 16;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -217,18 +218,28 @@ export const buildBoundedTokenMediaIdSet = ({
   if (!boundedLimit) return new Set();
 
   const candidates = (Array.isArray(tokens) ? tokens : [])
-    .map((token, index) => ({
-      token,
-      index,
-      priority: token?.isActiveTurn
+    .map((token, index) => {
+      const tokenScreenSize = Number(token?.renderPosition?.size) * Number(viewport?.scale);
+      const isUsefulVisibleMedia = (
+        Number.isFinite(tokenScreenSize)
+        && tokenScreenSize >= TOKEN_MEDIA_MIN_SCREEN_SIZE_PX
+        && isTokenWithinStageViewport(token, viewport, stageSize)
+      );
+      const priority = token?.isActiveTurn
         ? 0
         : (token?.isSelected
           ? 1
-          : (isTokenWithinStageViewport(token, viewport, stageSize)
+          : (token?.isOwnedByViewer
             ? 2
-            : (token?.canMove ? 3 : 4))),
-    }))
-    .filter(({token}) => token?.tokenId && hasMediaAsset(token))
+            : (isUsefulVisibleMedia ? 3 : 4)));
+      return {
+        token,
+        index,
+        priority,
+        eligible: priority < 4,
+      };
+    })
+    .filter(({token, eligible}) => eligible && token?.tokenId && hasMediaAsset(token))
     .sort((left, right) => left.priority - right.priority || left.index - right.index)
     .slice(0, boundedLimit);
 
@@ -2991,10 +3002,13 @@ export default function GrigliataBoard({
   const tokenItems = useMemo(
     () => sortTokensByLayerOrder(placedTokens, resolvedBackground?.tokenLayerOrder).map((token) => {
       const tokenId = token.id || token.ownerUid;
-      const canMove = !!tokenId && (isManager || token.ownerUid === currentUserId || tokenId === currentUserId);
+      const isOwnedByViewer = !!tokenId
+        && (token.ownerUid === currentUserId || tokenId === currentUserId);
+      const canMove = !!tokenId && (isManager || isOwnedByViewer);
       return {
         ...token,
         tokenId,
+        isOwnedByViewer,
         canMove,
         position: getTokenPositionPx(token, normalizedGrid),
       };

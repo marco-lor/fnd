@@ -58,12 +58,12 @@ const createDeferred = () => {
   return { promise, resolve, reject };
 };
 
-test('bounds token media leases and prioritizes active, selected, then visible tokens', () => {
+test('bounds token media leases and excludes offscreen tokens after priority selection', () => {
   const tokens = [
     {
       tokenId: 'offscreen',
       imageUrl: 'https://example.com/offscreen.png',
-      renderPosition: {x: 900, y: 900, size: 50},
+      renderPosition: {x: 900, y: 900, size: 500},
     },
     {
       tokenId: 'visible',
@@ -88,11 +88,84 @@ test('bounds token media leases and prioritizes active, selected, then visible t
     tokens,
     viewport: {x: 0, y: 0, scale: 1},
     stageSize: {width: 200, height: 200},
-    limit: 3,
+    limit: 4,
   });
 
   expect([...selectedIds]).toEqual(['active', 'selected', 'visible']);
   expect(selectedIds).not.toContain('offscreen');
+});
+
+test('defers tiny overview token media except active, selected, and viewer-owned art', () => {
+  const tokenAt = (tokenId, overrides = {}) => ({
+    tokenId,
+    imageUrl: `https://example.com/${tokenId}.png`,
+    renderPosition: {x: 20, y: 20, size: 50},
+    ...overrides,
+  });
+  const tokens = [
+    tokenAt('tiny-visible'),
+    tokenAt('manager-movable', {canMove: true}),
+    tokenAt('viewer-owned', {
+      isOwnedByViewer: true,
+      renderPosition: {x: 2000, y: 2000, size: 50},
+    }),
+    tokenAt('selected', {isSelected: true}),
+    tokenAt('active', {isActiveTurn: true}),
+    tokenAt('just-below-useful-size', {
+      renderPosition: {x: 20, y: 20, size: 79.5},
+    }),
+    tokenAt('minimum-useful-size', {
+      renderPosition: {x: 20, y: 20, size: 80},
+    }),
+  ];
+
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens,
+    viewport: {x: 0, y: 0, scale: 0.2},
+    stageSize: {width: 200, height: 200},
+    limit: 10,
+  });
+
+  expect([...selectedIds]).toEqual([
+    'active',
+    'selected',
+    'viewer-owned',
+    'minimum-useful-size',
+  ]);
+  expect(selectedIds).not.toContain('tiny-visible');
+  expect(selectedIds).not.toContain('manager-movable');
+  expect(selectedIds).not.toContain('just-below-useful-size');
+});
+
+test('keeps token media priority and fixture order stable when candidates exceed the limit', () => {
+  const tokenAt = (tokenId, overrides = {}) => ({
+    tokenId,
+    imageUrl: `https://example.com/${tokenId}.png`,
+    renderPosition: {x: 20, y: 20, size: 50},
+    ...overrides,
+  });
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens: [
+      tokenAt('visible-first'),
+      tokenAt('owned-first', {isOwnedByViewer: true}),
+      tokenAt('selected-first', {isSelected: true}),
+      tokenAt('active-first', {isActiveTurn: true}),
+      tokenAt('active-second', {isActiveTurn: true}),
+      tokenAt('selected-second', {isSelected: true}),
+    ],
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 5,
+  });
+
+  expect([...selectedIds]).toEqual([
+    'active-first',
+    'active-second',
+    'selected-first',
+    'selected-second',
+    'owned-first',
+  ]);
+  expect(selectedIds).not.toContain('visible-first');
 });
 
 jest.mock('framer-motion', () => {

@@ -131,6 +131,27 @@ still fail. On an authoritative failure, GitHub uploads this immutable evidence
 before the soak starts, so the soak can continue without replacing the failure
 artifact. The classifier itself was not broadened.
 
+The exact evidence-patch push then exposed a separate product regression in
+the standard Linux route smoke. Run
+[`31941432007`](https://github.com/marco-lor/fatins-test/actions/runs/31941432007)
+passed every non-browser job and cross-browser readiness, but the first
+five-peer player still had four active and thirteen queued token images at the
+unchanged 15-second finite-asset deadline. The retained trace showed 75 image
+requests whose individual emulator responses took only about 5-62 ms, while
+registry polls were blocked for 4-5 seconds. The full-map fit rendered all 200
+tokens at roughly seven CSS pixels, yet the selector filled 72 media leases
+because every token was technically on screen and every DM token was movable.
+
+The board now loads token art only when the token is active, selected,
+viewer-owned, or both on screen and at least 16 CSS pixels. Offscreen and tiny
+overview tokens keep their existing initials/fallback rendering, and manager
+movement authority no longer makes all token art eager. The 200-token fixture,
+registry concurrency, and 15-second gate remain unchanged. The compact browser
+contract now proves all 200 Konva token nodes remain rendered while the active
+board stays pinned, finite registry work drains to zero, no preload is dropped,
+and compact record/byte budgets hold; it no longer requires spare registry
+capacity to be filled to an incidental exact count.
+
 ## Independent review
 
 An independent read-only agent audited the implementation from base
@@ -159,6 +180,14 @@ before asynchronous response resolution, retained error strings and diagnostic
 errors are bounded, and the failure-only upload is tied specifically to the
 authoritative step outcome.
 
+After the exact-SHA Linux smoke exposed overview token-media starvation, the
+reviewer independently approved the product correction with no P0-P2 blocker.
+The review confirmed the 15.9/16.0 CSS-pixel boundary, large-offscreen,
+viewer-owned-offscreen, manager-movable-non-owned, and stable over-limit order
+coverage; verified that ownership derivation preserves the prior movement
+authorization rule without changing persistence or reads; and approved the
+compact 200-node, active-pin, drained-queue, zero-drop, and budget contract.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -167,7 +196,7 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 139 suites, 1,299 tests |
+| Full frontend Jest | PASS: 139 suites, 1,301 tests |
 | Performance/harness Node tests | PASS: 366/366 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
@@ -177,6 +206,7 @@ No live application data was mutated by these gates.
 | Firefox/WebKit Task 07 smoke | PASS: 4/4 |
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Patched five-peer response-evidence gate | PASS: 3/3 Playwright stages with clean owned-emulator teardown; all 12 additional scenario repetitions passed |
+| Overview token-media regression | PASS: GrigliataBoard 146/146; fresh performance build plus strict five-peer and compact 200-token browser probes 4/4 |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 | Clean-commit authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each |
@@ -221,6 +251,13 @@ Predeploy and live evidence:
   and
 - `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
   loopback source.
+
+The overview token-media correction produces the next scoped release candidate
+as `main.4024cc0c.js` (665,057 bytes; SHA-256
+`3fa03506611c20b2ddf6f6131f47ccd86e27ebf5b8156efca40f35f5620f5c35`). Its
+exact-SHA workflows and live served-bundle match remain explicit final release
+gates; the earlier `main.355adcc4.js` evidence above is retained as the last
+completed scoped deployment rather than being rewritten as future evidence.
 
 ## Final release gates
 
