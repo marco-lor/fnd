@@ -244,11 +244,19 @@ const collectScenarioMetricSamples = (report, predicate) => {
   return { metrics, recordCounts };
 };
 
-const buildTimingMedianMetricMap = (report) => {
+const timingAggregation = (key) => (
+  /:runtime\.maxLongTaskMs$/.test(key) ? 'maximum' : 'median'
+);
+
+const aggregateTimingSamples = (key, values) => (
+  timingAggregation(key) === 'maximum' ? Math.max(...values) : median(values)
+);
+
+const buildTimingMetricMap = (report) => {
   const { metrics } = collectScenarioMetricSamples(report, isTimingMetric);
   return Object.fromEntries(Object.entries(metrics).map(([key, samples]) => [
     key,
-    samples.complete ? median(samples.values) : null,
+    samples.complete ? aggregateTimingSamples(key, samples.values) : null,
   ]));
 };
 
@@ -549,8 +557,13 @@ const compareReports = (
       leftTimingCollection.recordCounts[scenarioId],
       rightTimingCollection.recordCounts[scenarioId]
     );
-    const leftValue = comparison.complete ? median(comparison.leftSamples) : null;
-    const rightValue = comparison.complete ? median(comparison.rightSamples) : null;
+    const aggregation = timingAggregation(key);
+    const leftValue = comparison.complete
+      ? aggregateTimingSamples(key, comparison.leftSamples)
+      : null;
+    const rightValue = comparison.complete
+      ? aggregateTimingSamples(key, comparison.rightSamples)
+      : null;
     const variancePercent = Number.isFinite(leftValue) && Number.isFinite(rightValue)
       ? relativeDifferencePercent(leftValue, rightValue)
       : null;
@@ -564,6 +577,7 @@ const compareReports = (
     const gatedVariancePercent = withinAbsoluteTolerance ? 0 : variancePercent;
     return {
       ...comparison,
+      aggregation,
       left: leftValue,
       right: rightValue,
       absoluteDifference,
@@ -634,11 +648,13 @@ module.exports = {
   TTFB_ABSOLUTE_JITTER_MS,
   aggregateReports,
   absoluteJitterToleranceMs,
-  buildTimingMedianMetricMap,
+  aggregateTimingSamples,
+  buildTimingMetricMap,
   collectScenarioMetricSamples,
   compareReports,
   isDeterministicMetric,
   isTimingMetric,
   relativeDifferencePercent,
   runRepeatability,
+  timingAggregation,
 };

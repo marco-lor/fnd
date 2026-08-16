@@ -6,9 +6,12 @@ const {
   installDeterministicFontRoutes,
   isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   writeScenarioResult,
 } = require('./helpers');
+
+const TASK07_COMPACT_EXPECTED_LOADED_RECORDS = 40;
 
 const task07RegistryMetrics = (registry) => ({
   'task07.registryRequestConcurrencyLimit': Number(registry?.limits?.maxConcurrentRequests),
@@ -187,11 +190,13 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       expectedPathname: '/grigliata',
       timeoutMs: 30_000,
     });
-    await page.waitForFunction(() => (
-      typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
-    ));
+    // The owned fixture establishes a 40-record compact load set: one pinned
+    // active map plus 39 unpinned media records. Capture only after that finite
+    // queue is idle and stable; readiness alone can precede its completion.
+    const registry = await waitForImageRegistrySettlement(page, {
+      minimumLoadedRecords: TASK07_COMPACT_EXPECTED_LOADED_RECORDS,
+    });
     const snapshot = await page.evaluate(() => ({
-      registry: window.__FND_PERF_BENCHMARKS__.getImageRegistryStats(),
       visibleStarFields: Array.from(
         document.querySelectorAll('.global-aurora__star-field')
       ).filter((node) => getComputedStyle(node).display !== 'none').length,
@@ -200,7 +205,7 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       ).length,
       meteorSlots: document.querySelectorAll('.shooting-star').length,
     }));
-    expect(snapshot.registry.limits).toMatchObject({
+    expect(registry.limits).toMatchObject({
       profile: 'compact',
       maxConcurrentRequests: 2,
       maxRecords: 64,
@@ -208,6 +213,9 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       maxTotalDecodedBytes: 320 * 1024 * 1024,
       maxLowPriorityQueueSize: 16,
     });
+    expect(registry.loadedRecordCount).toBe(TASK07_COMPACT_EXPECTED_LOADED_RECORDS);
+    expect(registry.activeRequestCount).toBe(0);
+    expect(registry.queuedRequestCount).toBe(0);
     expect(snapshot.visibleStarFields).toBe(1);
     expect(snapshot.meteorSlots).toBe(2);
     expect(snapshot.activeMeteors).toBe(0);
@@ -222,7 +230,7 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
         browserName: testInfo.project.use.browserName || testInfo.project.name,
         browserVersion: browser.version(),
       },
-      metrics: task07RegistryMetrics(snapshot.registry),
+      metrics: task07RegistryMetrics(registry),
       diagnostics: {
         consoleErrors: errors,
         explainedRecaptchaReportOnlyWarnings,

@@ -193,6 +193,31 @@ test('timing repeatability compares complete retained-sample medians', () => {
   assert.equal(result.timing.some(({ key }) => key.endsWith('.p95')), false);
 });
 
+test('maximum long-task repeatability compares the worst retained samples', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  setScenarioMetric(left, 'runtime.maxLongTaskMs', [307, 152, 165]);
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [312, 308, 284]);
+
+  const stable = compare(left, right, 15);
+  const longTask = stable.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(stable.status, 'pass');
+  assert.equal(longTask.aggregation, 'maximum');
+  assert.equal(longTask.left, 307);
+  assert.equal(longTask.right, 312);
+  assert.deepEqual(longTask.leftSamples, [307, 152, 165]);
+  assert.deepEqual(longTask.rightSamples, [312, 308, 284]);
+
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [200, 198, 190]);
+  const drifted = compare(left, right, 15);
+  assert.equal(
+    drifted.timing.find(({ key }) => key === 'home:runtime.maxLongTaskMs').status,
+    'fail'
+  );
+});
+
 test('advisory INP samples do not control the authoritative repeatability gate', () => {
   const left = report('run-a', 1000);
   const right = report('run-b', 1000);

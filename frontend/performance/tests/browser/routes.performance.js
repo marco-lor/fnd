@@ -6,6 +6,7 @@ const {
   countRouteResources,
   createPageAssetTracker,
   drainPageConnections,
+  flushBrowserObservers,
   installBootstrap,
   installDeterministicFontRoutes,
   isExpectedDemoRecaptchaCancellation,
@@ -33,19 +34,6 @@ const waitForFinitePageAssets = async (pageAssets, scenarioId, phase) => {
       message: `Finite page assets did not settle ${phase} for ${scenarioId}.`,
     }
   ).toBe(true);
-};
-
-const flushBrowserObservers = async (page) => {
-  await page.evaluate(() => new Promise((resolve) => {
-    const afterIdle = () => {
-      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(afterIdle, { timeout: 250 });
-      return;
-    }
-    window.setTimeout(afterIdle, 0);
-  }));
 };
 
 const waitForStableLargestContentfulPaint = async (
@@ -189,7 +177,13 @@ for (const scenario of scenarios) {
       }
       await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
       await waitForStableLargestContentfulPaint(page, scenario.id);
-      await runInteraction(page, scenario);
+      await runInteraction(page, scenario, {
+        settleFiniteAssets: async (phase) => {
+          pageAssets.beginQuietWindow();
+          await flushBrowserObservers(page);
+          await waitForFinitePageAssets(pageAssets, scenario.id, phase);
+        },
+      });
       assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);
       pageAssets.beginQuietWindow();

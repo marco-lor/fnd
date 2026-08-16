@@ -706,6 +706,61 @@ const createPageAssetTracker = ({
   };
 };
 
+const flushBrowserObservers = async (page) => {
+  await page.evaluate(() => new Promise((resolve) => {
+    const afterIdle = () => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(afterIdle, { timeout: 250 });
+      return;
+    }
+    window.setTimeout(afterIdle, 0);
+  }));
+};
+
+const waitForImageRegistrySettlement = async (page, {
+  minimumLoadedRecords = 0,
+  quietMs = 250,
+  timeoutMs = 15_000,
+} = {}) => {
+  await flushBrowserObservers(page);
+  const deadline = Date.now() + timeoutMs;
+  let lastSignature = '';
+  let unchangedSince = Date.now();
+  let latest = null;
+
+  while (Date.now() < deadline) {
+    latest = await page.evaluate(() => {
+      const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
+      return typeof getStats === 'function' ? getStats() : null;
+    });
+    const settled = latest
+      && Number(latest.loadedRecordCount) >= minimumLoadedRecords
+      && Number(latest.activeRequestCount) === 0
+      && Number(latest.queuedRequestCount) === 0;
+    const signature = settled ? JSON.stringify([
+      Number(latest.recordCount),
+      Number(latest.loadedRecordCount),
+      Number(latest.decodedBytes),
+      Number(latest.unpinnedDecodedBytes),
+      Number(latest.unpinnedRecordCount),
+    ]) : '';
+
+    if (signature && signature === lastSignature) {
+      if (Date.now() - unchangedSince >= quietMs) return latest;
+    } else {
+      lastSignature = signature;
+      unchangedSince = Date.now();
+    }
+    await page.waitForTimeout(50);
+  }
+
+  throw new Error(
+    `Image registry did not settle: ${JSON.stringify({ minimumLoadedRecords, latest })}`
+  );
+};
+
 const installOwnedEmulatorFirestoreTransport = async (context) => {
   if (!context || typeof context.addInitScript !== 'function') {
     throw new TypeError('Owned emulator Firestore transport requires a browser context.');
@@ -966,7 +1021,7 @@ const locateDmDashboardPlayerCard = (page, playerName) => {
   );
 };
 
-const runInteraction = async (page, scenario) => {
+const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
   switch (scenario.id) {
     case 'login-cold':
     case 'login-warm': {
@@ -1040,7 +1095,20 @@ const runInteraction = async (page, scenario) => {
     case 'foes-hub': {
       const row = page.locator('[role="button"]').filter({ hasText: 'Fixture foe 42' }).first();
       await expect(row).toBeVisible();
+      // Playwright's implicit click scroll can expose a timing-dependent set of
+      // intermediate lazy rows. Land directly on the measured row, then let
+      // its finite MediaImage work settle before expanding it.
+      await row.evaluate((node) => node.scrollIntoView({
+        behavior: 'auto',
+        block: 'center',
+        inline: 'nearest',
+      }));
+      if (typeof settleFiniteAssets !== 'function') {
+        throw new TypeError('Foes Hub measurement requires finite-asset settlement.');
+      }
+      await settleFiniteAssets('after deterministic Foes Hub scroll');
       await row.getByLabel('expand').click();
+      await expect(row).toHaveAttribute('aria-expanded', 'true');
       break;
     }
     case 'admin': {
@@ -1321,6 +1389,7 @@ module.exports = {
   createStaticAssetWarmupBatches,
   assertStaticAssetWarmupInventory,
   drainPageConnections,
+  flushBrowserObservers,
   installBootstrap,
   installDeterministicFontRoutes,
   installOwnedEmulatorFirestoreTransport,
@@ -1347,6 +1416,7 @@ module.exports = {
   warmBrowserAssetDelivery,
   waitForBridge,
   waitForKonvaTokenMove,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   writeScenarioRaw,
   writeScenarioResult,

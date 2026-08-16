@@ -34,6 +34,7 @@ const {
   scenarioRestorePatch,
   summarizeResourceEntries,
   warmBrowserAssetDelivery,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
@@ -1070,6 +1071,51 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   assert.equal(tracker.isQuiet(), false);
   now = 1460;
   assert.equal(tracker.isQuiet(), true);
+});
+
+test('image registry settlement rejects early idle and waits for a stable complete fixture', async () => {
+  const registrySnapshots = [
+    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
+    { loadedRecordCount: 14, activeRequestCount: 0, queuedRequestCount: 0 },
+    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
+    {
+      recordCount: 40,
+      loadedRecordCount: 40,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      decodedBytes: 40 * 36_864,
+      unpinnedDecodedBytes: 39 * 36_864,
+      unpinnedRecordCount: 39,
+    },
+    {
+      recordCount: 40,
+      loadedRecordCount: 40,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      decodedBytes: 40 * 36_864,
+      unpinnedDecodedBytes: 39 * 36_864,
+      unpinnedRecordCount: 39,
+    },
+  ];
+  let evaluateCalls = 0;
+  const page = {
+    evaluate: async () => {
+      evaluateCalls += 1;
+      if (evaluateCalls === 1) return undefined;
+      return registrySnapshots.shift();
+    },
+    waitForTimeout: async () => new Promise((resolve) => setTimeout(resolve, 2)),
+  };
+
+  const settled = await waitForImageRegistrySettlement(page, {
+    minimumLoadedRecords: 40,
+    quietMs: 1,
+  });
+
+  assert.equal(settled.loadedRecordCount, 40);
+  assert.equal(settled.activeRequestCount, 0);
+  assert.equal(evaluateCalls, 6);
+  assert.equal(registrySnapshots.length, 0);
 });
 
 test('resource summaries preserve requests and separate canonical inventory from streams', () => {
