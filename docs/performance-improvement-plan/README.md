@@ -6,15 +6,16 @@ The tasks are intentionally ordered and must be implemented one at a time. Each 
 
 ## Current sequence status
 
-Task 06 was accepted as locally validated for roadmap progression on
-2026-07-27. Task 07 may start.
+Task 07's isolated `fatin-test` closure passed its local, independent-review,
+authoritative, 600-second soak, production-build, scoped Hosting, and exact
+served-bundle gates on 2026-08-16. Task 08 is the next sequential task once the
+containing `main` revision's normal workflow and manually dispatched full
+benchmark finish green.
 
-This closure is based on the passing full frontend, Functions, backend,
-emulator, build, startup, and 19/19 broad browser-performance checks recorded
-in `task-06/implementation-evidence.md`. It does not mean Task 06 was deployed
-or that a new performance baseline was accepted. The final two-run
-authoritative repeatability certification was explicitly waived for Task 06
-closure and remains unavailable as baseline-acceptance evidence.
+The Task 07 closure does not accept a new performance baseline, hide the
+documented non-blocking roadmap targets, authorize a `fatins` deployment, or
+change any Firestore/Storage/Functions plane. Exact evidence and boundaries are
+recorded in `task-07/fatin-test-closure-2026-08-16.md`.
 
 ## Documents
 

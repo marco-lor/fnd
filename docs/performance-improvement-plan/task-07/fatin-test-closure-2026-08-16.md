@@ -2,10 +2,10 @@
 
 Date: 2026-08-16
 
-Status: release candidate. This record becomes final only after the containing
-candidate passes the clean-commit authoritative and soak gates, the scoped
-`fatin-test` Hosting release is verified, and the exact pushed revision is
-green in CI.
+Status: local, independent-review, soak, build, Hosting, and live-verification
+gates complete. Task 07 is complete for `fatin-test` roadmap progression once
+the containing `main` revision finishes the required exact-revision CI green;
+any CI failure reopens this closure.
 
 This closure is limited to the isolated `fatin-test` project. It does not
 authorize or describe a `fatins` deployment, data copy, media-control change,
@@ -120,8 +120,8 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 138 suites, 1,297 tests |
-| Performance/harness Node tests | PASS: 360/360 |
+| Full frontend Jest | PASS: 138 suites, 1,298 tests |
+| Performance/harness Node tests | PASS: 363/363 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
@@ -131,6 +131,10 @@ No live application data was mutated by these gates.
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
+| Clean-commit authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each |
+| Authoritative repeatability | PASS: zero compatibility, deterministic, or timing failures; maximum gated variance 10.00% |
+| Default 600-second media soak | PASS: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle |
+| Production bundle and unchanged start path | PASS: hardened build verification and `/home` HTTP 200 through `npm start` |
 
 The comparison continues to report five non-blocking roadmap targets. They are
 not hidden or re-baselined by this closure:
@@ -140,22 +144,46 @@ not hidden or re-baselined by this closure:
 - LCP, INP, and CLS final targets are owned by Task 22; and
 - the Grigliata long-task target is owned by Task 17.
 
+## Scoped release and live verification
+
+Only Hosting was deployed. Functions, Firestore rules/indexes, Storage rules,
+rollout controls, and application data were not changed. The release command
+targeted the hard-coded `fatin-test` site, and the predeploy guard reran all
+prerequisites before uploading 81 Hosting files.
+
+The Windows Firebase CLI session was reused through Node's system certificate
+store with `NODE_OPTIONS=--use-system-ca`. The ignored canonical
+`fatins-test/frontend/.env.local` values required by the App Check verifier
+were inherited only by the release process; no credential or environment file
+was copied into this worktree or committed.
+
+Predeploy and live evidence:
+
+- App Check reported `ready: true`, including API, domain, service-agent,
+  reCAPTCHA Enterprise, score-integration, site-key, and web-app bindings;
+- the user-directory verifier scanned 11 documents, found all 11 unchanged,
+  and performed zero writes;
+- Firebase reported the `fatin-test` Hosting release complete at
+  `https://fatin-test.web.app`;
+- live `/home` returned HTTP 200 and referenced the exact local script
+  manifest;
+- live `main.52ca5fa2.js` matched the local production bundle exactly
+  (665,021 UTF-8 bytes; SHA-256
+  `ac522f8a3bf85913034d10ca5ae0a5221d483e4399b72a4977e232a9f362d998`);
+  and
+- `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
+  loopback source.
+
 ## Final release gates
 
-Before changing this record to `complete`:
+The containing revision must retain all of these gates:
 
-1. commit the release candidate so the authoritative harness can prove a clean
-   worktree;
-2. pass `npm run perf:authoritative`, including two three-iteration Chromium
-   snapshots, repeatability comparison, and all blocking budgets;
-3. pass the default 600-second `npm run perf:media:soak` with all 50 maps, 200
-   placements, three or more cycles, zero stale route resources, and zero Konva
-   stages/containers after cleanup;
-4. rebuild and verify the production bundle and unchanged `npm start` path;
-5. deploy Hosting only to the exact `fatin-test` target and verify the served
-   release; and
-6. fast-forward and push `main`, dispatch the full benchmark for the exact
-   pushed revision, and require its checks to finish green.
+1. the clean-commit authoritative pair and blocking budgets recorded above;
+2. the default 600-second media soak with the full 50-map/200-placement fixture;
+3. the production bundle, unchanged start path, scoped Hosting release, and
+   exact served-bundle verification recorded above; and
+4. a fast-forward push to `main` followed by the normal workflow and a manually
+   dispatched full benchmark for that exact pushed revision, both green.
 
 After those gates pass, Task 07 is closed for `fatin-test` roadmap progression
 and Task 08 is the next sequential task.
