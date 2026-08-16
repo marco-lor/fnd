@@ -258,6 +258,28 @@ hydration regressions were added before the final verdict: **APPROVE**, with no
 remaining code, UX, security, or evidence-integrity blocker. A fresh exact-SHA
 GitHub run remains mandatory release evidence.
 
+The replacement revision `00fa3bb5a1ad77ebe0ef298b3e485082d734d614`
+passed the complete normal Linux workflow in run `31949123260`. Its manually
+dispatched run `31949671046` also passed every normal job and the full
+600-second media soak, but its authoritative A/B comparison was not accepted:
+three timing-only series exceeded the unchanged v4 repeatability gate while
+all compatibility, deterministic, delivery, cleanup, and error evidence
+matched. The reviewer found no demonstrated product regression and explicitly
+rejected threshold widening or retry-only acceptance. It instead required
+native long-task start/phase attribution and decomposition of five-peer write
+acknowledgement from each peer's render settlement. Those bounded, text-free
+diagnostics were added without changing any gated metric or normal production
+behavior; a fresh clean-commit pair remains required.
+
+The follow-up independent audit initially blocked the evidence patch on four
+edge contracts: acknowledgement-dominant totals, attached waiter rejection
+handling, conflated route/scenario phases, and hidden peers. The corrected
+implementation preserves total convergence as the maximum of write ack and
+every peer, drains attached waiters with deterministic error precedence,
+retains independent categorical phase dimensions, and fail-closes unless every
+peer is visible. Final verdict: **APPROVE**, with no remaining code, security,
+or evidence-integrity blocker.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -266,8 +288,8 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 139 suites, 1,308 tests |
-| Performance/harness Node tests | PASS: 370/370 |
+| Full frontend Jest | PASS: 139 suites, 1,309 tests |
+| Performance/harness Node tests | PASS: 376/376 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
@@ -277,11 +299,14 @@ No live application data was mutated by these gates.
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Patched five-peer response-evidence gate | PASS: 3/3 Playwright stages with clean owned-emulator teardown; all 12 additional scenario repetitions passed |
 | Overview token-media, geometry, zoom, and narration-fit regressions | PASS: GrigliataBoard 153/153; three separate fresh desktop/compact 200-token browser probes 4/4 each, including two from the exact final source |
+| Timing-attribution browser gate | PASS: asset warmup, auth setup, five-peer, login-warm, and Grigliata manager 5/5; snapshots retain bounded phase diagnostics and split five-peer write/render timings |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 | Historical clean-commit v3 authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each; superseded as final evidence by contract v4 |
 | Historical v3 authoritative repeatability | PASS: zero compatibility, deterministic, or timing failures; maximum gated variance 10.00%; a fresh v4 pair remains required for the containing revision |
 | Default 600-second media soak | PASS: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle |
+| Exact-SHA normal Linux workflow | PASS: run `31949123260` on `00fa3bb5a1ad77ebe0ef298b3e485082d734d614`, all six required jobs green |
+| Exact-SHA manual Linux workflow | NOT ACCEPTED: run `31949671046` passed all six normal jobs and the 600-second soak, but the A/B timing comparison failed three hosted-runner series; all deterministic checks passed |
 | Production bundle and unchanged start path | PASS: hardened build verification and `/home` HTTP 200 through `npm start` |
 
 The comparison continues to report five non-blocking roadmap targets. They are
@@ -328,12 +353,15 @@ next scoped release candidate as `main.cc93f065.js` (665,057 bytes; SHA-256
 exact-SHA workflows and live served-bundle match remain explicit final release
 gates; the earlier `main.355adcc4.js` evidence above is retained as the last
 completed scoped deployment rather than being rewritten as future evidence.
+The evidence-only timing-attribution follow-up retains these exact production
+bytes and remains absent from the normal bundle by the disabled-build verifier.
 
 ## Final release gates
 
 The containing revision must retain all of these gates:
 
-1. the clean-commit authoritative pair and blocking budgets recorded above;
+1. a fresh clean-commit authoritative attribution pair with every blocking
+   compatibility, deterministic, and timing comparison green;
 2. the default 600-second media soak with the full 50-map/200-placement fixture;
 3. the production bundle, unchanged start path, scoped Hosting release, and
    exact served-bundle verification recorded above; and

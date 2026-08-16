@@ -13,6 +13,7 @@ const {
   isExpectedDemoRecaptchaReportOnlyWarning,
   navigateToCleanup,
   retainImageResourceTimings,
+  retainLongTaskEntries,
   restoreScenarioState,
   runInteraction,
   storageStateForRole,
@@ -25,6 +26,10 @@ const {
 const scenarios = manifest.scenarios.filter((scenario) => scenario.scheduledOnly !== true);
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
+
+const markScenarioPhase = (page, phase) => page.evaluate((nextPhase) => {
+  window.__FND_PERF__?.mark?.('scenario-phase', { phase: nextPhase });
+}, phase);
 
 const waitForFinitePageAssets = async (pageAssets, scenarioId, phase) => {
   await expect.poll(
@@ -166,17 +171,24 @@ for (const scenario of scenarios) {
         });
 
       await page.goto(scenario.route, { waitUntil: 'domcontentloaded' });
+      await markScenarioPhase(page, 'route-readiness');
       await waitForReadiness(page);
+      await markScenarioPhase(page, 'route-active');
       lifecyclePhase = 'route-active';
       await expect(page).toHaveURL(new RegExp(`${scenario.route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
       if (scenario.cache === 'warm') {
         lifecyclePhase = 'route-navigation';
         await page.reload({ waitUntil: 'domcontentloaded' });
+        await markScenarioPhase(page, 'route-readiness');
         await waitForReadiness(page);
+        await markScenarioPhase(page, 'route-active');
         lifecyclePhase = 'route-active';
       }
+      await markScenarioPhase(page, 'asset-settlement');
       await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
+      await markScenarioPhase(page, 'lcp-settlement');
       await waitForStableLargestContentfulPaint(page, scenario.id);
+      await markScenarioPhase(page, 'interaction');
       await runInteraction(page, scenario, {
         settleFiniteAssets: async (phase) => {
           pageAssets.beginQuietWindow();
@@ -184,12 +196,15 @@ for (const scenario of scenarios) {
           await waitForFinitePageAssets(pageAssets, scenario.id, phase);
         },
       });
+      await markScenarioPhase(page, 'post-interaction-settlement');
       assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);
       pageAssets.beginQuietWindow();
       await flushBrowserObservers(page);
       await waitForFinitePageAssets(pageAssets, scenario.id, 'after interaction and observer flush');
+      await markScenarioPhase(page, 'capture');
       const capture = await captureBrowserMetrics(page, diagnostics);
+      const retainedLongTasks = retainLongTaskEntries(capture.snapshot.events);
       expect(
         capture.resourceTimingBufferOverflow,
         `Resource Timing buffer overflowed for ${scenario.id}.`
@@ -253,6 +268,8 @@ for (const scenario of scenarios) {
           imageResourceTimings: retainImageResourceTimings(
             capture.diagnostics.imageResourceTimings
           ),
+          longTaskEntryCount: retainedLongTasks.totalCount,
+          longTaskEntries: retainedLongTasks.entries,
         },
       });
       } catch (error) {

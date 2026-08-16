@@ -465,6 +465,7 @@ export const installPerformanceRuntime = () => {
         metric: 'long-task',
         value: entry.duration,
         unit: 'ms',
+        tags: { startTime: entry.startTime },
       }));
     });
     longTaskObserver.observe({ type: 'longtask', buffered: true });

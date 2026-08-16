@@ -9,6 +9,7 @@ const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  assertVisiblePeerStates,
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
@@ -17,6 +18,7 @@ const {
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedFirestoreLifecycleCancellation,
   isKnownDemoFirestoreStartupWarning,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
@@ -406,15 +408,22 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
         )
       )));
-      const startedAt = Date.now();
-      await placement.update({ col, updatedAt });
-      await Promise.all(pages.map(({ page }, index) => waitForKonvaTokenMove(page, {
-        tokenId: PROBE_TOKEN_ID,
-        from: fromPositions[index],
-        deltaX,
-        deltaY: 0,
-      })));
-      const durationMs = Date.now() - startedAt;
+      const visibilityByPeer = await Promise.all(pages.map(({ page }) => (
+        page.evaluate(() => document.visibilityState)
+      )));
+      visibilityByPeer.forEach((visibilityState, index) => {
+        pages[index].diagnostics.visibilityState = visibilityState;
+      });
+      assertVisiblePeerStates(visibilityByPeer, pages.map(({ role }) => `${label}/${role}`));
+      const transitionTimings = await measurePeerTransitionTimings({
+        performWrite: () => placement.update({ col, updatedAt }),
+        waitForPeers: pages.map(({ page }, index) => () => waitForKonvaTokenMove(page, {
+          tokenId: PROBE_TOKEN_ID,
+          from: fromPositions[index],
+          deltaX,
+          deltaY: 0,
+        })),
+      });
       const serverPlacement = (await placement.get()).data();
       expect(serverPlacement?.col, `${label}: server placement column`).toBe(col);
       expect(serverPlacement?.updatedAt, `${label}: server placement timestamp`).toBe(updatedAt);
@@ -438,7 +447,8 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         deltaX,
         label,
         deliveriesByPeer,
-        durationMs,
+        visibilityByPeer,
+        ...transitionTimings,
         nextPositions: fromPositions.map(({ x, y }) => ({ x: x + deltaX, y })),
         eventCounts: afterTelemetry.map(({ eventCount }) => eventCount),
       };
@@ -599,6 +609,16 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         warmup: {
           forwardDurationMs: warmupForward.durationMs,
           reverseDurationMs: warmupReverse.durationMs,
+          forwardWriteAckMs: warmupForward.writeAckMs,
+          reverseWriteAckMs: warmupReverse.writeAckMs,
+          forwardPeerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            warmupForward.peerConvergenceMs[peerIndex],
+          ])),
+          reversePeerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            warmupReverse.peerConvergenceMs[peerIndex],
+          ])),
           forwardDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,
             warmupForward.deliveriesByPeer[peerIndex],
@@ -617,6 +637,19 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           fromPositions: transition.fromPositions,
           deltaX: transition.deltaX,
           durationMs: transition.durationMs,
+          writeAckMs: transition.writeAckMs,
+          peerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.peerConvergenceMs[peerIndex],
+          ])),
+          postWriteAckConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.postWriteAckConvergenceMs[peerIndex],
+          ])),
+          visibilityByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.visibilityByPeer[peerIndex],
+          ])),
           observedPlacementChangeEvents: observedPlacementChangeEvents[index],
           placementDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,

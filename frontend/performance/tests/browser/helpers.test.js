@@ -9,6 +9,7 @@ const {
   MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
+  assertVisiblePeerStates,
   assertStaticAssetWarmupInventory,
   countChangedDocumentsForTarget,
   createPageAssetTracker,
@@ -24,22 +25,164 @@ const {
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
   retainImageResourceTimings,
+  retainLongTaskEntries,
   resolvePlaywrightResponseStatus,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
   sanitizeFivePeerRequestFailure,
   scenarioRestorePatch,
   summarizeResourceEntries,
+  summarizePeerTransitionTimings,
   warmBrowserAssetDelivery,
   waitForImageRegistrySettlement,
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('retains bounded native long-task timings with the phase active at task start', () => {
+  const events = [
+    { category: 'route', metric: 'start', timestamp: 5 },
+    { category: 'custom', metric: 'scenario-phase', timestamp: 20, tags: { phase: 'interaction' } },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 160,
+      value: 80,
+      tags: { startTime: 40 },
+    },
+    { category: 'custom', metric: 'scenario-phase', timestamp: 100, tags: { phase: 'post-interaction-settlement' } },
+    { category: 'route', metric: 'interactive', timestamp: 105 },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 240,
+      value: 120,
+      tags: { startTime: 110 },
+    },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 300,
+      value: 60,
+      tags: { startTime: 15 },
+    },
+  ];
+
+  assert.deepEqual(retainLongTaskEntries(events, { maximumEntries: 2 }), {
+    totalCount: 3,
+    entries: [
+      {
+        startTime: 40,
+        duration: 80,
+        scenarioPhase: 'interaction',
+        routePhase: 'route-start',
+      },
+      {
+        startTime: 110,
+        duration: 120,
+        scenarioPhase: 'post-interaction-settlement',
+        routePhase: 'interactive',
+      },
+    ],
+  });
+});
+
+test('separates write acknowledgement from each peer render settlement', () => {
+  assert.deepEqual(summarizePeerTransitionTimings({
+    startedAt: 1_000,
+    writeAcknowledgedAt: 1_120,
+    peerSettledAt: [1_180, 1_260, 1_200],
+  }), {
+    durationMs: 260,
+    writeAckMs: 120,
+    peerConvergenceMs: [180, 260, 200],
+    postWriteAckConvergenceMs: [60, 140, 80],
+  });
+});
+
+test('keeps an acknowledgement-dominant write in total peer convergence', () => {
+  assert.deepEqual(summarizePeerTransitionTimings({
+    startedAt: 1_000,
+    writeAcknowledgedAt: 1_400,
+    peerSettledAt: [1_100, 1_250],
+  }), {
+    durationMs: 400,
+    writeAckMs: 400,
+    peerConvergenceMs: [100, 250],
+    postWriteAckConvergenceMs: [0, 0],
+  });
+});
+
+test('drains every attached peer waiter before propagating a write rejection', async () => {
+  const writeFailure = new Error('write failed');
+  let releaseSlowPeer;
+  let slowPeerDrained = false;
+  const measurement = measurePeerTransitionTimings({
+    performWrite: async () => { throw writeFailure; },
+    waitForPeers: [
+      () => new Promise((resolve) => {
+        releaseSlowPeer = () => {
+          slowPeerDrained = true;
+          resolve();
+        };
+      }),
+      async () => { throw new Error('peer poll failed'); },
+    ],
+    now: () => 1_000,
+  });
+  let settled = false;
+  const outcome = measurement.then(
+    () => ({ status: 'resolved' }),
+    (error) => ({ status: 'rejected', error })
+  ).finally(() => { settled = true; });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+  releaseSlowPeer();
+  const result = await outcome;
+  assert.equal(slowPeerDrained, true);
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.error, writeFailure);
+});
+
+test('observes an early peer failure while the write is still pending', async () => {
+  const peerFailure = new Error('peer failed');
+  let acknowledgeWrite;
+  const measurement = measurePeerTransitionTimings({
+    performWrite: () => new Promise((resolve) => { acknowledgeWrite = resolve; }),
+    waitForPeers: [async () => { throw peerFailure; }],
+    now: () => 1_000,
+  });
+  let settled = false;
+  const outcome = measurement.then(
+    () => ({ status: 'resolved' }),
+    (error) => ({ status: 'rejected', error })
+  ).finally(() => { settled = true; });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+  acknowledgeWrite();
+  const result = await outcome;
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.error, peerFailure);
+});
+
+test('rejects a hidden peer before convergence timing is accepted', () => {
+  assert.deepEqual(
+    assertVisiblePeerStates(['visible', 'visible'], ['player', 'dm']),
+    ['visible', 'visible']
+  );
+  assert.throws(
+    () => assertVisiblePeerStates(['visible', 'hidden'], ['player', 'peer-2']),
+    /peer-2 must be visible during convergence measurement; received hidden/
+  );
+});
 
 const browserContextStub = (browserName, capture) => ({
   addInitScript: async (script, argument) => capture(script, argument),
@@ -970,7 +1113,7 @@ test('authoritative image diagnostics retain a bounded head and tail', () => {
   assert.deepEqual(retainImageResourceTimings(null), []);
 });
 
-test('authoritative scenario results retain sanitized LCP and image timing diagnostics', () => {
+test('authoritative scenario results retain sanitized LCP, image, and long-task diagnostics', () => {
   const routeSource = fs.readFileSync(
     path.resolve(__dirname, 'routes.performance.js'),
     'utf8'
@@ -982,6 +1125,10 @@ test('authoritative scenario results retain sanitized LCP and image timing diagn
   assert.match(
     routeSource,
     /imageResourceTimings:\s*retainImageResourceTimings\(/
+  );
+  assert.match(
+    routeSource,
+    /longTaskEntries:\s*retainedLongTasks\.entries/
   );
 });
 

@@ -47,6 +47,22 @@ const FIVE_PEER_DIAGNOSTIC_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'POST', 
 const MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS = 16;
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
 const MAX_RETAINED_IMAGE_RESOURCE_TIMINGS = 128;
+const MAX_RETAINED_LONG_TASK_ENTRIES = 64;
+const LONG_TASK_SCENARIO_PHASES = new Set([
+  'route-readiness',
+  'route-active',
+  'asset-settlement',
+  'lcp-settlement',
+  'interaction',
+  'post-interaction-settlement',
+  'capture',
+]);
+const LONG_TASK_ROUTE_PHASES = new Map([
+  ['start', 'route-start'],
+  ['shell-visible', 'shell-visible'],
+  ['data-ready', 'data-ready'],
+  ['interactive', 'interactive'],
+]);
 
 const demoFirestoreStreamOperation = (url) => {
   let parsed;
@@ -1339,6 +1355,145 @@ const retainImageResourceTimings = (timings) => {
   ];
 };
 
+const retainLongTaskEntries = (events, {
+  maximumEntries = MAX_RETAINED_LONG_TASK_ENTRIES,
+} = {}) => {
+  if (!Array.isArray(events)) return { totalCount: 0, entries: [] };
+  if (!Number.isInteger(maximumEntries) || maximumEntries < 1) {
+    throw new TypeError('Long-task diagnostics require a positive integer bound.');
+  }
+  const routePhaseMarkers = events.flatMap((event) => {
+    const timestamp = Number(event?.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp < 0) return [];
+    if (event.category === 'route' && LONG_TASK_ROUTE_PHASES.has(event.metric)) {
+      return [{ timestamp, phase: LONG_TASK_ROUTE_PHASES.get(event.metric) }];
+    }
+    return [];
+  }).sort((left, right) => left.timestamp - right.timestamp);
+  const scenarioPhaseMarkers = events.flatMap((event) => {
+    const timestamp = Number(event?.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp < 0) return [];
+    const phase = event?.tags?.phase;
+    if (
+      event.category === 'custom'
+      && event.metric === 'scenario-phase'
+      && LONG_TASK_SCENARIO_PHASES.has(phase)
+    ) {
+      return [{ timestamp, phase }];
+    }
+    return [];
+  }).sort((left, right) => left.timestamp - right.timestamp);
+  const phaseAt = (markers, startTime) => markers.reduce((latest, marker) => (
+    marker.timestamp <= startTime ? marker.phase : latest
+  ), 'unattributed');
+  const longTasks = events.flatMap((event) => {
+    if (event?.category !== 'runtime' || event?.metric !== 'long-task') return [];
+    const startTime = Number(event?.tags?.startTime);
+    const duration = Number(event?.value);
+    if (!Number.isFinite(startTime) || startTime < 0 || !Number.isFinite(duration) || duration < 0) {
+      return [];
+    }
+    return [{
+      startTime,
+      duration,
+      scenarioPhase: phaseAt(scenarioPhaseMarkers, startTime),
+      routePhase: phaseAt(routePhaseMarkers, startTime),
+    }];
+  });
+  const entries = [...longTasks]
+    .sort((left, right) => right.duration - left.duration || left.startTime - right.startTime)
+    .slice(0, maximumEntries)
+    .sort((left, right) => left.startTime - right.startTime);
+  return { totalCount: longTasks.length, entries };
+};
+
+const summarizePeerTransitionTimings = ({
+  startedAt,
+  writeAcknowledgedAt,
+  peerSettledAt,
+}) => {
+  const start = Number(startedAt);
+  const writeAck = Number(writeAcknowledgedAt);
+  const peerSettlements = Array.isArray(peerSettledAt) ? peerSettledAt.map(Number) : [];
+  if (
+    !Number.isFinite(start)
+    || !Number.isFinite(writeAck)
+    || writeAck < start
+    || !peerSettlements.length
+    || peerSettlements.some((settledAt) => !Number.isFinite(settledAt) || settledAt < start)
+  ) {
+    throw new TypeError('Peer transition timing requires ordered finite timestamps.');
+  }
+  const writeAckMs = writeAck - start;
+  const peerConvergenceMs = peerSettlements.map((settledAt) => settledAt - start);
+  return {
+    durationMs: Math.max(writeAckMs, ...peerConvergenceMs),
+    writeAckMs,
+    peerConvergenceMs,
+    postWriteAckConvergenceMs: peerConvergenceMs.map((duration) => (
+      Math.max(0, duration - writeAckMs)
+    )),
+  };
+};
+
+const assertVisiblePeerStates = (visibilityStates, roles) => {
+  if (
+    !Array.isArray(visibilityStates)
+    || !Array.isArray(roles)
+    || !visibilityStates.length
+    || visibilityStates.length !== roles.length
+  ) {
+    throw new TypeError('Peer visibility requires one state for every role.');
+  }
+  visibilityStates.forEach((visibilityState, index) => {
+    if (visibilityState !== 'visible') {
+      throw new Error(
+        `${String(roles[index] || `peer-${index + 1}`)} must be visible during convergence measurement; `
+        + `received ${String(visibilityState || 'unknown')}.`
+      );
+    }
+  });
+  return visibilityStates;
+};
+
+const measurePeerTransitionTimings = async ({
+  performWrite,
+  waitForPeers,
+  now = Date.now,
+}) => {
+  if (
+    typeof performWrite !== 'function'
+    || !Array.isArray(waitForPeers)
+    || !waitForPeers.length
+    || waitForPeers.some((waitForPeer) => typeof waitForPeer !== 'function')
+    || typeof now !== 'function'
+  ) {
+    throw new TypeError('Peer transition measurement requires a write and peer waiters.');
+  }
+  const startedAt = now();
+  const peerSettlementsPromise = Promise.allSettled(waitForPeers.map(async (waitForPeer) => {
+    await waitForPeer();
+    return now();
+  }));
+  let writeAcknowledgedAt = null;
+  let writeError = null;
+  try {
+    await performWrite();
+    writeAcknowledgedAt = now();
+  } catch (error) {
+    writeError = error;
+  }
+  const peerSettlements = await peerSettlementsPromise;
+  if (writeError) throw writeError;
+  const rejectedPeer = peerSettlements.find((settlement) => settlement.status === 'rejected');
+  if (rejectedPeer) throw rejectedPeer.reason;
+  return summarizePeerTransitionTimings({
+    startedAt,
+    writeAcknowledgedAt,
+    peerSettledAt: peerSettlements.map((settlement) => settlement.value),
+  });
+};
+
 const aggregateMetrics = (capture, cleanup) => {
   const metrics = {};
   const events = capture.snapshot.events;
@@ -1513,8 +1668,10 @@ module.exports = {
   ACCOUNT,
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
   MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
+  MAX_RETAINED_LONG_TASK_ENTRIES,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
+  assertVisiblePeerStates,
   captureBrowserMetrics,
   countChangedDocumentsForTarget,
   countRouteResources,
@@ -1534,11 +1691,13 @@ module.exports = {
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
   retainImageResourceTimings,
+  retainLongTaskEntries,
   resolvePlaywrightResponseStatus,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
@@ -1546,6 +1705,7 @@ module.exports = {
   sanitizeFivePeerRequestFailure,
   runInteraction,
   scenarioRestorePatch,
+  summarizePeerTransitionTimings,
   summarizeResourceEntries,
   storageStateForRole,
   warmBrowserAssetDelivery,
