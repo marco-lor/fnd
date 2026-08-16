@@ -3274,6 +3274,162 @@ describe('GrigliataBoard', () => {
     expect(requestedUrls.slice(0, firstOrdinaryRequest)).toContain('');
   });
 
+  test('waits for background geometry before completing the token-media viewport fit', async () => {
+    const buildToken = (tokenId, ownerUid) => ({
+      tokenId,
+      id: tokenId,
+      ownerUid,
+      tokenType: 'character',
+      label: tokenId,
+      imageUrl: `https://example.com/${tokenId}.png`,
+      placed: true,
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    });
+    const props = buildProps({
+      activeBackground: {
+        id: 'map-loading-geometry',
+        name: 'Loading Geometry',
+        imageUrl: 'https://example.com/map-loading-geometry.png',
+        imageWidth: 0,
+        imageHeight: 0,
+      },
+      tokens: [
+        buildToken('ordinary-loading-geometry', 'another-user'),
+        buildToken('owned-loading-geometry', 'current-user'),
+      ],
+    });
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loading',
+      image: null,
+      error: null,
+    }));
+    const { rerender } = render(<GrigliataBoard {...props} />);
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/owned-loading-geometry.png'
+      );
+    });
+    await act(async () => {});
+    expect(useImageAssetSnapshot).not.toHaveBeenCalledWith(
+      'https://example.com/ordinary-loading-geometry.png'
+    );
+
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loaded',
+      image: mockAlternateBattlemapImage,
+      error: null,
+    }));
+    rerender(<GrigliataBoard {...props} />);
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/ordinary-loading-geometry.png'
+      );
+    });
+  });
+
+  test.each([
+    {
+      label: 'media-less',
+      imageUrl: '',
+      snapshot: { status: 'idle', image: null, error: null },
+    },
+    {
+      label: 'failed-media',
+      imageUrl: 'https://example.com/failed-geometry.png',
+      snapshot: { status: 'error', image: null, error: new Error('fixture failure') },
+    },
+  ])('allows ordinary token media after the $label geometry fallback settles', async ({
+    imageUrl,
+    label,
+    snapshot,
+  }) => {
+    useImageAssetSnapshot.mockImplementation(() => snapshot);
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: `map-${label}`,
+            name: label,
+            imageUrl,
+            imageWidth: 0,
+            imageHeight: 0,
+          },
+          tokens: [{
+            tokenId: `ordinary-${label}`,
+            id: `ordinary-${label}`,
+            ownerUid: 'another-user',
+            tokenType: 'character',
+            label,
+            imageUrl: `https://example.com/ordinary-${label}.png`,
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        `https://example.com/ordinary-${label}.png`
+      );
+    });
+  });
+
+  test('preserves the completed token-media fit across wheel zoom updates', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-wheel-fit',
+            name: 'Wheel Fit',
+            imageUrl: 'https://example.com/map-wheel-fit.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+          tokens: [{
+            tokenId: 'ordinary-wheel-fit',
+            id: 'ordinary-wheel-fit',
+            ownerUid: 'another-user',
+            tokenType: 'character',
+            label: 'Ordinary wheel fit',
+            imageUrl: 'https://example.com/ordinary-wheel-fit.png',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/ordinary-wheel-fit.png'
+      );
+    });
+    useImageAssetSnapshot.mockClear();
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.wheel(stage, { deltaY: -120 });
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/ordinary-wheel-fit.png'
+      );
+    });
+  });
+
   test('fades into the narration battlemap without showing the combat map underneath', async () => {
     jest.useFakeTimers();
 
@@ -3515,6 +3671,62 @@ describe('GrigliataBoard', () => {
     expect(viewportLeft + (imageScreenWidth / 2)).toBeCloseTo(460, 4);
     expect(viewportTop + (imageScreenHeight / 2)).toBeCloseTo(320, 4);
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('preserves a narration viewport when unrelated combat-map geometry hydrates', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const narrationBackground = {
+      id: 'narration-map',
+      name: 'Narration Map',
+      imageUrl: 'https://example.com/narration-map.png',
+      imageWidth: 1920,
+      imageHeight: 1080,
+    };
+    const narrationPlacement = {
+      id: 'background:narration-map',
+      backgroundId: 'narration-map',
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      order: 0,
+    };
+    const buildNarrationProps = (imageWidth, imageHeight) => buildProps({
+      activeBackground: {
+        id: 'combat-map-hydrating',
+        name: 'Combat Map',
+        imageUrl: '',
+        imageWidth,
+        imageHeight,
+      },
+      isNarrationOverlayActive: true,
+      narrationBackgrounds: [narrationBackground],
+      narrationPlacements: [narrationPlacement],
+    });
+    const { container, rerender } = render(
+      <GrigliataBoard {...buildNarrationProps(0, 0)} />
+    );
+    const getStage = () => container.querySelector('[data-konva-type="Stage"]');
+
+    await waitFor(() => {
+      expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeCloseTo(824 / 1920, 5);
+    });
+    fireEvent.wheel(getStage(), { deltaY: -120 });
+    await waitFor(() => {
+      expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeGreaterThan(824 / 1920);
+    });
+    const zoomedViewport = {
+      x: getNumericKonvaProp(getStage(), 'data-x'),
+      y: getNumericKonvaProp(getStage(), 'data-y'),
+      scale: getNumericKonvaProp(getStage(), 'data-scalex'),
+    };
+
+    rerender(<GrigliataBoard {...buildNarrationProps(5000, 5000)} />);
+    await act(async () => {});
+
+    expect(getNumericKonvaProp(getStage(), 'data-x')).toBeCloseTo(zoomedViewport.x, 5);
+    expect(getNumericKonvaProp(getStage(), 'data-y')).toBeCloseTo(zoomedViewport.y, 5);
+    expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeCloseTo(zoomedViewport.scale, 5);
   });
 
   test('renders multi-image narration placements and persists DM movement', async () => {

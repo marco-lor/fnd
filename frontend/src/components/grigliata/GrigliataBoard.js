@@ -2354,7 +2354,12 @@ export default function GrigliataBoard({
   const suppressNextTokenContextMenuRef = useRef(false);
   const nextLocalPingIdRef = useRef(0);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState({
+    x: 0,
+    y: 0,
+    scale: 1,
+    fittedViewportKey: '',
+  });
   const [isDropActive, setIsDropActive] = useState(false);
   const [selectedTokenIds, setSelectedTokenIds] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
@@ -2461,8 +2466,6 @@ export default function GrigliataBoard({
   const battlemapImageAnimationLayersRef = useRef(null);
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
-  const lastFitKeyRef = useRef('');
-
   useEffect(() => {
     if (
       isNarrationOverlayActive
@@ -3320,6 +3323,18 @@ export default function GrigliataBoard({
   const viewportFitBounds = narrationImageBounds || boardBounds;
   const backplateBounds = narrationImageBounds || boardBounds;
   const backplatePadding = narrationImageBounds ? 0 : normalizedGrid.cellSizePx;
+  const resolvedBackgroundWidth = Number(resolvedBackground?.imageWidth) || 0;
+  const resolvedBackgroundHeight = Number(resolvedBackground?.imageHeight) || 0;
+  const hasResolvedBackgroundGeometry = (
+    resolvedBackgroundWidth > 0 && resolvedBackgroundHeight > 0
+  );
+  const isViewportFitGeometryReady = Boolean(
+    narrationImageBounds
+    || !resolvedBackground
+    || activeBackgroundMediaSource.candidateCount === 0
+    || activeBackgroundMediaSource.status === 'error'
+    || hasResolvedBackgroundGeometry
+  );
   const renderedSharedInteractions = useMemo(
     () => (sharedInteractions || [])
       .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
@@ -3538,18 +3553,45 @@ export default function GrigliataBoard({
       ? `${narrationImageBounds.minX},${narrationImageBounds.minY},${narrationImageBounds.maxX},${narrationImageBounds.maxY}`
       : '',
   ].join('::');
+  const viewportFitGeometryKey = narrationImageBounds
+    ? 'narration-bounds'
+    : `${resolvedBackgroundWidth}x${resolvedBackgroundHeight}`;
+  const viewportFitKey = [
+    fitKey,
+    viewportFitGeometryKey,
+  ].join('::geometry:');
 
   const fitToBoard = useCallback(() => {
-    if (!stageSize.width || !stageSize.height) return;
-    setViewport(fitViewportToBounds(viewportFitBounds, stageSize.width, stageSize.height, BOARD_FIT_PADDING));
-    lastFitKeyRef.current = fitKey;
-  }, [fitKey, stageSize.height, stageSize.width, viewportFitBounds]);
+    if (!stageSize.width || !stageSize.height || !isViewportFitGeometryReady) return;
+    setViewport({
+      ...fitViewportToBounds(
+        viewportFitBounds,
+        stageSize.width,
+        stageSize.height,
+        BOARD_FIT_PADDING
+      ),
+      fittedViewportKey: viewportFitKey,
+    });
+  }, [
+    isViewportFitGeometryReady,
+    stageSize.height,
+    stageSize.width,
+    viewportFitBounds,
+    viewportFitKey,
+  ]);
 
   useEffect(() => {
-    if (!stageSize.width || !stageSize.height) return;
-    if (lastFitKeyRef.current === fitKey) return;
+    if (!stageSize.width || !stageSize.height || !isViewportFitGeometryReady) return;
+    if (viewport.fittedViewportKey === viewportFitKey) return;
     fitToBoard();
-  }, [fitKey, fitToBoard, stageSize.width, stageSize.height]);
+  }, [
+    fitToBoard,
+    isViewportFitGeometryReady,
+    stageSize.height,
+    stageSize.width,
+    viewport.fittedViewportKey,
+    viewportFitKey,
+  ]);
 
   useEffect(() => {
     interactionRef.current = null;
@@ -4315,6 +4357,7 @@ export default function GrigliataBoard({
       };
 
       return {
+        ...currentViewport,
         scale: safeScale,
         x: referencePoint.x - (worldPoint.x * safeScale),
         y: referencePoint.y - (worldPoint.y * safeScale),
@@ -6348,7 +6391,10 @@ export default function GrigliataBoard({
     0,
     getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
   ), []);
-  const hasFittedCurrentViewport = lastFitKeyRef.current === fitKey;
+  const hasFittedCurrentViewport = (
+    isViewportFitGeometryReady
+    && viewport.fittedViewportKey === viewportFitKey
+  );
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
     tokens: visibleRenderedTokens,
     viewport,

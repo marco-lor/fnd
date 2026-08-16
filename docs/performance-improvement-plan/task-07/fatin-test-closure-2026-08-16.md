@@ -182,6 +182,31 @@ retain the strict 15 percent contract. Baseline acceptance separately rejects
 GitHub-hosted, unknown, blank, or missing reference-machine identities before
 any baseline write.
 
+The next exact-revision automatic workflow, run
+[`31947085203`](https://github.com/marco-lor/fatins-test/actions/runs/31947085203),
+passed frontend unit, emulator/rules, Functions, hardened-build, and
+cross-browser readiness jobs on
+`8caff1d760bc3d11c96d2bc5c95c07a4ad7a25a8`. Its Chromium route smoke passed
+27 of 28 stages and correctly blocked the revision when the Grigliata registry
+retained 71 ordinary token images instead of at most two. The trace proved a
+product scheduling race: it fetched fixture images `image-000` through
+`image-071` while the board transitioned from its fallback grid fit to the
+final 5000-by-5000 background fit. The mutable fitted-key ref became current
+before the associated React viewport update committed, and unresolved
+background geometry did not invalidate that fallback fit. The failed revision
+was not retried into acceptance; no authoritative dispatch or deployment used
+it.
+
+Viewport position, scale, and fitted identity now publish in one atomic state
+update. A background with pending media cannot complete the fit until its real
+geometry resolves; failed or media-less backgrounds still settle through the
+grid fallback. Wheel zoom preserves the fitted identity, explicit narration
+bounds use a neutral geometry key so unrelated combat-map hydration does not
+reset narration pan/zoom, and active, selected, or viewer-owned token art keeps
+its existing priority while the geometry fence is pending. Three fresh
+desktop/compact probes passed after the repair, including two clean emulator
+and browser cycles from the exact final source.
+
 ## Independent review
 
 An independent read-only agent audited the implementation from base
@@ -225,6 +250,14 @@ machine-identity scoping, and baseline-acceptance guard. Final verdict:
 finding. The only P3 suggestion is an additional end-to-end CLI test for the
 already directly wired and unit-tested baseline write guard.
 
+After exact-SHA Linux scheduling exposed the remaining fallback-fit race, the
+reviewer independently traced the fetched fixture range and viewport sequence,
+rejected a retry-only classification, and reviewed the atomic viewport repair.
+The requested loading, media-less, failed-media, wheel-zoom, and narration
+hydration regressions were added before the final verdict: **APPROVE**, with no
+remaining code, UX, security, or evidence-integrity blocker. A fresh exact-SHA
+GitHub run remains mandatory release evidence.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -233,7 +266,7 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 139 suites, 1,303 tests |
+| Full frontend Jest | PASS: 139 suites, 1,308 tests |
 | Performance/harness Node tests | PASS: 370/370 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
@@ -243,7 +276,7 @@ No live application data was mutated by these gates.
 | Firefox/WebKit Task 07 smoke | PASS: 4/4 |
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Patched five-peer response-evidence gate | PASS: 3/3 Playwright stages with clean owned-emulator teardown; all 12 additional scenario repetitions passed |
-| Overview token-media and initial-fit regressions | PASS: GrigliataBoard 148/148; two separate fresh desktop/compact 200-token browser probes 4/4 each |
+| Overview token-media, geometry, zoom, and narration-fit regressions | PASS: GrigliataBoard 153/153; three separate fresh desktop/compact 200-token browser probes 4/4 each, including two from the exact final source |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 | Historical clean-commit v3 authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each; superseded as final evidence by contract v4 |
@@ -289,9 +322,9 @@ Predeploy and live evidence:
 - `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
   loopback source.
 
-The viewport-fit correction and v4 evidence contract produce the next scoped
-release candidate as `main.7921f66a.js` (665,057 bytes; SHA-256
-`941255d03969ac5adda563dc7d1652d7a8b073309e7f69e0287ada8f1f68a3fe`). Its
+The atomic viewport/geometry correction and v4 evidence contract produce the
+next scoped release candidate as `main.cc93f065.js` (665,057 bytes; SHA-256
+`a6d97f92c8c384b995cb1689def9d15c27187baa3c42e8b55a44c9650380d16a`). Its
 exact-SHA workflows and live served-bundle match remain explicit final release
 gates; the earlier `main.355adcc4.js` evidence above is retained as the last
 completed scoped deployment rather than being rewritten as future evidence.
