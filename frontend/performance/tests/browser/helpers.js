@@ -710,13 +710,21 @@ const installOwnedEmulatorFirestoreTransport = async (context) => {
   if (!context || typeof context.addInitScript !== 'function') {
     throw new TypeError('Owned emulator Firestore transport requires a browser context.');
   }
-  await context.addInitScript(() => {
-    // The local Firestore emulator can acknowledge a WebChannel target while
-    // Playwright browsers buffer its response for several seconds. Use the
-    // SDK-supported fallback only in this owned demo harness; release builds
-    // never define this marker and retain the production/default transport.
-    window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
-  });
+  const browserName = context.browser?.()?.browserType?.()?.name?.();
+  if (!['chromium', 'firefox', 'webkit'].includes(browserName)) {
+    throw new TypeError(`Owned emulator Firestore transport could not classify browser: ${browserName || 'unknown'}.`);
+  }
+  await context.addInitScript(({ forceLongPolling }) => {
+    // WebKit can buffer the emulator's WebChannel response indefinitely. Use
+    // the SDK-supported fallback only for that affected engine. Chromium and
+    // Firefox retain the SDK default because forced long polling can strand a
+    // later target on their shared channel under multi-context load.
+    if (forceLongPolling) {
+      window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
+    } else {
+      delete window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__;
+    }
+  }, { forceLongPolling: browserName === 'webkit' });
 };
 
 const installBootstrap = async (context, scenario, iteration) => {

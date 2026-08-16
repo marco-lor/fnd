@@ -67,7 +67,10 @@ render-count reductions, and the final Home data path.
 
 - Restore Firebase's default buffering-proxy auto-detection for normal
   performance builds. Only the owned Playwright WebKit emulator probe may set
-  the SDK-supported force-long-polling flag; production behavior is unchanged.
+  the SDK-supported force-long-polling flag for WebKit only; Chromium and
+  Firefox retain the SDK default auto-detection because forcing long polling
+  there can strand later targets under multi-context load. Production behavior
+  is unchanged.
 - Begin the five-peer asset quiet window after route readiness, require both
   network quiet and an empty registry request queue, and retain sanitized
   pending-request diagnostics.
@@ -83,6 +86,15 @@ render-count reductions, and the final Home data path.
 - Make the 50-map soak observe the transient crossfade concurrently with the
   Active badge, verify the exact folder membership, require a stable active
   battlemap layer, and emit phase-specific registry/layer/cleanup diagnostics.
+
+The first clean-candidate authoritative attempt correctly stopped after 68 of
+70 browser scenarios passed. Its retained traces showed that blanket forced
+long polling had stranded one of five Chromium placement listeners and the
+initial Echi route targets even though the emulator acknowledged both Watch
+requests. No authoritative snapshot from that attempt was accepted. After the
+fallback was scoped to WebKit, the two exact Chromium scenarios each passed
+three consecutive executions, and the Firefox/WebKit Task 07 smoke remained
+green.
 
 ## Independent review
 
@@ -109,13 +121,14 @@ No live application data was mutated by these gates.
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
 | Full frontend Jest | PASS: 138 suites, 1,297 tests |
-| Performance/harness Node tests | PASS: 350/350 |
+| Performance/harness Node tests | PASS: 360/360 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
 | Full rules/callables emulator gate | PASS |
 | Task 07 media integration | PASS: callables 3/3, rules 27/27, query emulator 3/3, browser 10/10 |
 | Firefox/WebKit Task 07 smoke | PASS: 4/4 |
+| Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 

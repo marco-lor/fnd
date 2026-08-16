@@ -38,22 +38,71 @@ const {
   waitForKonvaTokenMove,
 } = require('./helpers');
 
-test('owned emulator browser contexts force the SDK long-polling fallback', async () => {
+const browserContextStub = (browserName, capture) => ({
+  addInitScript: async (script, argument) => capture(script, argument),
+  browser: () => ({
+    browserType: () => ({ name: () => browserName }),
+  }),
+});
+
+test('owned emulator WebKit contexts force the SDK long-polling fallback', async () => {
   let initScript;
-  await installOwnedEmulatorFirestoreTransport({
-    addInitScript: async (script) => { initScript = script; },
-  });
+  let initArgument;
+  await installOwnedEmulatorFirestoreTransport(browserContextStub(
+    'webkit',
+    (script, argument) => {
+      initScript = script;
+      initArgument = argument;
+    }
+  ));
   assert.equal(typeof initScript, 'function');
 
   const previousWindow = global.window;
   global.window = {};
   try {
-    initScript();
+    initScript(initArgument);
     assert.equal(global.window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__, true);
   } finally {
     if (previousWindow === undefined) delete global.window;
     else global.window = previousWindow;
   }
+});
+
+test('owned emulator Chromium and Firefox contexts retain the SDK default transport', async () => {
+  for (const browserName of ['chromium', 'firefox']) {
+    let initScript;
+    let initArgument;
+    await installOwnedEmulatorFirestoreTransport(browserContextStub(
+      browserName,
+      (script, argument) => {
+        initScript = script;
+        initArgument = argument;
+      }
+    ));
+
+    const previousWindow = global.window;
+    global.window = { __FND_PERF_FORCE_FIRESTORE_LONG_POLLING__: true };
+    try {
+      initScript(initArgument);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(
+          global.window,
+          '__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__'
+        ),
+        false
+      );
+    } finally {
+      if (previousWindow === undefined) delete global.window;
+      else global.window = previousWindow;
+    }
+  }
+});
+
+test('owned emulator transport fails closed when the browser engine is unknown', async () => {
+  await assert.rejects(
+    installOwnedEmulatorFirestoreTransport(browserContextStub('unknown', () => {})),
+    /could not classify browser: unknown/
+  );
 });
 
 test('every Firestore-backed browser probe installs and reports the owned transport', () => {
@@ -79,8 +128,10 @@ test('every Firestore-backed browser probe installs and reports the owned transp
   );
   assert.match(
     teardownSource,
-    /firestoreTransport:\s*['"]forced-long-polling-owned-emulator['"]/
+    /webkit:\s*['"]forced-long-polling['"]/
   );
+  assert.match(teardownSource, /chromium:\s*['"]sdk-default-auto-detect['"]/);
+  assert.match(teardownSource, /firefox:\s*['"]sdk-default-auto-detect['"]/);
 });
 
 test('document accounting preserves totals and exposes route-scoped deliveries', () => {
