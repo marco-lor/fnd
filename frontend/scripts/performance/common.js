@@ -12,7 +12,8 @@ const scenariosPath = path.join(frontendRoot, 'performance', 'scenarios.json');
 const fixtureManifestPath = path.join(frontendRoot, 'performance', 'fixture-manifest.json');
 const authoritativeResultsDir = path.join(resultsDir, 'authoritative');
 const PERFORMANCE_PROJECT_ID = 'demo-fnd-perf';
-const PERFORMANCE_MEASUREMENT_CONTRACT_VERSION = 4;
+const PERFORMANCE_MEASUREMENT_CONTRACT_VERSION = 5;
+const PERFORMANCE_MAX_VARIANCE_PERCENT = 15;
 const GITHUB_HOSTED_REFERENCE_MACHINE = 'github-hosted-runner';
 const projectId = PERFORMANCE_PROJECT_ID;
 const PERFORMANCE_ENVIRONMENT_MODE = Object.freeze({
@@ -140,6 +141,7 @@ module.exports = {
   configureOwnedPerformanceEnvironment,
   OWNED_PERFORMANCE_ENVIRONMENT,
   PERFORMANCE_ENVIRONMENT_MODE,
+  PERFORMANCE_MAX_VARIANCE_PERCENT,
   PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   PERFORMANCE_PROJECT_ID,
   percentile,

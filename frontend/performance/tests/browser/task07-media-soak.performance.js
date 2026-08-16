@@ -11,6 +11,9 @@ const {
   projectId,
 } = require('../../../scripts/performance/common');
 const {
+  drainRouteRenderScheduler,
+} = require('../../../scripts/performance/task07-render-scheduler');
+const {
   countRouteResources,
   drainPageConnections,
   installBootstrap,
@@ -52,45 +55,9 @@ const navigateWithinApp = async (page, route, firstNavigation) => {
   }, route);
 };
 
-const waitForRouteCleanup = async (page, route) => {
+const waitForRouteCleanup = async (page, route, { cycle } = {}) => {
   await navigateToCleanup(page);
-  const renderScheduler = await page.evaluate(() => new Promise((resolve) => {
-    let finished = false;
-    let frameCount = 0;
-    let frameHandle = null;
-    let timeoutId = null;
-    const snapshot = (state) => ({
-      containerCount: document.querySelectorAll('.konvajs-content').length,
-      stageCount: Array.isArray(window.Konva?.stages) ? window.Konva.stages.length : 0,
-      state,
-    });
-    const finish = (state) => {
-      if (finished) return;
-      finished = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      if (frameHandle !== null) window.cancelAnimationFrame(frameHandle);
-      resolve(snapshot(state));
-    };
-    const onFrame = () => {
-      if (finished) return;
-      frameHandle = null;
-      frameCount += 1;
-      if (frameCount < 2) {
-        frameHandle = window.requestAnimationFrame(onFrame);
-        return;
-      }
-      finish('settled');
-    };
-    timeoutId = window.setTimeout(() => finish('timeout'), 2_000);
-    frameHandle = window.requestAnimationFrame(onFrame);
-  }));
-  if (renderScheduler.state !== 'settled') {
-    throw new Error(`Task 07 render scheduler did not settle after leaving ${route}.`);
-  }
-  expect(renderScheduler).toMatchObject({
-    containerCount: 0,
-    stageCount: 0,
-  });
+  const renderScheduler = await drainRouteRenderScheduler(page, { cycle, route });
   let lastCleanup = null;
   try {
     await expect.poll(async () => {
@@ -128,7 +95,9 @@ const waitForRouteCleanup = async (page, route) => {
     throw new Error(
       `Task 07 route cleanup did not settle for ${route}: ${JSON.stringify({
         activeResources,
+        cycle,
         diagnostics,
+        renderScheduler,
       })}`,
       { cause: error }
     );
@@ -381,7 +350,7 @@ const runPlayerRouteSoak = async ({ browser, baseURL, errors }) => {
         }));
         expect(snapshot.audioNodes).toBeLessThanOrEqual(4);
         expect(snapshot.managedImages).toBeGreaterThan(0);
-        await waitForRouteCleanup(page, scenario.route);
+        await waitForRouteCleanup(page, scenario.route, { cycle: cycle + 1 });
       }
     }
   } finally {
@@ -489,7 +458,7 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
           window.__FND_PERF_BENCHMARKS__.getImageRegistryStats
         );
       });
-      await waitForRouteCleanup(page, '/grigliata');
+      await waitForRouteCleanup(page, '/grigliata', { cycle });
       await page.waitForTimeout(2_200);
       const registry = await page.evaluate(async () => {
         window.gc?.();

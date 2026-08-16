@@ -312,6 +312,98 @@ test('GitHub-hosted sub-millisecond microbenchmark jitter remains raw evidence',
   );
 });
 
+test('GitHub-hosted variance-only failures remain raw failures but are advisory to the execution gate', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+
+  const result = compare(left, right, 15);
+  const lcp = result.timing.find(({ key }) => key === 'home:web-vital.LCP');
+
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'pass');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'hosted-timing-advisory');
+  assert.equal(result.gateStatus, 'pass');
+  assert.equal(lcp.status, 'fail');
+  assert.ok(lcp.gatedVariancePercent > 15);
+});
+
+test('GitHub-hosted incomplete timing evidence remains blocking', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  delete right.browser.scenarios[1].metrics['web-vital.LCP'];
+
+  const result = compare(left, right, 15);
+  const lcp = result.timing.find(({ key }) => key === 'home:web-vital.LCP');
+
+  assert.equal(lcp.complete, false);
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'fail');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'hosted-timing-advisory');
+  assert.equal(result.gateStatus, 'fail');
+});
+
+test('GitHub-hosted deterministic or compatibility drift remains blocking', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(right, 'runtime.consoleErrors', [1, 1, 1]);
+
+  const deterministicDrift = compare(left, right, 15);
+  assert.equal(deterministicDrift.evidenceStatus, 'fail');
+  assert.equal(deterministicDrift.gateStatus, 'fail');
+
+  right.environment.referenceMachine = 'different-runner';
+  const identityDrift = compare(left, right, 15);
+  assert.equal(identityDrift.evidenceStatus, 'fail');
+  assert.equal(identityDrift.gateMode, 'strict');
+  assert.equal(identityDrift.gateStatus, 'fail');
+
+  left.environment.referenceMachine = 'unknown';
+  right.environment.referenceMachine = 'unknown';
+  const unknownIdentity = compare(left, right, 15);
+  assert.equal(
+    unknownIdentity.compatibility
+      .find(({ id }) => id === 'reference-machine-identity').status,
+    'fail'
+  );
+  assert.equal(unknownIdentity.evidenceStatus, 'fail');
+  assert.equal(unknownIdentity.gateMode, 'strict');
+  assert.equal(unknownIdentity.gateStatus, 'fail');
+});
+
+test('controlled reference machines keep timing variance strictly blocking', () => {
+  const result = compare(report('run-a', 1000), report('run-b', 1400), 15);
+
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'pass');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'strict');
+  assert.equal(result.gateStatus, 'fail');
+});
+
+test('malformed variance thresholds fail closed for hosted and controlled runs', () => {
+  for (const referenceMachine of ['github-hosted-runner', 'local-reference']) {
+    for (const maximumVariancePercent of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
+      const left = report('run-a', 1000);
+      const right = report('run-b', 1400);
+      left.environment.referenceMachine = referenceMachine;
+      right.environment.referenceMachine = referenceMachine;
+
+      assert.throws(
+        () => compare(left, right, maximumVariancePercent),
+        /maximum timing variance.*finite.*0.*100/i
+      );
+    }
+  }
+});
+
 test('advisory INP samples do not control the authoritative repeatability gate', () => {
   const left = report('run-a', 1000);
   const right = report('run-b', 1000);

@@ -4,9 +4,9 @@ Date: 2026-08-16
 
 Status: implementation, independent review, focused browser reproduction, full
 frontend tests, and hardened build gates are complete. The containing `main`
-revision still requires a fresh exact-revision automatic workflow, v4
-authoritative pair, scoped Hosting redeploy, and exact live-bundle verification;
-any failure reopens this closure.
+revision still requires a fresh exact-revision automatic workflow, v5
+authoritative evidence, default soak, scoped Hosting redeploy, and exact
+live-bundle verification; any blocking failure reopens this closure.
 
 This closure is limited to the isolated `fatin-test` project. It does not
 authorize or describe a `fatins` deployment, data copy, media-control change,
@@ -302,6 +302,39 @@ minutes with exactly 20 resolver invocations (four bounded chunks for each of
 five peers). Independent review verdict: **APPROVE**; a new clean exact-SHA
 automatic/manual pair remains required.
 
+The profile-readiness revision `02b3cb6defb303bee9563dc0fefaad7dfec3548b`
+passed all six normal Linux jobs in run `31956769379`. Its fresh manual run
+`31957323296` was not accepted. All six normal jobs passed, both authoritative
+browser matrices completed, and every compatibility and deterministic series
+matched, but five hosted timing series exceeded 15 percent. Those keys differed
+from the previous v4 pair and moved in both directions with the same LCP
+candidates and deterministic inventories. The independently reviewed evidence
+does not demonstrate an exact-revision product regression; it exposes the
+existing contradiction between the documented informational hosted-timing
+policy and the blocking CLI exit.
+
+The same manual job did not execute the required 600-second lifecycle. Its soak
+stopped in the first player-route cycle when an under-instrumented two-frame
+cleanup barrier timed out after leaving `/echi-di-viaggio`; the failure discarded
+the frame progress, foreground state, and already-collected stage/resource
+snapshot. Measurement contract v5 therefore keeps raw timing failures visible
+while separating evidence, timing, and execution-gate statuses. Hosted variance
+is advisory only for the exact hosted identity after complete finite
+iteration-matched evidence; missing samples, deterministic or compatibility
+drift, browser failures, and unknown or mismatched identities still block.
+Controlled machines remain strict, the 15 percent threshold is unchanged, and
+baseline acceptance still requires raw repeatability success from a controlled
+source.
+
+The soak now records cycle, route, frame count, elapsed time, visibility/focus,
+Konva stage/container counts, and bounded old-route resource diagnostics. A
+hidden page, incomplete two-frame drain, retained stage/container, or strict
+old-route resource leak still fails. The focused v5/status and scheduler tests
+pass 51/51, and a real three-cycle 50-map/200-token Chromium soak smoke passed
+all three stages in 9.7 minutes. Independent review classified these as
+evidence-contract fixes rather than threshold or retry gaming; a fresh exact-SHA
+default soak and hosted job remain mandatory.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -326,11 +359,14 @@ No live application data was mutated by these gates.
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 | Historical clean-commit v3 authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each; superseded as final evidence by contract v4 |
 | Historical v3 authoritative repeatability | PASS: zero compatibility, deterministic, or timing failures; maximum gated variance 10.00%; a fresh v4 pair remains required for the containing revision |
-| Default 600-second media soak | PASS: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle |
+| Historical 600-second media soak | PASS on `00fa3bb5a1ad77ebe0ef298b3e485082d734d614` in manual run `31949671046`: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle; this is not v5 acceptance evidence |
 | Exact-SHA normal Linux workflow | PASS: run `31949123260` on `00fa3bb5a1ad77ebe0ef298b3e485082d734d614`, all six required jobs green |
 | Exact-SHA manual Linux workflow | NOT ACCEPTED: run `31949671046` passed all six normal jobs and the 600-second soak, but the A/B timing comparison failed three hosted-runner series; all deterministic checks passed |
 | Evidence-revision normal Linux workflow | PASS: run `31953381497` on `457a2c641a3fdc862bfbaa8169074a729e409162`, all six required jobs green |
 | Evidence-revision manual Linux workflow | NOT ACCEPTED: run `31953899082` passed the 600-second soak but the first authoritative pass failed one five-peer finite-settlement case; trace-backed profile-readiness fix applied without widening the gate |
+| Profile-readiness normal Linux workflow | PASS: run `31956769379` on `02b3cb6defb303bee9563dc0fefaad7dfec3548b`, all six required jobs green |
+| Profile-readiness manual Linux workflow | NOT ACCEPTED: run `31957323296` passed all six normal jobs; raw hosted timing failed five shifting series, and the default soak stopped before the lifecycle on an under-instrumented foreground drain |
+| v5 scheduler soak smoke | PASS: focused status/scheduler tests 51/51 and real Chromium 3/3 stages in 9.7 minutes with three full 50-map/200-token cycles |
 | Production bundle and unchanged start path | PASS: hardened build verification and `/home` HTTP 200 through `npm start` |
 
 The comparison continues to report five non-blocking roadmap targets. They are
@@ -382,13 +418,16 @@ bytes and remains absent from the normal bundle by the disabled-build verifier.
 The profile-readiness correction supersedes that candidate with
 `main.a78b2ead.js` (665,057 bytes; SHA-256
 `5afddce3e4ab6c184538538d392776c6082e72053b69eb3b4d84c7468c82db74`).
+Measurement contract v5 changes only performance evidence/gating code and is
+verified absent from the normal production bundle.
 
 ## Final release gates
 
 The containing revision must retain all of these gates:
 
-1. a fresh clean-commit authoritative attribution pair with every blocking
-   compatibility, deterministic, and timing comparison green;
+1. a fresh clean-commit controlled authoritative pair with every compatibility,
+   deterministic, and timing comparison green, plus hosted evidence/gate status
+   green with any raw timing variance retained explicitly as advisory;
 2. the default 600-second media soak with the full 50-map/200-placement fixture;
 3. the production bundle, unchanged start path, scoped Hosting release, and
    exact served-bundle verification recorded above; and

@@ -24,6 +24,7 @@ const {
   resolveTask07SoakRuntime,
   resolveTask07SoakSmokeMode,
 } = require('./task07-soak-contract');
+const { validateRenderSchedulerSnapshot } = require('./task07-render-scheduler');
 
 const frontendRoot = path.resolve(__dirname, '..', '..');
 const workflowPath = path.resolve(frontendRoot, '..', '.github', 'workflows', 'performance.yml');
@@ -310,6 +311,73 @@ test('Task 07 browser soak activates every fixture map and proves overlapping na
   assert.match(playwrightConfig, /name:\s*'task07-soak'[\s\S]*timeout:\s*task07SoakRuntime\.timeoutMs/);
 });
 
+test('Task 07 render-scheduler evidence accepts only a visible settled stage-free page', () => {
+  const settled = {
+    containerCount: 0,
+    elapsedMs: 32,
+    frameCount: 2,
+    hasFocus: true,
+    routeActiveResources: {},
+    routeDiagnostics: [],
+    stageCount: 0,
+    state: 'settled',
+    visibilityState: 'visible',
+  };
+
+  assert.doesNotThrow(() => validateRenderSchedulerSnapshot(settled, {
+    cycle: 2,
+    route: '/echi-di-viaggio',
+  }));
+
+  assert.throws(() => validateRenderSchedulerSnapshot({
+    ...settled,
+    hasFocus: false,
+    visibilityState: 'hidden',
+  }, {
+    cycle: 2,
+    route: '/echi-di-viaggio',
+  }), (error) => {
+    assert.match(error.message, /invalid foreground state/);
+    assert.match(error.message, /echi-di-viaggio/);
+    assert.match(error.message, /"cycle":2/);
+    assert.match(error.message, /"visibilityState":"hidden"/);
+    return true;
+  });
+
+  assert.throws(() => validateRenderSchedulerSnapshot({
+    ...settled,
+    containerCount: 1,
+    stageCount: 1,
+  }, {
+    cycle: 3,
+    route: '/grigliata',
+  }), /retained a Konva stage or container/);
+
+  assert.throws(() => validateRenderSchedulerSnapshot({
+    ...settled,
+    elapsedMs: 2001,
+    frameCount: 1,
+    routeActiveResources: { '/echi-di-viaggio::animation-frame': 1 },
+    state: 'timeout',
+  }, {
+    cycle: 1,
+    route: '/echi-di-viaggio',
+  }), (error) => {
+    assert.match(error.message, /did not settle/);
+    assert.match(error.message, /"frameCount":1/);
+    assert.match(error.message, /animation-frame/);
+    return true;
+  });
+
+  assert.throws(() => validateRenderSchedulerSnapshot({
+    ...settled,
+    frameCount: 1,
+  }, {
+    cycle: 1,
+    route: '/home',
+  }), /did not settle/);
+});
+
 test('Task 07 soak accepts a settled 50-background and 200-token registry plateau', () => {
   const result = evaluateTask07RegistryPlateau([
     settledCycle(1),
@@ -405,6 +473,14 @@ test('Task 07 soak evaluates only the required final three settled cycles', () =
   assert.throws(
     () => evaluateTask07RegistryPlateau([settledCycle(1), settledCycle(2)]),
     /at least three settled cycles/
+  );
+});
+
+test('Task 07 Grigliata cleanup records the registry lifecycle cycle', () => {
+  const soak = fs.readFileSync(soakPath, 'utf8');
+  assert.match(
+    soak,
+    /await waitForRouteCleanup\(page, '\/grigliata', \{ cycle \}\);/
   );
 });
 

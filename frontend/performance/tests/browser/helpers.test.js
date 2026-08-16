@@ -649,6 +649,16 @@ test('Playwright runs asset warmup before auth and keeps setup files out of meas
   assert.equal(config.retries, 0);
 });
 
+test('auth setup gives bounded catalog startup waves a non-measured readiness window', () => {
+  const authSetupSource = fs.readFileSync(path.join(__dirname, 'auth.setup.js'), 'utf8');
+
+  assert.match(authSetupSource, /const AUTH_ROUTE_READINESS_TIMEOUT_MS = 30_000;/);
+  assert.match(
+    authSetupSource,
+    /waitForReadiness\(page, \{[\s\S]*expectedPathname: destinationPathname,[\s\S]*timeoutMs: AUTH_ROUTE_READINESS_TIMEOUT_MS,[\s\S]*\}\)/
+  );
+});
+
 test('every measured browser test uses the automatic worker-scoped warmup fixture', () => {
   const measuredFiles = [
     'bootstrap.performance.js',

@@ -12,7 +12,10 @@ const {
   sha256,
   writeJson,
 } = require('./common');
-const { assertBaselineReferenceMachine } = require('./baseline-source');
+const {
+  assertBaselineReferenceMachine,
+  assertBaselineRepeatability,
+} = require('./baseline-source');
 const { evaluateBudget, evaluateStructuralGates, worstBudgetEvaluation } = require('./compare');
 
 if (!process.argv.includes('--accept')) {
@@ -30,7 +33,6 @@ const repeatability = assertSchemaVersion(readJson(repeatabilityPath), 'repeatab
 const aggregateBytes = fs.readFileSync(aggregatePath);
 if (
   repeatability.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION
-  || repeatability.status !== 'pass'
   || repeatability.aggregateSha256 !== sha256(aggregateBytes)
 ) {
   console.error('The authoritative aggregate is stale or its repeatability gate did not pass.');
@@ -44,6 +46,7 @@ if (report.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSI
 }
 try {
   assertBaselineReferenceMachine(report);
+  assertBaselineRepeatability(repeatability, report);
 } catch (error) {
   console.error(error.message);
   process.exit(1);
