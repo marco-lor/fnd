@@ -96,6 +96,19 @@ fallback was scoped to WebKit, the two exact Chromium scenarios each passed
 three consecutive executions, and the Firefox/WebKit Task 07 smoke remained
 green.
 
+The first exact-revision GitHub push and dispatch then correctly reopened the
+closure on two Linux-only integration gaps. The login route statically imported
+the complete user-data command module, so Linux chunk extraction placed
+`firebase/functions` in the login closure. Login now imports that command module
+only when profile initialization is actually required, and the real performance
+build reports zero forbidden login modules. Separately, all 70 authoritative
+browser checks passed before the detached Firebase emulator group survived
+Playwright's default POSIX web-server `SIGKILL`; the soak then could not acquire
+the owned ports. The Playwright web server now grants the existing emulator
+wrapper a bounded `SIGTERM` window so it can terminate its captured child group,
+escalate if needed, and prove stable port release. The original failed runs are
+diagnostic evidence only and are not accepted closure evidence.
+
 ## Independent review
 
 An independent read-only agent audited the implementation from base
@@ -112,6 +125,11 @@ still atomic, stale publication is fenced, and both per-attempt concurrency and
 retry count are bounded. A later hardening increment may define an explicit
 cross-attempt overlap policy; this is not a Task 07 release blocker.
 
+The same reviewer separately approved the final login split and POSIX emulator
+shutdown correction. The decisive integration proof remains a fresh Linux
+normal workflow plus manually dispatched full benchmark for the containing
+revision.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -120,8 +138,8 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 138 suites, 1,298 tests |
-| Performance/harness Node tests | PASS: 363/363 |
+| Full frontend Jest | PASS: 139 suites, 1,299 tests |
+| Performance/harness Node tests | PASS: 364/364 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
@@ -149,7 +167,7 @@ not hidden or re-baselined by this closure:
 Only Hosting was deployed. Functions, Firestore rules/indexes, Storage rules,
 rollout controls, and application data were not changed. The release command
 targeted the hard-coded `fatin-test` site, and the predeploy guard reran all
-prerequisites before uploading 81 Hosting files.
+prerequisites before uploading 82 Hosting files.
 
 The Windows Firebase CLI session was reused through Node's system certificate
 store with `NODE_OPTIONS=--use-system-ca`. The ignored canonical
@@ -167,9 +185,9 @@ Predeploy and live evidence:
   `https://fatin-test.web.app`;
 - live `/home` returned HTTP 200 and referenced the exact local script
   manifest;
-- live `main.52ca5fa2.js` matched the local production bundle exactly
-  (665,021 UTF-8 bytes; SHA-256
-  `ac522f8a3bf85913034d10ca5ae0a5221d483e4399b72a4977e232a9f362d998`);
+- live `main.355adcc4.js` matched the corrected local production bundle exactly
+  (665,057 UTF-8 bytes; SHA-256
+  `cc852397ab5cc197f972c66486a96d77518edb8f85e2e0749314707af0965d43`);
   and
 - `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
   loopback source.

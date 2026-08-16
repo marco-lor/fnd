@@ -133,6 +133,18 @@ test('authoritative cleanup wait allows the observed Windows socket-release wind
   assert.equal(EMULATOR_PORT_RELEASE_TIMEOUT_MS, 60_000);
 });
 
+test('Playwright lets the emulator wrapper relay POSIX shutdown before force killing it', () => {
+  const playwrightConfig = require('../../performance/playwright.config');
+  const gracefulShutdown = playwrightConfig.webServer?.gracefulShutdown;
+
+  assert.ok(gracefulShutdown, 'the performance web server must opt into graceful shutdown');
+  assert.equal(gracefulShutdown.signal, 'SIGTERM');
+  assert.ok(
+    gracefulShutdown.timeout >= 80_000,
+    'the graceful window must cover child TERM/KILL waits and stable port release'
+  );
+});
+
 test('Windows emulator cleanup targets only the captured child tree and preserves taskkill status', () => {
   let invocation;
   const result = requestOwnedWindowsProcessTreeTermination({ pid: 4321 }, {

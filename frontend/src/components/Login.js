@@ -3,12 +3,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { updateCharacterCreation } from '../data/userData/userDataCommands';
 import { useAuthSession, useProfileState } from "../AuthContext";
 import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
 import LoginCreateButton from "./LoginCreateButton";
 import { FiMail, FiLock, FiEye, FiEyeOff, FiLogIn } from "react-icons/fi";
+
+const updateCharacterCreation = async (input) => {
+  const commands = await import('../data/userData/userDataCommands');
+  return commands.updateCharacterCreation(input);
+};
 
 function Login() {
   const [email, setEmail] = useState("");
