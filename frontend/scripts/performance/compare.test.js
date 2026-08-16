@@ -62,6 +62,41 @@ test('structural gates reject missing scenarios and enabled normal builds', () =
   );
 });
 
+test('structural metric completeness honors an auxiliary scenario contract', () => {
+  const current = {
+    scenarioManifest: {
+      scenarios: [{
+        id: 'task07-registry-desktop',
+        requiredMetrics: [
+          'task07.registryRequestConcurrencyLimit',
+          'task07.unpinnedRegistryRecords',
+        ],
+      }],
+    },
+    browser: { scenarios: [{ scenarioId: 'task07-registry-desktop' }] },
+    metrics: {
+      'task07-registry-desktop:task07.registryRequestConcurrencyLimit': 4,
+      'task07-registry-desktop:task07.unpinnedRegistryRecords': 72,
+    },
+    fixture: {},
+    fixtureManifest: {},
+    build: {},
+    normalBuildVerification: {},
+  };
+
+  let gate = evaluateStructuralGates(current)
+    .find((evaluation) => evaluation.id === 'metric-completeness');
+  assert.equal(gate.status, 'pass');
+
+  delete current.metrics['task07-registry-desktop:task07.unpinnedRegistryRecords'];
+  gate = evaluateStructuralGates(current)
+    .find((evaluation) => evaluation.id === 'metric-completeness');
+  assert.equal(gate.status, 'fail');
+  assert.deepEqual(gate.missing, [
+    'task07-registry-desktop:task07.unpinnedRegistryRecords',
+  ]);
+});
+
 test('structural gates require and reject every explained emulator startup warning', () => {
   const metricSet = (explainedStartupWarnings) => ({
     'runtime.consoleErrors': 0,

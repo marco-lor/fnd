@@ -20,7 +20,7 @@ const {
   writeScenarioResult,
 } = require('./helpers');
 
-const scenarios = manifest.scenarios.filter((scenario) => scenario.role !== 'five-peer');
+const scenarios = manifest.scenarios.filter((scenario) => scenario.scheduledOnly !== true);
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
 
@@ -45,6 +45,39 @@ const flushBrowserObservers = async (page) => {
     }
     window.setTimeout(afterIdle, 0);
   }));
+};
+
+const waitForStableLargestContentfulPaint = async (
+  page,
+  scenarioId,
+  { quietMs = 500, timeoutMs = 5_000 } = {}
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastSignature = '';
+  let unchangedSince = Date.now();
+
+  while (Date.now() < deadline) {
+    await flushBrowserObservers(page);
+    const signature = await page.evaluate(() => {
+      const events = window.__FND_PERF__?.snapshot?.().events || [];
+      const latest = [...events].reverse().find((event) => (
+        event.category === 'web-vital' && event.metric === 'LCP'
+      ));
+      return latest
+        ? `${Number(latest.value)}:${Number(latest.timestamp)}`
+        : '';
+    });
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      unchangedSince = Date.now();
+    }
+    if (lastSignature && Date.now() - unchangedSince >= quietMs) return;
+    await page.waitForTimeout(50);
+  }
+
+  throw new Error(
+    `Largest Contentful Paint did not settle before interaction for ${scenarioId}.`
+  );
 };
 
 const assertChunkIsolation = (scenario, diagnostics) => {
@@ -154,6 +187,7 @@ for (const scenario of scenarios) {
         lifecyclePhase = 'route-active';
       }
       await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
+      await waitForStableLargestContentfulPaint(page, scenario.id);
       await runInteraction(page, scenario);
       assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);

@@ -88,7 +88,7 @@ describe("App route authorization states", () => {
   test("shows a deterministic state while auth is cold", () => {
     mockSessionState = { ...mockSessionState, user: null, authReady: false, authStatus: "checking" };
     render(<AuthenticatedRoute />);
-    expect(screen.getByText("Checking your session")).toBeInTheDocument();
+    expect(screen.getByText("Checking your session")).toHaveClass("text-xl");
   });
 
   test("redirects an anonymous authenticated route to login", () => {

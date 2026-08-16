@@ -18,6 +18,50 @@
     { "id": "admin", "route": "/admin", "role": "webmaster", "interaction": "search-users" },
     { "id": "grigliata-player", "route": "/grigliata", "role": "player", "interaction": "pan-zoom-select" },
     { "id": "grigliata-manager", "route": "/grigliata", "role": "dm", "interaction": "pan-zoom-move-open-library" },
-    { "id": "grigliata-five-peer", "route": "/grigliata", "role": "five-peer", "interaction": "placement-convergence", "scheduledOnly": true }
+    { "id": "grigliata-five-peer", "route": "/grigliata", "role": "five-peer", "interaction": "placement-convergence", "scheduledOnly": true },
+    {
+      "id": "task07-media-shell",
+      "route": "/home",
+      "role": "player",
+      "interaction": "media-shell-budget",
+      "scheduledOnly": true,
+      "requiredMetrics": [
+        "task07.attachedImages",
+        "task07.audioNodes",
+        "task07.farOffscreenAttachedImages",
+        "task07.managedImages",
+        "task07.musicStreamListeners",
+        "task07.reducedMotionMeteors",
+        "task07.uniqueFixtureImageRequests"
+      ]
+    },
+    {
+      "id": "task07-registry-compact",
+      "route": "/grigliata",
+      "role": "dm",
+      "interaction": "compact-registry-budget",
+      "scheduledOnly": true,
+      "requiredMetrics": [
+        "task07.registryRequestConcurrencyLimit",
+        "task07.unpinnedRegistryRecords",
+        "task07.unpinnedEstimatedDecodedBytes",
+        "task07.totalEstimatedDecodedBytes",
+        "task07.lowPriorityQueuedPreloads"
+      ]
+    },
+    {
+      "id": "task07-registry-desktop",
+      "route": "/grigliata",
+      "role": "dm",
+      "interaction": "desktop-registry-budget",
+      "scheduledOnly": true,
+      "requiredMetrics": [
+        "task07.registryRequestConcurrencyLimit",
+        "task07.unpinnedRegistryRecords",
+        "task07.unpinnedEstimatedDecodedBytes",
+        "task07.totalEstimatedDecodedBytes",
+        "task07.lowPriorityQueuedPreloads"
+      ]
+    }
   ]
 }

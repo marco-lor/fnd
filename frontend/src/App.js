@@ -58,7 +58,7 @@ const RoutePage = ({ descriptor, label }) => (
 const StatusPanel = ({ title, message, onRetry, onLogout }) => (
   <main className="flex min-h-screen items-center justify-center px-6 text-white" aria-live="polite">
     <section className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900/80 p-8 text-center shadow-2xl">
-      <h1 className="text-2xl font-semibold">{title}</h1>
+      <h1 className="text-xl font-semibold">{title}</h1>
       <p className="mt-3 text-slate-300">{message}</p>
       {(onRetry || onLogout) ? (
         <div className="mt-6 flex justify-center gap-3">

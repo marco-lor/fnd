@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateReports, compareReports, relativeDifferencePercent } = require('./repeatability');
+const { PERFORMANCE_MEASUREMENT_CONTRACT_VERSION } = require('./common');
+const {
+  TTFB_ABSOLUTE_JITTER_MS,
+  aggregateReports,
+  compareReports,
+  relativeDifferencePercent,
+} = require('./repeatability');
 
 const scenario = (id, timing, delivered = 10, iteration = 1, extraMetrics = {}) => ({
   scenarioId: id,
@@ -41,7 +47,7 @@ const report = (id, timing, delivered = 10) => {
   const deliveries = repeatThree(delivered);
   return {
     schemaVersion: 1,
-    measurementContractVersion: 2,
+    measurementContractVersion: PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
     commit: 'a'.repeat(40),
     projectId: 'demo-fnd-perf',
     run: { id, authoritative: true, retainedIterations: 3 },
@@ -101,6 +107,30 @@ const compare = (left, right, maximumVariancePercent = 15, canonical = left.scen
 test('relative timing variance is symmetric and bounded', () => {
   assert.equal(relativeDifferencePercent(100, 110), relativeDifferencePercent(110, 100));
   assert.ok(relativeDifferencePercent(100, 110) < 10);
+});
+
+test('tiny local TTFB jitter uses an explicit millisecond floor without relaxing LCP', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  setScenarioMetric(left, 'web-vital.TTFB', 6.8);
+  setScenarioMetric(right, 'web-vital.TTFB', 8.7);
+
+  const withinFloor = compare(left, right, 15);
+  const ttfb = withinFloor.timing.find(({ key }) => key === 'home:web-vital.TTFB');
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(ttfb.absoluteToleranceMs, TTFB_ABSOLUTE_JITTER_MS);
+  assert.ok(ttfb.variancePercent > 15);
+  assert.equal(ttfb.gatedVariancePercent, 0);
+  assert.equal(withinFloor.observedMaximumVariancePercent, ttfb.variancePercent);
+  assert.equal(withinFloor.maximumGatedVariancePercent, 0);
+
+  setScenarioMetric(left, 'web-vital.TTFB', 100);
+  setScenarioMetric(right, 'web-vital.TTFB', 120);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:web-vital.TTFB').status,
+    'fail'
+  );
 });
 
 test('matching authoritative reports pass and aggregate all retained scenarios', () => {
@@ -259,6 +289,65 @@ test('scheduled-only scenarios require exactly one iteration-one record', () => 
   ));
   const failing = compare(left, right, 15);
   assert.equal(failing.status, 'fail');
+});
+
+test('scheduled auxiliary scenarios use their explicit metric contract and remain deterministic', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  const manifestScenario = {
+    id: 'task07-registry-desktop',
+    route: '/grigliata',
+    role: 'dm',
+    interaction: 'desktop-registry-budget',
+    scheduledOnly: true,
+    requiredMetrics: [
+      'task07.registryRequestConcurrencyLimit',
+      'task07.unpinnedRegistryRecords',
+    ],
+  };
+  for (const current of [left, right]) {
+    current.scenarioManifest.scenarios.push(manifestScenario);
+    current.browser.scenarios.push({
+      scenarioId: manifestScenario.id,
+      route: manifestScenario.route,
+      role: manifestScenario.role,
+      iteration: 1,
+      environment: {
+        browserName: 'chromium',
+        browserVersion: '123',
+        projectName: 'chromium',
+      },
+      metrics: {
+        'task07.registryRequestConcurrencyLimit': 4,
+        'task07.unpinnedRegistryRecords': 72,
+      },
+    });
+  }
+
+  const passing = compare(left, right, 15);
+  assert.equal(passing.status, 'pass');
+  assert.equal(
+    passing.compatibility
+      .find(({ id }) => id === 'scenario-required-metrics:task07-registry-desktop').status,
+    'pass'
+  );
+
+  right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'] = 71;
+  const drift = compare(left, right, 15);
+  assert.equal(drift.status, 'fail');
+  assert.equal(
+    drift.deterministic
+      .find(({ key }) => key === 'task07-registry-desktop:task07.unpinnedRegistryRecords').status,
+    'fail'
+  );
+
+  delete right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'];
+  const missing = compare(left, right, 15);
+  assert.equal(
+    missing.compatibility
+      .find(({ id }) => id === 'scenario-required-metrics:task07-registry-desktop').status,
+    'fail'
+  );
 });
 
 test('authoritative identities require distinct run IDs, matching browser IDs, and real commits', () => {

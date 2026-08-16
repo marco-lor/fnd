@@ -15,6 +15,7 @@ const {
 const { buildMetricMap } = require('./report');
 
 const DEFAULT_MAX_VARIANCE_PERCENT = 15;
+const TTFB_ABSOLUTE_JITTER_MS = 5;
 
 const argumentValue = (name) => {
   const index = process.argv.indexOf(name);
@@ -61,7 +62,12 @@ const isDeterministicMetric = (key) => (
   || /:resource\.(javascript|css|image|font)\.(uniqueCount|uniqueGzipBytes|uniqueFingerprint)$/.test(key)
   || /:resource\.other\.(uniqueCount|uniqueFingerprint)$/.test(key)
   || /:task07\.(attachedImages|audioNodes|farOffscreenAttachedImages|managedImages|musicStreamListeners|reducedMotionMeteors|uniqueFixtureImageRequests)$/.test(key)
+  || /:task07\.(registryRequestConcurrencyLimit|unpinnedRegistryRecords|unpinnedEstimatedDecodedBytes|totalEstimatedDecodedBytes|lowPriorityQueuedPreloads)$/.test(key)
   || key.startsWith('build:')
+);
+
+const absoluteJitterToleranceMs = (key) => (
+  /:web-vital\.TTFB$/.test(key) ? TTFB_ABSOLUTE_JITTER_MS : 0
 );
 
 const buildFingerprint = (report) => (report.build?.assets || [])
@@ -176,9 +182,13 @@ const scenarioMetadataDetails = (report, manifestScenario) => {
 
 const scenarioMetricCoverageDetails = (report, manifestScenario) => {
   if (!manifestScenario) return { required: [], missing: [], valid: false };
-  const required = manifestScenario.scheduledOnly === true
-    ? SCHEDULED_REQUIRED_SCENARIO_METRICS
-    : ROUTE_REQUIRED_SCENARIO_METRICS;
+  const required = Array.isArray(manifestScenario.requiredMetrics)
+    ? manifestScenario.requiredMetrics
+    : (
+      manifestScenario.scheduledOnly === true
+        ? SCHEDULED_REQUIRED_SCENARIO_METRICS
+        : ROUTE_REQUIRED_SCENARIO_METRICS
+    );
   const records = (report.browser?.scenarios || [])
     .filter((entry) => (entry.scenarioId || entry.id) === manifestScenario.id);
   const missing = [];
@@ -287,6 +297,7 @@ const aggregateReports = (left, right, repeatability) => {
       status: repeatability.status,
       maximumVariancePercent: repeatability.maximumVariancePercent,
       observedMaximumVariancePercent: repeatability.observedMaximumVariancePercent,
+      maximumGatedVariancePercent: repeatability.maximumGatedVariancePercent,
       runIds: repeatability.runIds,
     },
   };
@@ -389,7 +400,21 @@ const compareReports = (
       && typeof manifest.locale === 'string' && manifest.locale.length > 0
       && typeof manifest.timezoneId === 'string' && manifest.timezoneId.length > 0
       && scenarios.length > 0
-      && scenarios.every(({ id }) => typeof id === 'string' && id.length > 0)
+      && scenarios.every(({ id, requiredMetrics }) => (
+        typeof id === 'string'
+        && id.length > 0
+        && (
+          requiredMetrics == null
+          || (
+            Array.isArray(requiredMetrics)
+            && requiredMetrics.length > 0
+            && requiredMetrics.every((metric) => (
+              typeof metric === 'string' && metric.length > 0
+            ))
+            && new Set(requiredMetrics).size === requiredMetrics.length
+          )
+        )
+      ))
       && new Set(scenarios.map(({ id }) => id)).size === scenarios.length;
   };
   compatibility.push({
@@ -529,19 +554,33 @@ const compareReports = (
     const variancePercent = Number.isFinite(leftValue) && Number.isFinite(rightValue)
       ? relativeDifferencePercent(leftValue, rightValue)
       : null;
+    const absoluteDifference = Number.isFinite(leftValue) && Number.isFinite(rightValue)
+      ? Math.abs(leftValue - rightValue)
+      : null;
+    const absoluteToleranceMs = absoluteJitterToleranceMs(key);
+    const withinAbsoluteTolerance = absoluteToleranceMs > 0
+      && Number.isFinite(absoluteDifference)
+      && absoluteDifference <= absoluteToleranceMs;
+    const gatedVariancePercent = withinAbsoluteTolerance ? 0 : variancePercent;
     return {
       ...comparison,
       left: leftValue,
       right: rightValue,
+      absoluteDifference,
+      absoluteToleranceMs,
       variancePercent,
+      gatedVariancePercent,
       status: comparison.complete
         && stableJson(comparison.leftIterations) === stableJson(comparison.rightIterations)
-        && Number.isFinite(variancePercent)
-        && variancePercent <= maximumVariancePercent ? 'pass' : 'fail',
+        && Number.isFinite(gatedVariancePercent)
+        && gatedVariancePercent <= maximumVariancePercent ? 'pass' : 'fail',
     };
   });
   const observedMaximumVariancePercent = Math.max(0, ...timing
     .map((entry) => entry.variancePercent)
+    .filter(Number.isFinite));
+  const maximumGatedVariancePercent = Math.max(0, ...timing
+    .map((entry) => entry.gatedVariancePercent)
     .filter(Number.isFinite));
   const status = [...compatibility, ...deterministic, ...timing]
     .some((entry) => entry.status !== 'pass') ? 'fail' : 'pass';
@@ -552,6 +591,7 @@ const compareReports = (
     status,
     maximumVariancePercent,
     observedMaximumVariancePercent,
+    maximumGatedVariancePercent,
     runIds: [left.run?.id || null, right.run?.id || null],
     compatibility,
     deterministic,
@@ -578,7 +618,11 @@ const runRepeatability = ({
   for (const entry of [...repeatability.compatibility, ...repeatability.deterministic, ...repeatability.timing]) {
     if (entry.status !== 'pass') console.error(`FAIL repeatability ${entry.id || entry.key}`);
   }
-  console.log(`${repeatability.status.toUpperCase()} repeatability (maximum observed variance ${repeatability.observedMaximumVariancePercent.toFixed(2)}%).`);
+  console.log(
+    `${repeatability.status.toUpperCase()} repeatability `
+    + `(maximum gated variance ${repeatability.maximumGatedVariancePercent.toFixed(2)}%; `
+    + `raw observed maximum ${repeatability.observedMaximumVariancePercent.toFixed(2)}%).`
+  );
   if (repeatability.status !== 'pass') process.exitCode = 1;
   return { repeatability, aggregate };
 };
@@ -587,7 +631,9 @@ if (require.main === module) runRepeatability();
 
 module.exports = {
   DEFAULT_MAX_VARIANCE_PERCENT,
+  TTFB_ABSOLUTE_JITTER_MS,
   aggregateReports,
+  absoluteJitterToleranceMs,
   buildTimingMedianMetricMap,
   collectScenarioMetricSamples,
   compareReports,
