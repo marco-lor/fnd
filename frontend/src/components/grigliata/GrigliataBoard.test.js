@@ -168,6 +168,31 @@ test('keeps token media priority and fixture order stable when candidates exceed
   expect(selectedIds).not.toContain('visible-first');
 });
 
+test('defers ordinary visible token media until the current viewport fit is ready', () => {
+  const tokenAt = (tokenId, overrides = {}) => ({
+    tokenId,
+    imageUrl: `https://example.com/${tokenId}.png`,
+    renderPosition: {x: 20, y: 20, size: 80},
+    ...overrides,
+  });
+
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens: [
+      tokenAt('ordinary-visible'),
+      tokenAt('viewer-owned', {isOwnedByViewer: true}),
+      tokenAt('selected', {isSelected: true}),
+      tokenAt('active', {isActiveTurn: true}),
+    ],
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 10,
+    allowVisibleMedia: false,
+  });
+
+  expect([...selectedIds]).toEqual(['active', 'selected', 'viewer-owned']);
+  expect(selectedIds).not.toContain('ordinary-visible');
+});
+
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
 
@@ -3180,6 +3205,73 @@ describe('GrigliataBoard', () => {
     expect(__getImageAssetRegistryStats().namedPins).toEqual([
       IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD,
     ]);
+  });
+
+  test('fits a new map before leasing its ordinary token media', async () => {
+    const buildToken = (tokenId, ownerUid) => ({
+      tokenId,
+      id: tokenId,
+      ownerUid,
+      tokenType: 'character',
+      label: tokenId,
+      imageUrl: `https://example.com/${tokenId}.png`,
+      placed: true,
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    });
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      const stage = document.querySelector('[data-konva-type="Stage"]');
+      expect(Number(stage?.getAttribute('data-scalex'))).not.toBe(1);
+    });
+    useImageAssetSnapshot.mockClear();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          tokens: [
+            buildToken('ordinary-map-2', 'another-user'),
+            buildToken('owned-map-2', 'current-user'),
+          ],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/ordinary-map-2.png'
+      );
+    });
+    const requestedUrls = useImageAssetSnapshot.mock.calls.map(([url]) => url);
+    const firstOwnedRequest = requestedUrls.indexOf('https://example.com/owned-map-2.png');
+    const firstOrdinaryRequest = requestedUrls.indexOf('https://example.com/ordinary-map-2.png');
+
+    expect(firstOwnedRequest).toBeGreaterThanOrEqual(0);
+    expect(firstOrdinaryRequest).toBeGreaterThan(firstOwnedRequest);
+    expect(requestedUrls.slice(0, firstOrdinaryRequest)).toContain('');
   });
 
   test('fades into the narration battlemap without showing the combat map underneath', async () => {

@@ -2,10 +2,11 @@
 
 Date: 2026-08-16
 
-Status: local, independent-review, soak, build, Hosting, and live-verification
-gates complete. Task 07 is complete for `fatin-test` roadmap progression once
-the containing `main` revision finishes the required exact-revision CI green;
-any CI failure reopens this closure.
+Status: implementation, independent review, focused browser reproduction, full
+frontend tests, and hardened build gates are complete. The containing `main`
+revision still requires a fresh exact-revision automatic workflow, v4
+authoritative pair, scoped Hosting redeploy, and exact live-bundle verification;
+any failure reopens this closure.
 
 This closure is limited to the isolated `fatin-test` project. It does not
 authorize or describe a `fatins` deployment, data copy, media-control change,
@@ -152,6 +153,35 @@ board stays pinned, finite registry work drains to zero, no preload is dropped,
 and compact record/byte budgets hold; it no longer requires spare registry
 capacity to be filled to an incidental exact count.
 
+The next exact-revision automatic workflow, run
+[`31943141392`](https://github.com/marco-lor/fatins-test/actions/runs/31943141392),
+passed all six required jobs on `d8c8133a1d3ae05dc908bdc27a2dd351eb3229e1`.
+The manually dispatched full benchmark, run
+[`31943659189`](https://github.com/marco-lor/fatins-test/actions/runs/31943659189),
+then ran both 70-scenario browser measurements successfully but correctly failed
+their repeatability comparison. One run retained one unpinned 96-by-96 token
+image while the other retained 71: the initial measured-stage render still used
+viewport scale 1 before the fit effect, leased the 72-record token budget, and
+left those otherwise released images in the deliberately retained registry.
+The same hosted pair also exposed one sub-threshold Long Tasks observation and
+sub-millisecond timer variance. This failed pair is diagnostic evidence only;
+it was not retried into acceptance and cannot be used as a baseline.
+
+Ordinary visible token media is now ineligible until the current scene's
+`fitKey` has been fitted. Active, selected, and viewer-owned media keeps its
+priority. A map-switch component test proves that a previous scene's viewport
+cannot lease the new scene's ordinary token art, and two separate fresh
+desktop/compact emulator runs prove the registry settles with zero active or
+queued work and the strict retained-record/byte bounds.
+
+Measurement contract v4 keeps the raw timing values and raw maximum variance,
+while applying explicit GitHub-hosted-only absolute bands for the Long Tasks
+API's 50 ms observation boundary and sub-millisecond microbenchmarks. Larger
+drift still fails, and controlled, missing, or mismatched machine identities
+retain the strict 15 percent contract. Baseline acceptance separately rejects
+GitHub-hosted, unknown, blank, or missing reference-machine identities before
+any baseline write.
+
 ## Independent review
 
 An independent read-only agent audited the implementation from base
@@ -188,6 +218,13 @@ coverage; verified that ownership derivation preserves the prior movement
 authorization rule without changing persistence or reads; and approved the
 compact 200-node, active-pin, drained-queue, zero-drop, and budget contract.
 
+The reviewer then independently audited the final viewport-fit fence,
+map-switch regression test, v4 timing arithmetic, raw-variance reporting,
+machine-identity scoping, and baseline-acceptance guard. Final verdict:
+**APPROVE** with no release-blocking correctness, security, or evidence-gaming
+finding. The only P3 suggestion is an additional end-to-end CLI test for the
+already directly wired and unit-tested baseline write guard.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -196,8 +233,8 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 139 suites, 1,301 tests |
-| Performance/harness Node tests | PASS: 366/366 |
+| Full frontend Jest | PASS: 139 suites, 1,303 tests |
+| Performance/harness Node tests | PASS: 370/370 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
@@ -206,11 +243,11 @@ No live application data was mutated by these gates.
 | Firefox/WebKit Task 07 smoke | PASS: 4/4 |
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
 | Patched five-peer response-evidence gate | PASS: 3/3 Playwright stages with clean owned-emulator teardown; all 12 additional scenario repetitions passed |
-| Overview token-media regression | PASS: GrigliataBoard 146/146; fresh performance build plus strict five-peer and compact 200-token browser probes 4/4 |
+| Overview token-media and initial-fit regressions | PASS: GrigliataBoard 148/148; two separate fresh desktop/compact 200-token browser probes 4/4 each |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
-| Clean-commit authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each |
-| Authoritative repeatability | PASS: zero compatibility, deterministic, or timing failures; maximum gated variance 10.00% |
+| Historical clean-commit v3 authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each; superseded as final evidence by contract v4 |
+| Historical v3 authoritative repeatability | PASS: zero compatibility, deterministic, or timing failures; maximum gated variance 10.00%; a fresh v4 pair remains required for the containing revision |
 | Default 600-second media soak | PASS: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle |
 | Production bundle and unchanged start path | PASS: hardened build verification and `/home` HTTP 200 through `npm start` |
 
@@ -252,9 +289,9 @@ Predeploy and live evidence:
 - `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
   loopback source.
 
-The overview token-media correction produces the next scoped release candidate
-as `main.4024cc0c.js` (665,057 bytes; SHA-256
-`3fa03506611c20b2ddf6f6131f47ccd86e27ebf5b8156efca40f35f5620f5c35`). Its
+The viewport-fit correction and v4 evidence contract produce the next scoped
+release candidate as `main.7921f66a.js` (665,057 bytes; SHA-256
+`941255d03969ac5adda563dc7d1652d7a8b073309e7f69e0287ada8f1f68a3fe`). Its
 exact-SHA workflows and live served-bundle match remain explicit final release
 gates; the earlier `main.355adcc4.js` evidence above is retained as the last
 completed scoped deployment rather than being rewritten as future evidence.

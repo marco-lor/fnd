@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   assertSchemaVersion,
+  GITHUB_HOSTED_REFERENCE_MACHINE,
   median,
   PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   readJson,
@@ -16,6 +17,9 @@ const { buildMetricMap } = require('./report');
 
 const DEFAULT_MAX_VARIANCE_PERCENT = 15;
 const TTFB_ABSOLUTE_JITTER_MS = 5;
+const GITHUB_HOSTED_LONG_TASK_JITTER_MS = 50;
+const GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS = 1;
+const LONG_TASK_ENTRY_THRESHOLD_MS = 50;
 
 const argumentValue = (name) => {
   const index = process.argv.indexOf(name);
@@ -66,8 +70,21 @@ const isDeterministicMetric = (key) => (
   || key.startsWith('build:')
 );
 
-const absoluteJitterToleranceMs = (key) => (
-  /:web-vital\.TTFB$/.test(key) ? TTFB_ABSOLUTE_JITTER_MS : 0
+const absoluteJitterToleranceMs = (key, { referenceMachine = '' } = {}) => {
+  if (/:web-vital\.TTFB$/.test(key)) return TTFB_ABSOLUTE_JITTER_MS;
+  if (referenceMachine !== GITHUB_HOSTED_REFERENCE_MACHINE) return 0;
+  if (/:runtime\.maxLongTaskMs$/.test(key)) return GITHUB_HOSTED_LONG_TASK_JITTER_MS;
+  if (/:microbenchmark\..*\.(median|p95)$/.test(key)) {
+    return GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS;
+  }
+  return 0;
+};
+
+const timingAbsoluteComparisonFloorMs = (key, { referenceMachine = '' } = {}) => (
+  referenceMachine === GITHUB_HOSTED_REFERENCE_MACHINE
+  && /:runtime\.maxLongTaskMs$/.test(key)
+    ? LONG_TASK_ENTRY_THRESHOLD_MS
+    : 0
 );
 
 const buildFingerprint = (report) => (report.build?.assets || [])
@@ -548,6 +565,11 @@ const compareReports = (
     ...Object.keys(leftTimingMetrics),
     ...Object.keys(rightTimingMetrics),
   ])].sort();
+  const matchingReferenceMachine = left.environment?.referenceMachine
+    && left.environment.referenceMachine === right.environment?.referenceMachine
+    ? left.environment.referenceMachine
+    : '';
+  const timingJitterContext = { referenceMachine: matchingReferenceMachine };
   const timing = timingKeys.map((key) => {
     const scenarioId = key.slice(0, key.indexOf(':'));
     const comparison = buildSampleComparison(
@@ -570,10 +592,17 @@ const compareReports = (
     const absoluteDifference = Number.isFinite(leftValue) && Number.isFinite(rightValue)
       ? Math.abs(leftValue - rightValue)
       : null;
-    const absoluteToleranceMs = absoluteJitterToleranceMs(key);
+    const absoluteComparisonFloorMs = timingAbsoluteComparisonFloorMs(key, timingJitterContext);
+    const gatedAbsoluteDifferenceMs = Number.isFinite(leftValue) && Number.isFinite(rightValue)
+      ? Math.abs(
+        Math.max(leftValue, absoluteComparisonFloorMs)
+        - Math.max(rightValue, absoluteComparisonFloorMs)
+      )
+      : null;
+    const absoluteToleranceMs = absoluteJitterToleranceMs(key, timingJitterContext);
     const withinAbsoluteTolerance = absoluteToleranceMs > 0
-      && Number.isFinite(absoluteDifference)
-      && absoluteDifference <= absoluteToleranceMs;
+      && Number.isFinite(gatedAbsoluteDifferenceMs)
+      && gatedAbsoluteDifferenceMs <= absoluteToleranceMs;
     const gatedVariancePercent = withinAbsoluteTolerance ? 0 : variancePercent;
     return {
       ...comparison,
@@ -581,6 +610,8 @@ const compareReports = (
       left: leftValue,
       right: rightValue,
       absoluteDifference,
+      absoluteComparisonFloorMs,
+      gatedAbsoluteDifferenceMs,
       absoluteToleranceMs,
       variancePercent,
       gatedVariancePercent,
@@ -645,6 +676,9 @@ if (require.main === module) runRepeatability();
 
 module.exports = {
   DEFAULT_MAX_VARIANCE_PERCENT,
+  GITHUB_HOSTED_LONG_TASK_JITTER_MS,
+  GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS,
+  LONG_TASK_ENTRY_THRESHOLD_MS,
   TTFB_ABSOLUTE_JITTER_MS,
   aggregateReports,
   absoluteJitterToleranceMs,
@@ -657,4 +691,5 @@ module.exports = {
   relativeDifferencePercent,
   runRepeatability,
   timingAggregation,
+  timingAbsoluteComparisonFloorMs,
 };

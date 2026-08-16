@@ -12,6 +12,7 @@ const {
   sha256,
   writeJson,
 } = require('./common');
+const { assertBaselineReferenceMachine } = require('./baseline-source');
 const { evaluateBudget, evaluateStructuralGates, worstBudgetEvaluation } = require('./compare');
 
 if (!process.argv.includes('--accept')) {
@@ -39,6 +40,12 @@ const report = JSON.parse(aggregateBytes.toString('utf8'));
 assertSchemaVersion(report, 'authoritative aggregate');
 if (report.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION) {
   console.error('The authoritative aggregate uses a stale measurement contract.');
+  process.exit(1);
+}
+try {
+  assertBaselineReferenceMachine(report);
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
 if (!report.build || !report.fixture || !report.browser) {

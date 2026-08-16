@@ -105,9 +105,9 @@ for (const scenario of manifest.scenarios) {
         await page.waitForFunction(() => (
           typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
         ));
-        const registry = await page.evaluate(() => (
-          window.__FND_PERF_BENCHMARKS__.getImageRegistryStats()
-        ));
+        const registry = await waitForImageRegistrySettlement(page, {
+          minimumLoadedRecords: 1,
+        });
         expect(registry.limits).toMatchObject({
           profile: 'desktop',
           maxConcurrentRequests: 4,
@@ -116,9 +116,13 @@ for (const scenario of manifest.scenarios) {
           maxTotalDecodedBytes: 384 * 1024 * 1024,
           maxLowPriorityQueueSize: 32,
         });
-        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(96);
-        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(128 * 1024 * 1024);
+        // The fixture's full-map fit makes ordinary token art smaller than the
+        // useful-media threshold. Only bounded priority/shell records may remain.
+        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
+        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
         expect(registry.decodedBytes).toBeLessThanOrEqual(384 * 1024 * 1024);
+        expect(registry.activeRequestCount).toBe(0);
+        expect(registry.queuedRequestCount).toBe(0);
         expect(registry.lowPriorityQueuedRequestCount).toBeLessThanOrEqual(32);
         writeScenarioResult({
           id: 'task07-registry-desktop',
@@ -221,8 +225,8 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
     expect(registry.loadedRecordCount).toBeGreaterThanOrEqual(1);
     expect(registry.pinnedRecordCount).toBe(1);
     expect(registry.namedPins).toContain('grigliata-active-board');
-    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(registry.limits.maxRecords);
-    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(registry.limits.maxDecodedBytes);
+    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
+    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
     expect(registry.decodedBytes).toBeLessThanOrEqual(registry.limits.maxTotalDecodedBytes);
     expect(registry.activeRequestCount).toBe(0);
     expect(registry.queuedRequestCount).toBe(0);

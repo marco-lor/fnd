@@ -213,6 +213,7 @@ export const buildBoundedTokenMediaIdSet = ({
   viewport,
   stageSize,
   limit,
+  allowVisibleMedia = true,
 }) => {
   const boundedLimit = Math.max(0, Math.floor(Number(limit) || 0));
   if (!boundedLimit) return new Set();
@@ -221,7 +222,8 @@ export const buildBoundedTokenMediaIdSet = ({
     .map((token, index) => {
       const tokenScreenSize = Number(token?.renderPosition?.size) * Number(viewport?.scale);
       const isUsefulVisibleMedia = (
-        Number.isFinite(tokenScreenSize)
+        allowVisibleMedia
+        && Number.isFinite(tokenScreenSize)
         && tokenScreenSize >= TOKEN_MEDIA_MIN_SCREEN_SIZE_PX
         && isTokenWithinStageViewport(token, viewport, stageSize)
       );
@@ -6346,12 +6348,15 @@ export default function GrigliataBoard({
     0,
     getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
   ), []);
+  const hasFittedCurrentViewport = lastFitKeyRef.current === fitKey;
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
     tokens: visibleRenderedTokens,
     viewport,
     stageSize,
     limit: tokenMediaLoadLimit,
+    allowVisibleMedia: hasFittedCurrentViewport,
   }), [
+    hasFittedCurrentViewport,
     stageSize,
     tokenMediaLoadLimit,
     viewport,

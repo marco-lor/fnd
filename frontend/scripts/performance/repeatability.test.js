@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { PERFORMANCE_MEASUREMENT_CONTRACT_VERSION } = require('./common');
 const {
+  GITHUB_HOSTED_LONG_TASK_JITTER_MS,
+  GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS,
+  LONG_TASK_ENTRY_THRESHOLD_MS,
   TTFB_ABSOLUTE_JITTER_MS,
   aggregateReports,
   compareReports,
@@ -214,6 +217,97 @@ test('maximum long-task repeatability compares the worst retained samples', () =
   const drifted = compare(left, right, 15);
   assert.equal(
     drifted.timing.find(({ key }) => key === 'home:runtime.maxLongTaskMs').status,
+    'fail'
+  );
+});
+
+test('GitHub-hosted long-task jitter uses the observer threshold without hiding larger drift', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(left, 'runtime.maxLongTaskMs', [0, 0, 0]);
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [93, 0, 0]);
+
+  const withinFloor = compare(left, right, 15);
+  const longTask = withinFloor.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(GITHUB_HOSTED_LONG_TASK_JITTER_MS, 50);
+  assert.equal(LONG_TASK_ENTRY_THRESHOLD_MS, 50);
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(longTask.left, 0);
+  assert.equal(longTask.right, 93);
+  assert.equal(longTask.absoluteDifference, 93);
+  assert.equal(longTask.absoluteComparisonFloorMs, 50);
+  assert.equal(longTask.gatedAbsoluteDifferenceMs, 43);
+  assert.equal(longTask.absoluteToleranceMs, 50);
+  assert.equal(longTask.variancePercent, 100);
+  assert.equal(longTask.gatedVariancePercent, 0);
+
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [101, 0, 0]);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:runtime.maxLongTaskMs').status,
+    'fail'
+  );
+
+  left.environment.referenceMachine = 'test-machine';
+  right.environment.referenceMachine = 'test-machine';
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [93, 0, 0]);
+  const controlledMachine = compare(left, right, 15);
+  const controlledLongTask = controlledMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(controlledMachine.status, 'fail');
+  assert.equal(controlledLongTask.absoluteToleranceMs, 0);
+  assert.equal(controlledLongTask.absoluteComparisonFloorMs, 0);
+
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'test-machine';
+  const mismatchedMachine = compare(left, right, 15);
+  const mismatchedLongTask = mismatchedMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(mismatchedLongTask.status, 'fail');
+  assert.equal(mismatchedLongTask.absoluteToleranceMs, 0);
+  assert.equal(mismatchedLongTask.absoluteComparisonFloorMs, 0);
+
+  delete right.environment.referenceMachine;
+  const missingMachine = compare(left, right, 15);
+  const missingLongTask = missingMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(missingLongTask.status, 'fail');
+  assert.equal(missingLongTask.absoluteToleranceMs, 0);
+  assert.equal(missingLongTask.absoluteComparisonFloorMs, 0);
+});
+
+test('GitHub-hosted sub-millisecond microbenchmark jitter remains raw evidence', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(left, 'microbenchmark.visibility.p95', [0.4, 0.6, 0.6]);
+  setScenarioMetric(right, 'microbenchmark.visibility.p95', [1.4, 2.3, 0.4]);
+
+  const withinFloor = compare(left, right, 15);
+  const visibility = withinFloor.timing.find(
+    ({ key }) => key === 'home:microbenchmark.visibility.p95'
+  );
+  assert.equal(GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS, 1);
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(visibility.left, 0.6);
+  assert.equal(visibility.right, 1.4);
+  assert.ok(visibility.variancePercent > 15);
+  assert.equal(visibility.absoluteToleranceMs, 1);
+  assert.ok(Math.abs(visibility.gatedAbsoluteDifferenceMs - 0.8) < 1e-9);
+  assert.equal(visibility.gatedVariancePercent, 0);
+
+  setScenarioMetric(right, 'microbenchmark.visibility.p95', [1.7, 2.3, 0.4]);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:microbenchmark.visibility.p95').status,
     'fail'
   );
 });
