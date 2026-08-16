@@ -29,8 +29,10 @@ const {
   readKonvaTokenPositions,
   readRouteCleanupSummary,
   retainImageResourceTimings,
+  resolvePlaywrightResponseStatus,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
+  sanitizeFivePeerRequestFailure,
   scenarioRestorePatch,
   summarizeResourceEntries,
   warmBrowserAssetDelivery,
@@ -738,6 +740,96 @@ test('only successful demo Write-channel turnover is explained during the five-p
       url: candidate.href,
     }), false, `unexpected ${parameter}`);
   }
+});
+
+test('five-peer request diagnostics retain protocol evidence without session values', () => {
+  const rawSid = 'I4sZ0bMAEY4XeEvOj7Ks4Q==';
+  const rawAid = '1452';
+  const rawZx = '9afmshv1j87t';
+  const rawDatabase = 'projects/demo-fnd-perf/databases/(default)';
+  const evidence = sanitizeFivePeerRequestFailure({
+    role: 'dm',
+    lifecyclePhase: 'route-active',
+    sequence: 3,
+    elapsedMs: 125.6,
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    responseStatus: undefined,
+    url: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Write/channel'
+      + `?VER=8&database=${encodeURIComponent(rawDatabase)}`
+      + `&SID=${encodeURIComponent(rawSid)}&RID=92943&AID=${rawAid}`
+      + `&TYPE=xmlhttp&zx=${rawZx}&t=1&${encodeURIComponent('unsafe=key')}=discarded`,
+  });
+
+  assert.deepEqual(evidence, {
+    schemaVersion: 1,
+    role: 'dm',
+    lifecyclePhase: 'route-active',
+    sequence: 3,
+    elapsedMs: 126,
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    path: '/google.firestore.v1.Firestore/Write/channel',
+    responseObserved: false,
+    responseStatus: null,
+    ownedEmulatorOrigin: true,
+    expectedDatabase: true,
+    operation: 'Write',
+    query: {
+      keys: ['AID', 'RID', 'SID', 'TYPE', 'VER', '[redacted]', 'database', 't', 'zx'],
+      omittedKeyCount: 0,
+      protocol: {
+        ver: '8',
+        rid: 'numeric',
+        ci: 'missing',
+        type: 'xmlhttp',
+        t: '1',
+      },
+      opaque: {
+        sid: { present: true, length: rawSid.length, format: 'token' },
+        aid: { present: true, length: rawAid.length, format: 'digits' },
+        zx: { present: true, length: rawZx.length, format: 'token' },
+      },
+    },
+  });
+  const serialized = JSON.stringify(evidence);
+  for (const secret of [rawSid, rawAid, rawZx, rawDatabase, 'unsafe=key']) {
+    assert.equal(serialized.includes(secret), false, `redacts ${secret}`);
+  }
+  assert.equal(sanitizeFivePeerRequestFailure({
+    failure: `net::ERR_${'A'.repeat(100)}`,
+  }).failure, 'other');
+});
+
+test('five-peer response diagnostics prefer observed status and safely query the request fallback', async () => {
+  const observedRequest = {
+    response: async () => {
+      throw new Error('the response fallback must not run when an event status exists');
+    },
+  };
+  const observedStatuses = new WeakMap([[observedRequest, 200]]);
+  assert.equal(
+    await resolvePlaywrightResponseStatus(observedRequest, observedStatuses),
+    200
+  );
+
+  const fallbackRequest = {
+    response: async () => ({ status: () => 204 }),
+  };
+  assert.equal(
+    await resolvePlaywrightResponseStatus(fallbackRequest, new WeakMap()),
+    204
+  );
+  assert.equal(await resolvePlaywrightResponseStatus({
+    response: async () => null,
+  }, new WeakMap()), undefined);
+  assert.equal(await resolvePlaywrightResponseStatus({
+    response: async () => {
+      throw new Error('request was already disposed');
+    },
+  }, new WeakMap()), undefined);
 });
 
 test('only intentional Task 07 fixture-image detach aborts are explained', () => {

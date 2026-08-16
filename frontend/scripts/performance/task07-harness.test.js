@@ -467,7 +467,31 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
     gate,
     /rules-emulators\.js --task07-only\r?\n\s+timeout-minutes:\s*15/
   );
-  assert.match(workflow, /full-benchmark:[\s\S]*npm run perf:authoritative[\s\S]*npm run perf:media:soak/);
+  const fullBenchmarkStart = workflow.indexOf('  full-benchmark:');
+  const fullBenchmark = workflow.slice(fullBenchmarkStart);
+  const authoritativeIndex = fullBenchmark.indexOf('npm run perf:authoritative');
+  const failureArtifactIndex = fullBenchmark.indexOf('authoritative-failure-${{ github.run_id }}-${{ github.run_attempt }}');
+  const failureArtifactStepIndex = fullBenchmark.lastIndexOf(
+    '- uses: actions/upload-artifact@v4',
+    failureArtifactIndex
+  );
+  const soakIndex = fullBenchmark.indexOf('npm run perf:media:soak');
+  const finalArtifactIndex = fullBenchmark.indexOf('name: full-performance-benchmark');
+  assert.ok(authoritativeIndex >= 0, 'full benchmark must run authoritative measurements');
+  assert.ok(failureArtifactStepIndex > authoritativeIndex, 'failure upload step must follow the authoritative gate');
+  assert.ok(failureArtifactIndex > authoritativeIndex, 'authoritative failure evidence must upload after the gate');
+  assert.ok(soakIndex > failureArtifactIndex, 'authoritative failure evidence must upload before soak');
+  assert.ok(finalArtifactIndex > soakIndex, 'the final combined artifact must upload after soak');
+  const failureArtifact = fullBenchmark.slice(failureArtifactStepIndex, soakIndex);
+  assert.match(fullBenchmark.slice(authoritativeIndex - 120, failureArtifactStepIndex), /id:\s*authoritative/);
+  assert.match(
+    failureArtifact,
+    /if:\s*\$\{\{\s*failure\(\)\s*&&\s*steps\.authoritative\.outcome\s*==\s*'failure'\s*\}\}/
+  );
+  assert.match(failureArtifact, /if-no-files-found:\s*error/);
+  assert.match(failureArtifact, /frontend\/performance-results\//);
+  assert.match(failureArtifact, /frontend\/test-results\/performance\//);
+  assert.match(failureArtifact, /frontend\/playwright-report\/performance\//);
   const rulesJobStart = workflow.indexOf('  emulator-rules:');
   const rulesJobEnd = workflow.indexOf('\n  hardened-build:', rulesJobStart);
   const rulesJob = workflow.slice(rulesJobStart, rulesJobEnd);

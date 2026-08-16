@@ -28,6 +28,23 @@ const FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS = [
   't',
   'zx',
 ];
+const FIVE_PEER_DIAGNOSTIC_ROLES = new Set(['player', 'peer-2', 'peer-3', 'peer-4', 'dm']);
+const FIVE_PEER_DIAGNOSTIC_PHASES = new Set([
+  'route-navigation',
+  'route-active',
+  'route-cleanup',
+]);
+const FIVE_PEER_DIAGNOSTIC_RESOURCE_TYPES = new Set([
+  'document',
+  'fetch',
+  'image',
+  'media',
+  'script',
+  'stylesheet',
+  'xhr',
+]);
+const FIVE_PEER_DIAGNOSTIC_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT']);
+const MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS = 16;
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
 const MAX_RETAINED_IMAGE_RESOURCE_TIMINGS = 128;
 
@@ -492,6 +509,122 @@ const isExpectedFirestoreLifecycleCancellation = ({
 
   const operation = demoFirestoreStreamOperation(url);
   return Boolean(operation && allowedOperations.has(operation));
+};
+
+const isHttpResponseStatus = (value) => (
+  Number.isInteger(value) && value >= 0 && value <= 999
+);
+
+const resolvePlaywrightResponseStatus = async (request, observedStatuses) => {
+  const observed = observedStatuses?.get?.(request);
+  if (isHttpResponseStatus(observed)) return observed;
+  try {
+    const response = await request?.response?.();
+    const status = response?.status?.();
+    return isHttpResponseStatus(status) ? status : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+};
+
+const classifyProtocolLiteral = (value, expected) => {
+  if (value === null) return 'missing';
+  return expected.includes(value) ? value : 'other';
+};
+
+const classifyRequestId = (value) => {
+  if (value === null) return 'missing';
+  if (value === 'rpc') return 'rpc';
+  if (/^\d+$/.test(value)) return 'numeric';
+  return 'other';
+};
+
+const describeOpaqueQueryValue = (value, pattern, matchedFormat = 'token') => ({
+  present: value !== null,
+  length: value === null ? 0 : Math.min(value.length, 4096),
+  format: value === null ? 'missing' : pattern.test(value) ? matchedFormat : 'other',
+});
+
+const sanitizeFivePeerRequestFailure = ({
+  role,
+  lifecyclePhase,
+  sequence,
+  elapsedMs,
+  resourceType,
+  failure,
+  method,
+  responseStatus,
+  url,
+} = {}) => {
+  let parsed = null;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    // Invalid URLs stay fail-closed while retaining only categorical evidence.
+  }
+  const rawKeys = parsed ? [...parsed.searchParams.keys()] : [];
+  const sanitizedKeys = rawKeys
+    .map((key) => (/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(key) ? key : '[redacted]'))
+    .sort();
+  const retainedKeys = sanitizedKeys.slice(0, MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS);
+  const pathname = parsed?.pathname || '';
+  const safePath = /^[A-Za-z0-9/._~-]{1,160}$/.test(pathname) ? pathname : '[redacted]';
+  const operation = pathname.match(FIRESTORE_STREAM_PATH)?.[1] || null;
+  const status = isHttpResponseStatus(responseStatus) ? responseStatus : null;
+  const safeElapsedMs = Number.isFinite(elapsedMs)
+    ? Math.min(600_000, Math.max(0, Math.round(elapsedMs)))
+    : 0;
+  const failureText = String(failure || '');
+  const safeFailure = failureText.length <= 64 && /^net::ERR_[A-Z0-9_]+$/.test(failureText)
+    ? failureText
+    : failure === 'unknown' ? 'unknown' : 'other';
+
+  return {
+    schemaVersion: 1,
+    role: FIVE_PEER_DIAGNOSTIC_ROLES.has(role) ? role : 'unknown',
+    lifecyclePhase: FIVE_PEER_DIAGNOSTIC_PHASES.has(lifecyclePhase)
+      ? lifecyclePhase
+      : 'unknown',
+    sequence: Number.isSafeInteger(sequence) && sequence > 0 ? sequence : 0,
+    elapsedMs: safeElapsedMs,
+    resourceType: FIVE_PEER_DIAGNOSTIC_RESOURCE_TYPES.has(resourceType)
+      ? resourceType
+      : 'other',
+    failure: safeFailure,
+    method: FIVE_PEER_DIAGNOSTIC_METHODS.has(method) ? method : 'other',
+    path: safePath,
+    responseObserved: status !== null,
+    responseStatus: status,
+    ownedEmulatorOrigin: parsed?.origin === FIRESTORE_EMULATOR_ORIGIN,
+    expectedDatabase: parsed?.searchParams.get('database') === FIRESTORE_EMULATOR_DATABASE,
+    operation,
+    query: {
+      keys: retainedKeys,
+      omittedKeyCount: Math.max(0, sanitizedKeys.length - retainedKeys.length),
+      protocol: {
+        ver: classifyProtocolLiteral(parsed?.searchParams.get('VER') ?? null, ['8']),
+        rid: classifyRequestId(parsed?.searchParams.get('RID') ?? null),
+        ci: classifyProtocolLiteral(parsed?.searchParams.get('CI') ?? null, ['0', '1']),
+        type: classifyProtocolLiteral(parsed?.searchParams.get('TYPE') ?? null, ['xmlhttp']),
+        t: classifyProtocolLiteral(parsed?.searchParams.get('t') ?? null, ['1']),
+      },
+      opaque: {
+        sid: describeOpaqueQueryValue(
+          parsed?.searchParams.get('SID') ?? null,
+          /^[A-Za-z0-9+/=_-]{8,}$/
+        ),
+        aid: describeOpaqueQueryValue(
+          parsed?.searchParams.get('AID') ?? null,
+          /^\d+$/,
+          'digits'
+        ),
+        zx: describeOpaqueQueryValue(
+          parsed?.searchParams.get('zx') ?? null,
+          /^[A-Za-z0-9_-]{6,}$/
+        ),
+      },
+    },
+  };
 };
 
 const isExpectedFivePeerFirestoreWriteTurnover = ({
@@ -1406,9 +1539,11 @@ module.exports = {
   readKonvaTokenPositions,
   readRouteCleanupSummary,
   retainImageResourceTimings,
+  resolvePlaywrightResponseStatus,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
+  sanitizeFivePeerRequestFailure,
   runInteraction,
   scenarioRestorePatch,
   summarizeResourceEntries,

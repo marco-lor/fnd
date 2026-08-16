@@ -109,6 +109,28 @@ wrapper a bounded `SIGTERM` window so it can terminate its captured child group,
 escalate if needed, and prove stable port release. The original failed runs are
 diagnostic evidence only and are not accepted closure evidence.
 
+The next exact-revision dispatch proved both corrections: every standard Linux
+job passed, the full default media soak passed on the same runner, and the
+emulator ports were stably free immediately after the authoritative command.
+The authoritative command nevertheless remained failed because the DM peer
+reported one active Firestore Write-channel `ERR_ABORTED` after all placement
+delivery checks had converged. The old diagnostic retained only the path and
+let the following soak overwrite the failed trace, so it could not prove
+whether Chromium had already observed HTTP 200 or whether the abort lacked a
+response.
+
+The closure keeps that classification fail-closed. It now resolves Playwright's
+request response as a fallback when the response-event map misses it, awaits
+all diagnostic tasks before assertions, and retains only bounded categorical
+protocol evidence: response status, owned origin/database booleans, operation,
+sorted query-key names, fixed protocol categories, and opaque-value
+presence/length/format. Complete URLs, database values, headers, bodies, and
+raw `SID`, `AID`, and `zx` values are never serialized. A fallback HTTP 200
+uses the already-reviewed turnover branch; missing, error, and unknown shapes
+still fail. On an authoritative failure, GitHub uploads this immutable evidence
+before the soak starts, so the soak can continue without replacing the failure
+artifact. The classifier itself was not broadened.
+
 ## Independent review
 
 An independent read-only agent audited the implementation from base
@@ -130,6 +152,13 @@ shutdown correction. The decisive integration proof remains a fresh Linux
 normal workflow plus manually dispatched full benchmark for the containing
 revision.
 
+The reviewer also approved the final Write-channel evidence patch with no
+release-blocking correctness, security, race, classifier, or CI finding. Its
+precision suggestions were applied before commit: failure timing is sampled
+before asynchronous response resolution, retained error strings and diagnostic
+errors are bounded, and the failure-only upload is tied specifically to the
+authoritative step outcome.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -139,7 +168,7 @@ No live application data was mutated by these gates.
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
 | Full frontend Jest | PASS: 139 suites, 1,299 tests |
-| Performance/harness Node tests | PASS: 364/364 |
+| Performance/harness Node tests | PASS: 366/366 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
 | Backend unit tests | PASS: 22/22 |
@@ -147,6 +176,7 @@ No live application data was mutated by these gates.
 | Task 07 media integration | PASS: callables 3/3, rules 27/27, query emulator 3/3, browser 10/10 |
 | Firefox/WebKit Task 07 smoke | PASS: 4/4 |
 | Chromium transport-regression reproduction | PASS: five-peer and Echi 3/3 each |
+| Patched five-peer response-evidence gate | PASS: 3/3 Playwright stages with clean owned-emulator teardown; all 12 additional scenario repetitions passed |
 | Bounded 50-map/200-token diagnostic soak | PASS: 3 complete cycles |
 | Chromium route/performance matrix | PASS: 28/28 scenarios and every blocking budget |
 | Clean-commit authoritative pair | PASS: `2026-08-16T04-18-59-324Z-a` and `-b`, both on `8f7cfc5c95ccbd24129f999242776fe9afed2ca2`, three retained iterations each |

@@ -173,8 +173,19 @@ jobs:
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run perf:authoritative
+      - id: authoritative
+        run: npm run perf:authoritative
         env: { FND_PERF_REFERENCE_MACHINE: 'github-hosted-runner' }
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() && steps.authoritative.outcome == 'failure' }}
+        with:
+          name: authoritative-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            frontend/performance-results/
+            frontend/test-results/performance/
+            frontend/playwright-report/performance/
       - run: npm run perf:media:soak
         if: ${{ !cancelled() }}
       - uses: actions/upload-artifact@v4
