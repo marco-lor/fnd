@@ -492,6 +492,15 @@ export default function GlobalGrigliataMusicPlayer({
       setMusicMode(normalizeTask07MusicMode(musicModeOverride));
       return undefined;
     }
+    // The UID is published before the live profile establishes its role-based
+    // repository access scope. Starting the control read in that transition
+    // window creates an intentionally invalidated request and can delay every
+    // Task 07 media consumer behind its retry. Stay non-fetching until the
+    // authoritative role is available.
+    if (!userRole) {
+      setMusicMode(null);
+      return undefined;
+    }
     let active = true;
     setMusicMode(null);
     resolveMusicMode({

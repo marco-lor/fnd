@@ -6,6 +6,7 @@ const path = require('node:path');
 const { sha256 } = require('../../../scripts/performance/common');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
   assertStaticAssetWarmupInventory,
@@ -14,6 +15,7 @@ const {
   createStaticAssetWarmupBatches,
   drainPageConnections,
   installDeterministicFontRoutes,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedFirestoreLifecycleCancellation,
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
@@ -26,6 +28,7 @@ const {
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
+  retainImageResourceTimings,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
   scenarioRestorePatch,
@@ -34,6 +37,51 @@ const {
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('owned emulator browser contexts force the SDK long-polling fallback', async () => {
+  let initScript;
+  await installOwnedEmulatorFirestoreTransport({
+    addInitScript: async (script) => { initScript = script; },
+  });
+  assert.equal(typeof initScript, 'function');
+
+  const previousWindow = global.window;
+  global.window = {};
+  try {
+    initScript();
+    assert.equal(global.window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__, true);
+  } finally {
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
+  }
+});
+
+test('every Firestore-backed browser probe installs and reports the owned transport', () => {
+  const contextFiles = [
+    'auth.setup.js',
+    'grigliata-five-peer.performance.js',
+    'routes.performance.js',
+    'task07-media-cross-browser.smoke.js',
+    'task07-media-routes.performance.js',
+    'task07-media-shell.performance.js',
+    'task07-media-soak.performance.js',
+  ];
+  for (const fileName of contextFiles) {
+    const source = fs.readFileSync(path.join(__dirname, fileName), 'utf8');
+    assert.match(
+      source,
+      /install(?:Bootstrap|OwnedEmulatorFirestoreTransport)\(/
+    );
+  }
+  const teardownSource = fs.readFileSync(
+    path.resolve(__dirname, '..', '..', 'global-teardown.js'),
+    'utf8'
+  );
+  assert.match(
+    teardownSource,
+    /firestoreTransport:\s*['"]forced-long-polling-owned-emulator['"]/
+  );
+});
 
 test('document accounting preserves totals and exposes route-scoped deliveries', () => {
   const capture = {
@@ -759,6 +807,38 @@ test('route measurements wire the strict demo reCAPTCHA report-only classifier',
   );
   assert.match(routeSource, /isExpectedDemoRecaptchaReportOnlyWarning\(text, \{baseURL\}\)/);
   assert.match(routeSource, /explainedRecaptchaReportOnlyWarnings\.push\(text\.slice\(0, 500\)\)/);
+});
+
+test('authoritative image diagnostics retain a bounded head and tail', () => {
+  const timings = Array.from({ length: 200 }, (_, index) => ({ startTime: index }));
+  const retained = retainImageResourceTimings(timings);
+  assert.equal(retained.length, MAX_RETAINED_IMAGE_RESOURCE_TIMINGS);
+  assert.deepEqual(
+    retained.slice(0, 32).map(({ startTime }) => startTime),
+    Array.from({ length: 32 }, (_, index) => index)
+  );
+  assert.deepEqual(
+    retained.slice(32).map(({ startTime }) => startTime),
+    Array.from({ length: 96 }, (_, index) => index + 104)
+  );
+  const alreadyBounded = timings.slice(0, 4);
+  assert.equal(retainImageResourceTimings(alreadyBounded), alreadyBounded);
+  assert.deepEqual(retainImageResourceTimings(null), []);
+});
+
+test('authoritative scenario results retain sanitized LCP and image timing diagnostics', () => {
+  const routeSource = fs.readFileSync(
+    path.resolve(__dirname, 'routes.performance.js'),
+    'utf8'
+  );
+  assert.match(
+    routeSource,
+    /lcpCandidates:\s*capture\.diagnostics\.lcpCandidates/
+  );
+  assert.match(
+    routeSource,
+    /imageResourceTimings:\s*retainImageResourceTimings\(/
+  );
 });
 
 test('font routing keeps optional Google font requests deterministic and local', async () => {

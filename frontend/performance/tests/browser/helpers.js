@@ -29,6 +29,7 @@ const FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS = [
   'zx',
 ];
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
+const MAX_RETAINED_IMAGE_RESOURCE_TIMINGS = 128;
 
 const demoFirestoreStreamOperation = (url) => {
   let parsed;
@@ -705,7 +706,21 @@ const createPageAssetTracker = ({
   };
 };
 
+const installOwnedEmulatorFirestoreTransport = async (context) => {
+  if (!context || typeof context.addInitScript !== 'function') {
+    throw new TypeError('Owned emulator Firestore transport requires a browser context.');
+  }
+  await context.addInitScript(() => {
+    // The local Firestore emulator can acknowledge a WebChannel target while
+    // Playwright browsers buffer its response for several seconds. Use the
+    // SDK-supported fallback only in this owned demo harness; release builds
+    // never define this marker and retain the production/default transport.
+    window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
+  });
+};
+
 const installBootstrap = async (context, scenario, iteration) => {
+  await installOwnedEmulatorFirestoreTransport(context);
   await context.addInitScript(({
     scenarioId,
     role,
@@ -715,6 +730,37 @@ const installBootstrap = async (context, scenario, iteration) => {
     resourceTimingBufferSize,
   }) => {
     window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__ = false;
+    window.__FND_PERF_LCP_CANDIDATES__ = [];
+    if (
+      typeof PerformanceObserver !== 'undefined'
+      && PerformanceObserver.supportedEntryTypes?.includes('largest-contentful-paint')
+    ) {
+      const lcpObserver = new PerformanceObserver((list) => {
+        list.getEntries().forEach((entry) => {
+          const element = entry.element;
+          const rect = element?.getBoundingClientRect?.();
+          window.__FND_PERF_LCP_CANDIDATES__.push({
+            startTime: Number(entry.startTime) || 0,
+            renderTime: Number(entry.renderTime) || 0,
+            loadTime: Number(entry.loadTime) || 0,
+            size: Number(entry.size) || 0,
+            tagName: String(element?.tagName || '').toLowerCase().slice(0, 32),
+            className: typeof element?.className === 'string'
+              ? element.className.slice(0, 240)
+              : '',
+            testId: String(element?.getAttribute?.('data-testid') || '').slice(0, 120),
+            textLength: String(element?.textContent || '').length,
+            childElementCount: Number(element?.childElementCount) || 0,
+            width: Number(rect?.width) || 0,
+            height: Number(rect?.height) || 0,
+          });
+          if (window.__FND_PERF_LCP_CANDIDATES__.length > 24) {
+            window.__FND_PERF_LCP_CANDIDATES__.shift();
+          }
+        });
+      });
+      lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+    }
     if (typeof performance.setResourceTimingBufferSize === 'function') {
       performance.setResourceTimingBufferSize(resourceTimingBufferSize);
     }
@@ -1031,11 +1077,29 @@ const captureBrowserMetrics = async (page, diagnostics) => {
       transferSize: entry.transferSize,
       encodedBodySize: entry.encodedBodySize,
     }));
+    const imageResourceTimings = performance.getEntriesByType('resource')
+      .filter((entry) => entry.initiatorType === 'img')
+      .map((entry) => ({
+        startTime: Number(entry.startTime) || 0,
+        fetchStart: Number(entry.fetchStart) || 0,
+        requestStart: Number(entry.requestStart) || 0,
+        responseStart: Number(entry.responseStart) || 0,
+        responseEnd: Number(entry.responseEnd) || 0,
+        duration: Number(entry.duration) || 0,
+        transferSize: Number(entry.transferSize) || 0,
+        encodedBodySize: Number(entry.encodedBodySize) || 0,
+      }));
     return {
       snapshot,
       resourceEntries,
       resourceTimingBufferOverflow: Boolean(window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__),
-      diagnostics: capturedDiagnostics,
+      diagnostics: {
+        ...capturedDiagnostics,
+        lcpCandidates: Array.isArray(window.__FND_PERF_LCP_CANDIDATES__)
+          ? window.__FND_PERF_LCP_CANDIDATES__
+          : [],
+        imageResourceTimings,
+      },
     };
   }, diagnostics);
   let cdp = null;
@@ -1054,6 +1118,16 @@ const captureBrowserMetrics = async (page, diagnostics) => {
     resources: summarizeResourceEntries(resourceEntries),
     cdp,
   };
+};
+
+const retainImageResourceTimings = (timings) => {
+  if (!Array.isArray(timings)) return [];
+  if (timings.length <= MAX_RETAINED_IMAGE_RESOURCE_TIMINGS) return timings;
+  const retainedHeadCount = 32;
+  return [
+    ...timings.slice(0, retainedHeadCount),
+    ...timings.slice(-(MAX_RETAINED_IMAGE_RESOURCE_TIMINGS - retainedHeadCount)),
+  ];
 };
 
 const aggregateMetrics = (capture, cleanup) => {
@@ -1229,6 +1303,7 @@ const restoreScenarioState = async (scenarioId) => {
 module.exports = {
   ACCOUNT,
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
   captureBrowserMetrics,
@@ -1240,6 +1315,7 @@ module.exports = {
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedFirestoreLifecycleCancellation,
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
@@ -1252,6 +1328,7 @@ module.exports = {
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
+  retainImageResourceTimings,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,

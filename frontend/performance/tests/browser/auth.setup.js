@@ -9,6 +9,7 @@ const {
   ACCOUNT,
   createPageAssetTracker,
   drainPageConnections,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
   isExpectedFirestoreLifecycleCancellation,
@@ -58,6 +59,7 @@ test('create deterministic emulator authentication states', async ({ browser, ba
   try {
     for (const [role, account] of Object.entries(ACCOUNT)) {
       const context = await browser.newContext({ baseURL });
+      await installOwnedEmulatorFirestoreTransport(context);
       const diagnostics = {
         role,
         completed: false,

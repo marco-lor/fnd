@@ -162,6 +162,7 @@ module.exports = async () => {
             projectId,
             runId: process.env.FND_PERF_RUN_ID || 'local',
             authoritative: process.env.FND_PERF_AUTHORITATIVE === '1',
+            firestoreTransport: 'forced-long-polling-owned-emulator',
             retainedIterations: Number(process.env.FND_PERF_ITERATIONS || 1),
             browsers,
             authSetupDiagnostics,

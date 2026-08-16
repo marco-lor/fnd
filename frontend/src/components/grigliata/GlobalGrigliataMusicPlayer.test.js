@@ -341,6 +341,38 @@ describe('GlobalGrigliataMusicPlayer', () => {
     paritySpy.mockRestore();
   });
 
+  test('waits for the authoritative profile role before resolving the automatic media mode', async () => {
+    const resolveMusicMode = jest.fn().mockResolvedValue('derivative-read');
+    authState = { user: { uid: 'user-1' }, userData: null };
+    const view = render(
+      <GlobalGrigliataMusicPlayer
+        acquireAudioAsset={acquireAudioAsset}
+        resolveMusicMode={resolveMusicMode}
+        subscribeToMusicStream={subscribeToMusicStream}
+      />
+    );
+
+    expect(resolveMusicMode).not.toHaveBeenCalled();
+    expect(subscribeToMusicStream).not.toHaveBeenCalled();
+
+    authState = { user: { uid: 'user-1' }, userData: { role: 'player' } };
+    view.rerender(
+      <GlobalGrigliataMusicPlayer
+        acquireAudioAsset={acquireAudioAsset}
+        resolveMusicMode={resolveMusicMode}
+        subscribeToMusicStream={subscribeToMusicStream}
+      />
+    );
+
+    await waitFor(() => expect(resolveMusicMode).toHaveBeenCalledTimes(1));
+    expect(resolveMusicMode).toHaveBeenCalledWith({
+      purpose: 'music',
+      role: 'player',
+      uid: 'user-1',
+    });
+    await waitFor(() => expect(subscribeToMusicStream).toHaveBeenCalledTimes(1));
+  });
+
   test('renders zero audio nodes for empty, paused, stopped, and locally muted playback', async () => {
     const { container, rerender } = render(
       candidatePlayer()

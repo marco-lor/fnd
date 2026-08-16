@@ -22,15 +22,6 @@ test('Task 07 media shell renders and stays dormant cross-browser', async ({
     storageState: storageStateForRole('player'),
     reducedMotion: 'reduce',
   });
-  if (browser.browserType().name() === 'webkit') {
-    // The local Firestore emulator acknowledges Watch targets but Playwright
-    // WebKit buffers the WebChannel response beyond the readiness contract.
-    // Keep production/default transports for other browsers and force the
-    // SDK-supported fallback only for this owned emulator probe.
-    await context.addInitScript(() => {
-      window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
-    });
-  }
   await installDeterministicFontRoutes(context);
   await installBootstrap(context, scenario, 1);
   const errors = [];

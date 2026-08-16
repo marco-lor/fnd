@@ -11,6 +11,7 @@ const {
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
   navigateToCleanup,
+  retainImageResourceTimings,
   restoreScenarioState,
   runInteraction,
   storageStateForRole,
@@ -249,6 +250,15 @@ for (const scenario of scenarios) {
             diagnostics.explainedRecaptchaReportOnlyWarnings,
           unhandledErrors: capture.diagnostics.unhandledErrors,
           failedRequests: capture.diagnostics.failedRequests,
+          // These arrays contain only the bounded, text-free fields captured
+          // by helpers.js. Keeping them in each scenario result preserves the
+          // exact candidate identity and image timeline in both authoritative
+          // snapshots; raw iteration files are intentionally reused by run B.
+          lcpCandidates: capture.diagnostics.lcpCandidates,
+          imageResourceTimingCount: capture.diagnostics.imageResourceTimings.length,
+          imageResourceTimings: retainImageResourceTimings(
+            capture.diagnostics.imageResourceTimings
+          ),
         },
       });
       } catch (error) {
