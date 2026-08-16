@@ -6036,6 +6036,74 @@ describe('GrigliataPage', () => {
     );
   });
 
+  test('waits for a fresh auth profile before resolving placed canonical media', async () => {
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {},
+      },
+      loading: true,
+      profileFresh: false,
+    });
+
+    const view = render(<GrigliataPage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockTask07ResolveCharacterMediaCallable).not.toHaveBeenCalled();
+
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 1 });
+    view.rerender(<GrigliataPage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockTask07ResolveCharacterMediaCallable).not.toHaveBeenCalled();
+
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {},
+      },
+      loading: false,
+      profileFresh: true,
+    });
+    view.rerender(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(1);
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+        backgroundId: 'map-1',
+        tokenIds: ['custom-instance-2'],
+      });
+    });
+  });
+
   test('caps visible peer character profile reads at six deterministic 10-id queries', async () => {
     const peerIds = Array.from(
       { length: 61 },

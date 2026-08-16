@@ -156,6 +156,7 @@ export default function useGrigliataPageData({
   currentUserHiddenBackgroundIds = [],
   currentUserHiddenTokenIdsByBackground = {},
   isManager = false,
+  isCanonicalMediaAccessReady = true,
   repositoryAccessGeneration = 0,
   activeGridSizeOverride = null,
   selectedGalleryFolderId = '',
@@ -1142,7 +1143,12 @@ export default function useGrigliataPageData({
       placedCanonicalMediaByTokenIdRef.current = nextMediaByTokenId;
       setPlacedCanonicalMediaByTokenId(nextMediaByTokenId);
     };
-    if (!currentUserId || !request.backgroundId || !tokenIds.length) {
+    if (
+      !isCanonicalMediaAccessReady
+      || !currentUserId
+      || !request.backgroundId
+      || !tokenIds.length
+    ) {
       placedCanonicalMediaScopeRef.current = '';
       publishMedia({});
       return () => {
@@ -1202,7 +1208,11 @@ export default function useGrigliataPageData({
       }
       if (retryTimerId !== null) clearTimeout(retryTimerId);
     };
-  }, [currentUserId, placedCanonicalMediaRequestKey]);
+  }, [
+    currentUserId,
+    isCanonicalMediaAccessReady,
+    placedCanonicalMediaRequestKey,
+  ]);
 
   const normalizedTokenProfiles = useMemo(
     () => [

@@ -280,6 +280,28 @@ retains independent categorical phase dimensions, and fail-closes unless every
 peer is visible. Final verdict: **APPROVE**, with no remaining code, security,
 or evidence-integrity blocker.
 
+The evidence revision `457a2c641a3fdc862bfbaa8169074a729e409162`
+passed all six normal Linux jobs in run `31953381497`. Its fresh manual run
+`31953899082` was not accepted: the first authoritative pass completed 69/70
+browser cases, but the first five-peer player did not reach finite-asset quiet
+within 15 seconds. The separately executed 600-second media soak passed.
+
+The retained trace showed four successful callable chunks covering all 200
+placements, followed by a fifth `task07ResolveCharacterMedia` request. The
+canonical-media effect had started while the authenticated profile was not yet
+fresh, then restarted when the role-scoped repository access generation was
+published. Cold Functions initialization, fog-memory persistence, and the
+two-core hosted runner amplified that duplicate generation. The product now
+defers only placed canonical-media resolution until `profileFresh`; stale
+publication and server authorization remain unchanged. The 15-second gate was
+not widened. A regression test covers both an unbatched access-generation
+update while the profile is unready and the later fresh-profile transition.
+The focused Grigliata/canonical-media gate passed 202/202 tests, and a fresh
+five-peer browser reproduction passed all three Playwright stages in 6.0
+minutes with exactly 20 resolver invocations (four bounded chunks for each of
+five peers). Independent review verdict: **APPROVE**; a new clean exact-SHA
+automatic/manual pair remains required.
+
 ## Candidate validation completed
 
 All emulator and browser commands used only the owned `demo-fnd-perf` fixture.
@@ -288,7 +310,7 @@ No live application data was mutated by these gates.
 | Gate | Result |
 | --- | --- |
 | Task 07 Node and focused Jest gate | PASS |
-| Full frontend Jest | PASS: 139 suites, 1,309 tests |
+| Full frontend Jest | PASS: 139 suites, 1,310 tests |
 | Performance/harness Node tests | PASS: 376/376 |
 | Functions lint | PASS: 0 errors; 5 pre-existing non-blocking warnings |
 | Functions TypeScript build and tests | PASS: 211/211 |
@@ -307,6 +329,8 @@ No live application data was mutated by these gates.
 | Default 600-second media soak | PASS: all 3 Playwright stages in 16.5 minutes, including the 600,000 ms minimum lifecycle |
 | Exact-SHA normal Linux workflow | PASS: run `31949123260` on `00fa3bb5a1ad77ebe0ef298b3e485082d734d614`, all six required jobs green |
 | Exact-SHA manual Linux workflow | NOT ACCEPTED: run `31949671046` passed all six normal jobs and the 600-second soak, but the A/B timing comparison failed three hosted-runner series; all deterministic checks passed |
+| Evidence-revision normal Linux workflow | PASS: run `31953381497` on `457a2c641a3fdc862bfbaa8169074a729e409162`, all six required jobs green |
+| Evidence-revision manual Linux workflow | NOT ACCEPTED: run `31953899082` passed the 600-second soak but the first authoritative pass failed one five-peer finite-settlement case; trace-backed profile-readiness fix applied without widening the gate |
 | Production bundle and unchanged start path | PASS: hardened build verification and `/home` HTTP 200 through `npm start` |
 
 The comparison continues to report five non-blocking roadmap targets. They are
@@ -347,14 +371,17 @@ Predeploy and live evidence:
 - `X-Frame-Options` remained `DENY`, while the report-only CSP contained no
   loopback source.
 
-The atomic viewport/geometry correction and v4 evidence contract produce the
-next scoped release candidate as `main.cc93f065.js` (665,057 bytes; SHA-256
+The atomic viewport/geometry correction and v4 evidence contract produced the
+prior scoped release candidate as `main.cc93f065.js` (665,057 bytes; SHA-256
 `a6d97f92c8c384b995cb1689def9d15c27187baa3c42e8b55a44c9650380d16a`). Its
 exact-SHA workflows and live served-bundle match remain explicit final release
 gates; the earlier `main.355adcc4.js` evidence above is retained as the last
 completed scoped deployment rather than being rewritten as future evidence.
 The evidence-only timing-attribution follow-up retains these exact production
 bytes and remains absent from the normal bundle by the disabled-build verifier.
+The profile-readiness correction supersedes that candidate with
+`main.a78b2ead.js` (665,057 bytes; SHA-256
+`5afddce3e4ab6c184538538d392776c6082e72053b69eb3b4d84c7468c82db74`).
 
 ## Final release gates
 
