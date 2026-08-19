@@ -62,6 +62,88 @@ const routePerformancePath = path.resolve(
   'routes.performance.js'
 );
 const mebibyte = 1024 * 1024;
+const performanceArtifactPaths = [
+  'frontend/performance-results/',
+  'frontend/test-results/performance/',
+  'frontend/playwright-report/performance/',
+];
+
+const extractFullBenchmarkSteps = (workflow) => {
+  const job = /^  full-benchmark:\r?\n([\s\S]*?)(?=^  [\w-]+:\r?\n|(?![\s\S]))/m.exec(workflow);
+  assert.ok(job, 'full-benchmark job is required');
+  const steps = /^    steps:\r?\n/m.exec(job[1]);
+  assert.ok(steps, 'full-benchmark steps are required');
+  const content = job[1].slice(steps.index + steps[0].length);
+  const starts = [...content.matchAll(/^      - (?=\S)/gm)].map((match) => match.index);
+  assert.ok(starts.length > 0, 'full-benchmark must contain steps');
+  return starts.map((start, index) => content.slice(start, starts[index + 1]));
+};
+
+const findSingleStep = (steps, label, predicate) => {
+  const matches = steps
+    .map((step, index) => ({ index, step }))
+    .filter(({ step }) => predicate(step));
+  assert.equal(matches.length, 1, `expected exactly one ${label} step, found ${matches.length}`);
+  return matches[0];
+};
+
+const assertPerformanceArtifactPaths = (step, label) => {
+  for (const artifactPath of performanceArtifactPaths) {
+    const escapedPath = artifactPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(
+      step,
+      new RegExp(`^            ${escapedPath}\r?$`, 'm'),
+      `${label} missing required path: ${artifactPath}`
+    );
+  }
+};
+
+const validateFullBenchmarkWorkflow = (workflow) => {
+  const steps = extractFullBenchmarkSteps(workflow);
+  const authoritative = findSingleStep(
+    steps,
+    'authoritative',
+    (step) => /^      - id: authoritative\r?$/m.test(step)
+  );
+  assert.match(
+    authoritative.step,
+    /^        run: npm run perf:authoritative\r?$/m,
+    'authoritative step must contain the exact command'
+  );
+
+  const failureArtifact = findSingleStep(
+    steps,
+    'authoritative failure artifact',
+    (step) => /^      - uses: actions\/upload-artifact@v4\r?$/m.test(step)
+      && /^        if: \$\{\{ failure\(\) && steps\.authoritative\.outcome == 'failure' \}\}\r?$/m.test(step)
+      && /^          name: authoritative-failure-/m.test(step)
+  );
+  assert.ok(authoritative.index < failureArtifact.index, 'failure artifact must follow authoritative');
+  assert.match(failureArtifact.step, /^          retention-days: 30\r?$/m);
+  assert.match(failureArtifact.step, /^          if-no-files-found: error\r?$/m);
+  assertPerformanceArtifactPaths(failureArtifact.step, 'authoritative failure artifact');
+
+  const soak = findSingleStep(
+    steps,
+    'Task 07 soak',
+    (step) => /^      - run: npm run perf:media:soak\r?$/m.test(step)
+  );
+  assert.ok(failureArtifact.index < soak.index, 'failure artifact must precede the Task 07 soak');
+
+  const finalArtifact = findSingleStep(
+    steps.slice(soak.index + 1),
+    'final combined artifact after soak',
+    (step) => /^      - uses: actions\/upload-artifact@v4\r?$/m.test(step)
+      && /^        if: always\(\)\r?$/m.test(step)
+      && /^          name: full-performance-benchmark\r?$/m.test(step)
+  );
+  assertPerformanceArtifactPaths(finalArtifact.step, 'final combined artifact');
+
+  assert.match(workflow, /push:\r?\n\s+branches: \[main, devs\]/);
+  assert.match(extractFullBenchmarkSteps(workflow).join(''), /node-version: 22/);
+  assert.match(extractFullBenchmarkSteps(workflow).join(''), /distribution: temurin, java-version: 21/);
+  assert.doesNotMatch(extractFullBenchmarkSteps(workflow).join(''), /firebase deploy|secrets\./);
+};
 
 const registrySample = (overrides = {}) => ({
   activeRequestCount: 0,
@@ -628,38 +710,25 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
 
 test('checked-in full benchmark captures authoritative failures before the Task 07 soak', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const start = workflow.indexOf('  full-benchmark:');
-  const benchmark = workflow.slice(start);
-  const authoritativeStart = benchmark.indexOf('      - id: authoritative');
-  const failureArtifactStart = benchmark.indexOf('      - uses: actions/upload-artifact@v4', authoritativeStart);
-  const soakStart = benchmark.indexOf('      - run: npm run perf:media:soak');
-  const finalArtifactStart = benchmark.indexOf('      - uses: actions/upload-artifact@v4', soakStart);
+  assert.doesNotThrow(() => validateFullBenchmarkWorkflow(workflow));
 
-  assert.notEqual(start, -1);
-  assert.notEqual(authoritativeStart, -1);
-  assert.notEqual(failureArtifactStart, -1);
-  assert.notEqual(soakStart, -1);
-  assert.notEqual(finalArtifactStart, -1);
-  assert.ok(authoritativeStart < failureArtifactStart);
-  assert.ok(failureArtifactStart < soakStart);
-  assert.ok(soakStart < finalArtifactStart);
-  assert.match(workflow, /push:\r?\n\s+branches: \[main, devs\]/);
-  assert.match(benchmark, /node-version: 22/);
-  assert.match(benchmark, /distribution: temurin, java-version: 21/);
-  assert.doesNotMatch(benchmark, /firebase deploy|secrets\./);
+  const splitAuthoritative = workflow.replace(
+    /      - id: authoritative\r?\n        run: npm run perf:authoritative/,
+    '      - id: authoritative\n        run: npm run perf:other\n      - run: npm run perf:authoritative'
+  );
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(splitAuthoritative),
+    /authoritative step must contain/
+  );
 
-  const failureArtifact = benchmark.slice(failureArtifactStart, soakStart);
-  assert.match(failureArtifact, /if: \$\{\{ failure\(\) && steps\.authoritative\.outcome == 'failure' \}\}/);
-  assert.match(failureArtifact, /name: authoritative-failure-/);
-  assert.match(failureArtifact, /retention-days: 30/);
-  assert.match(failureArtifact, /if-no-files-found: error/);
-  assert.match(failureArtifact, /frontend\/performance-results\//);
-  assert.match(failureArtifact, /frontend\/test-results\/performance\//);
-  assert.match(failureArtifact, /frontend\/playwright-report\/performance\//);
-
-  const finalArtifact = benchmark.slice(finalArtifactStart);
-  assert.match(finalArtifact, /if: always\(\)/);
-  assert.match(finalArtifact, /name: full-performance-benchmark/);
+  const finalArtifactStart = workflow.indexOf('          name: full-performance-benchmark');
+  const finalArtifactMissingPlaywrightReport = `${workflow.slice(0, finalArtifactStart)}${workflow
+    .slice(finalArtifactStart)
+    .replace(/^            frontend\/playwright-report\/performance\/\r?\n/m, '')}`;
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(finalArtifactMissingPlaywrightReport),
+    /final combined artifact missing required path: frontend\/playwright-report\/performance\//
+  );
 });
 
 test('checked-in workflow provisions every dependency used by frontend and browser jobs', () => {
