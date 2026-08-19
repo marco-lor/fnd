@@ -626,6 +626,42 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
   assert.doesNotMatch(rulesJob, /npx firebase|firebase emulators:exec/);
 });
 
+test('checked-in full benchmark captures authoritative failures before the Task 07 soak', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const start = workflow.indexOf('  full-benchmark:');
+  const benchmark = workflow.slice(start);
+  const authoritativeStart = benchmark.indexOf('      - id: authoritative');
+  const failureArtifactStart = benchmark.indexOf('      - uses: actions/upload-artifact@v4', authoritativeStart);
+  const soakStart = benchmark.indexOf('      - run: npm run perf:media:soak');
+  const finalArtifactStart = benchmark.indexOf('      - uses: actions/upload-artifact@v4', soakStart);
+
+  assert.notEqual(start, -1);
+  assert.notEqual(authoritativeStart, -1);
+  assert.notEqual(failureArtifactStart, -1);
+  assert.notEqual(soakStart, -1);
+  assert.notEqual(finalArtifactStart, -1);
+  assert.ok(authoritativeStart < failureArtifactStart);
+  assert.ok(failureArtifactStart < soakStart);
+  assert.ok(soakStart < finalArtifactStart);
+  assert.match(workflow, /push:\r?\n\s+branches: \[main, devs\]/);
+  assert.match(benchmark, /node-version: 22/);
+  assert.match(benchmark, /distribution: temurin, java-version: 21/);
+  assert.doesNotMatch(benchmark, /firebase deploy|secrets\./);
+
+  const failureArtifact = benchmark.slice(failureArtifactStart, soakStart);
+  assert.match(failureArtifact, /if: \$\{\{ failure\(\) && steps\.authoritative\.outcome == 'failure' \}\}/);
+  assert.match(failureArtifact, /name: authoritative-failure-/);
+  assert.match(failureArtifact, /retention-days: 30/);
+  assert.match(failureArtifact, /if-no-files-found: error/);
+  assert.match(failureArtifact, /frontend\/performance-results\//);
+  assert.match(failureArtifact, /frontend\/test-results\/performance\//);
+  assert.match(failureArtifact, /frontend\/playwright-report\/performance\//);
+
+  const finalArtifact = benchmark.slice(finalArtifactStart);
+  assert.match(finalArtifact, /if: always\(\)/);
+  assert.match(finalArtifact, /name: full-performance-benchmark/);
+});
+
 test('checked-in workflow provisions every dependency used by frontend and browser jobs', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const frontendStart = workflow.indexOf('  frontend-unit:');

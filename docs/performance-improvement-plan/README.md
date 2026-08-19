@@ -6,15 +6,13 @@ The tasks are intentionally ordered and must be implemented one at a time. Each 
 
 ## Current sequence status
 
-Task 06 was accepted as locally validated for roadmap progression on
-2026-07-27. Task 07 may start.
+The reviewed Task 07 source closure is Fatins-test commit `296eeca`. This
+production adaptation follows this plan and the Task 07 specification: it adds
+CI evidence capture without changing deployment behavior or Firebase planes.
 
-This closure is based on the passing full frontend, Functions, backend,
-emulator, build, startup, and 19/19 broad browser-performance checks recorded
-in `task-06/implementation-evidence.md`. It does not mean Task 06 was deployed
-or that a new performance baseline was accepted. The final two-run
-authoritative repeatability certification was explicitly waived for Task 06
-closure and remains unavailable as baseline-acceptance evidence.
+This reference to the isolated test-project source closure is not production
+closure, validation, deployment, or baseline-acceptance evidence. Production
+Task 07 progression still requires its own reviewed results under this plan.
 
 ## Documents
 

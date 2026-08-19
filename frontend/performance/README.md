@@ -46,6 +46,19 @@ The checked-in artifacts are:
 
 Raw traces, screenshots, authentication state, emulator data and logs, detailed network captures, and heap data are written only to ignored output directories and are uploaded as CI artifacts.
 
+## CI evidence boundary
+
+The scheduled/manual `full-benchmark` records `perf:authoritative` under an
+`authoritative` step. If that step fails, CI uploads the performance results,
+test results, and Playwright report before the Task 07 soak; the combined final
+artifact is still uploaded after the soak. This is evidence collection only:
+the workflow contains no deployment step and continues to use the
+`demo-fnd-perf` emulator contract.
+
+Fatins-test commit `296eeca` is the reviewed Task 07 source closure used for
+this production adaptation. It is historical source context, not evidence of a
+Fatins production deployment, validation, or accepted baseline.
+
 ## Task 07 media validation
 
 Task 07 has deliberately serial entry points so local validation cannot create a
