@@ -25,7 +25,7 @@ import {
   where,
   writeBatch,
 } from '../../performance/firestore';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import {
   useProgression,
   useResources,
@@ -658,7 +658,14 @@ export default function GrigliataPage() {
     return installGrigliataBenchmarkBridge();
   }, []);
 
-  const { user, userData: userShell, loading } = useAuth();
+  const {
+    user,
+    userData: userShell,
+    loading,
+    profileFresh,
+  } = useAuth();
+  const isCanonicalMediaAccessReady = profileFresh ?? !loading;
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
   const { data: userProgressionDomain } = useProgression();
   const { data: userResourcesDomain } = useResources();
   const { data: userSettingsDomain } = useUserSettings();
@@ -936,7 +943,9 @@ export default function GrigliataPage() {
     currentUserHiddenBackgroundIds,
     currentUserHiddenTokenIdsByBackground,
     currentUserId,
+    isCanonicalMediaAccessReady,
     isManager,
+    repositoryAccessGeneration,
     preferredSelectedBackgroundId,
     selectedBackgroundPreferenceKey: workspacePreferenceKey,
     selectedGalleryFolderId,

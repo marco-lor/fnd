@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import {
   useProgression,
   useResources,
@@ -292,6 +292,7 @@ const mockRunFirestoreTransaction = (callback, completionPromise = Promise.resol
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
+  useAuthSession: jest.fn(() => ({ repositoryAccessGeneration: 0 })),
   useOptionalAuth: jest.fn(() => null),
 }));
 
@@ -1089,6 +1090,7 @@ describe('GrigliataPage', () => {
     mockBatchInstances.splice(0, mockBatchInstances.length);
     mockTransactionInstances.splice(0, mockTransactionInstances.length);
     mockGeneratedDocCounter = 0;
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 0 });
     mockFirestoreState.collections = {
       grigliata_backgrounds: [
         {
@@ -5915,6 +5917,164 @@ describe('GrigliataPage', () => {
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
         refreshedThumbnailPath
       );
+    });
+  });
+
+  test('ignores canonical media resolved under an earlier access generation', async () => {
+    const createTokenMedia = (assetCharacter, generation) => {
+      const assetId = `m_${assetCharacter.repeat(40)}`;
+      const prefix = `media_assets/v1/signed-in/user-2/${assetId}/${generation}`;
+      return {
+        schemaVersion: 1,
+        contractVersion: 1,
+        assetId,
+        kind: 'token',
+        state: 'ready',
+        generation,
+        audience: 'signed-in',
+        ownerUid: 'user-2',
+        original: {
+          path: `${prefix}/original`,
+          generation,
+          bytes: 4,
+          contentType: 'image/png',
+          width: 512,
+          height: 512,
+        },
+        variants: {
+          thumbnail: {
+            path: `${prefix}/thumbnail`,
+            generation,
+            bytes: 4,
+            contentType: 'image/webp',
+            width: 96,
+            height: 96,
+          },
+        },
+      };
+    };
+    const staleMedia = createTokenMedia('c', '40');
+    const currentMedia = createTokenMedia('d', '41');
+    const staleResolution = createDeferred();
+    const responseFor = (media) => ({
+      data: {
+        schemaVersion: 1,
+        entries: [{ tokenId: 'custom-instance-2', media }],
+      },
+    });
+    mockTask07ResolveCharacterMediaCallable
+      .mockReturnValueOnce(staleResolution.promise)
+      .mockResolvedValueOnce(responseFor(currentMedia));
+    setCollectionData('grigliata_tokens', []);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    const view = render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(1);
+    });
+
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 1 });
+    view.rerender(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+        currentMedia.variants.thumbnail.path
+      );
+    });
+
+    await act(async () => {
+      staleResolution.resolve(responseFor(staleMedia));
+      await staleResolution.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+      currentMedia.variants.thumbnail.path
+    );
+    expect(screen.getByTestId('board-token-media-paths')).not.toHaveTextContent(
+      staleMedia.variants.thumbnail.path
+    );
+  });
+
+  test('waits for a fresh auth profile before resolving placed canonical media', async () => {
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {},
+      },
+      loading: true,
+      profileFresh: false,
+    });
+
+    const view = render(<GrigliataPage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockTask07ResolveCharacterMediaCallable).not.toHaveBeenCalled();
+
+    useAuthSession.mockReturnValue({ repositoryAccessGeneration: 1 });
+    view.rerender(<GrigliataPage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockTask07ResolveCharacterMediaCallable).not.toHaveBeenCalled();
+
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {},
+      },
+      loading: false,
+      profileFresh: true,
+    });
+    view.rerender(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(1);
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+        backgroundId: 'map-1',
+        tokenIds: ['custom-instance-2'],
+      });
     });
   });
 
