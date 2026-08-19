@@ -320,12 +320,20 @@ test('teardown preserves raw trigger and log evidence when their assertions fail
 });
 
 test('aggregate teardown diagnostics include every bounded child message', () => {
+  const firstMessage = `unexpected\ntrigger ${'a'.repeat(600)}`;
+  const secondMessage = `log\tbudget ${'b'.repeat(600)}`;
+  const firstExpected = `[1] unexpected trigger ${'a'.repeat(477)}`;
+  const secondExpected = `[2] log budget ${'b'.repeat(485)}`;
+  const result = formatAggregateGateErrorMessage('Performance teardown failed.', [
+    new Error(firstMessage),
+    new Error(secondMessage),
+  ]);
+
+  assert.equal(firstExpected.length, 500);
+  assert.equal(secondExpected.length, 500);
   assert.equal(
-    formatAggregateGateErrorMessage('Performance teardown failed.', [
-      new Error('unexpected trigger\nwith detail'),
-      new Error('log budget exceeded'),
-    ]),
-    'Performance teardown failed. [1] unexpected trigger with detail [2] log budget exceeded'
+    result,
+    `Performance teardown failed. ${firstExpected} ${secondExpected}`
   );
 });
 
