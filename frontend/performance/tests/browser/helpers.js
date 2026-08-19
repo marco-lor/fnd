@@ -48,6 +48,8 @@ const MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS = 16;
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
 const MAX_RETAINED_IMAGE_RESOURCE_TIMINGS = 128;
 const MAX_RETAINED_LONG_TASK_ENTRIES = 64;
+const MAX_RETAINED_PAGE_ASSET_ENTRIES = 64;
+const MAX_PAGE_ASSET_DIAGNOSTIC_AGE_MS = 600_000;
 const LONG_TASK_SCENARIO_PHASES = new Set([
   'route-readiness',
   'route-active',
@@ -806,6 +808,29 @@ const createPageAssetTracker = ({
     return !demoFirestoreStreamOperation(requestUrl);
   };
   const pending = new Map();
+  const diagnosticResourceTypes = new Set([
+    ...trackedResourceTypes,
+    'fetch',
+    'xhr',
+  ]);
+  const boundedAgeMs = (value) => (
+    Number.isFinite(value)
+      ? Math.min(MAX_PAGE_ASSET_DIAGNOSTIC_AGE_MS, Math.max(0, Math.round(value)))
+      : 0
+  );
+  const pathnameCategory = (request) => {
+    let pathname;
+    try {
+      const rawUrl = typeof request?.url === 'function' ? request.url() : '';
+      pathname = new URL(rawUrl).pathname;
+    } catch (_error) {
+      return 'unknown';
+    }
+    if (pathname === '/') return 'root';
+    if (/^\/api(?:\/|$)/.test(pathname)) return 'api';
+    if (/^\/static(?:\/|$)/.test(pathname)) return 'static';
+    return 'other';
+  };
   let lastActivityAt = now();
   const touch = () => {
     lastActivityAt = now();
@@ -831,23 +856,31 @@ const createPageAssetTracker = ({
     },
     snapshot() {
       const capturedAt = now();
+      const allPending = [...pending.entries()];
+      const retainedHeadCount = 16;
+      const retainedPending = allPending.length <= MAX_RETAINED_PAGE_ASSET_ENTRIES
+        ? allPending
+        : [
+          ...allPending.slice(0, retainedHeadCount),
+          ...allPending.slice(-(
+            MAX_RETAINED_PAGE_ASSET_ENTRIES - retainedHeadCount
+          )),
+        ];
       return {
         pendingCount: pending.size,
-        quietForMs: Math.max(0, capturedAt - lastActivityAt),
-        pending: [...pending.entries()].map(([request, metadata]) => {
-          const rawUrl = typeof request?.url === 'function' ? request.url() : '';
-          let path = 'unknown';
+        quietForMs: boundedAgeMs(capturedAt - lastActivityAt),
+        pending: retainedPending.map(([request, metadata]) => {
+          let resourceType = 'other';
           try {
-            path = new URL(rawUrl).pathname || '/';
+            const candidate = request?.resourceType?.();
+            if (diagnosticResourceTypes.has(candidate)) resourceType = candidate;
           } catch (_error) {
-            // Diagnostics intentionally omit malformed or non-URL request text.
+            // Diagnostics intentionally collapse unstable request metadata.
           }
           return {
-            ageMs: Math.max(0, capturedAt - metadata.startedAt),
-            path,
-            resourceType: typeof request?.resourceType === 'function'
-              ? request.resourceType()
-              : 'unknown',
+            ageMs: boundedAgeMs(capturedAt - metadata.startedAt),
+            pathnameCategory: pathnameCategory(request),
+            resourceType,
           };
         }),
       };
@@ -873,33 +906,43 @@ const waitForImageRegistrySettlement = async (page, {
   quietMs = 250,
   timeoutMs = 15_000,
 } = {}) => {
-  await flushBrowserObservers(page);
   const deadline = Date.now() + timeoutMs;
   let lastSignature = '';
   let unchangedSince = Date.now();
   let latest = null;
+  const readRegistry = () => page.evaluate(() => {
+    const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
+    return typeof getStats === 'function' ? getStats() : null;
+  });
+  const settledSignature = (snapshot) => {
+    const settled = snapshot
+      && Number(snapshot.loadedRecordCount) >= minimumLoadedRecords
+      && Number(snapshot.activeRequestCount) === 0
+      && Number(snapshot.queuedRequestCount) === 0;
+    return settled ? JSON.stringify([
+      Number(snapshot.recordCount),
+      Number(snapshot.loadedRecordCount),
+      Number(snapshot.decodedBytes),
+      Number(snapshot.unpinnedDecodedBytes),
+      Number(snapshot.unpinnedRecordCount),
+    ]) : '';
+  };
 
   while (Date.now() < deadline) {
-    latest = await page.evaluate(() => {
-      const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
-      return typeof getStats === 'function' ? getStats() : null;
-    });
-    const settled = latest
-      && Number(latest.loadedRecordCount) >= minimumLoadedRecords
-      && Number(latest.activeRequestCount) === 0
-      && Number(latest.queuedRequestCount) === 0;
-    const signature = settled ? JSON.stringify([
-      Number(latest.recordCount),
-      Number(latest.loadedRecordCount),
-      Number(latest.decodedBytes),
-      Number(latest.unpinnedDecodedBytes),
-      Number(latest.unpinnedRecordCount),
-    ]) : '';
-
-    if (signature && signature === lastSignature) {
-      if (Date.now() - unchangedSince >= quietMs) return latest;
-    } else {
+    latest = await readRegistry();
+    const signature = settledSignature(latest);
+    const observedAt = Date.now();
+    if (signature !== lastSignature) {
       lastSignature = signature;
+      unchangedSince = observedAt;
+    }
+    if (signature && observedAt - unchangedSince >= quietMs) {
+      await flushBrowserObservers(page);
+      const afterFrames = await readRegistry();
+      const afterFramesSignature = settledSignature(afterFrames);
+      if (afterFramesSignature === signature) return afterFrames;
+      latest = afterFrames;
+      lastSignature = afterFramesSignature;
       unchangedSince = Date.now();
     }
     await page.waitForTimeout(50);
@@ -1389,7 +1432,7 @@ const retainLongTaskEntries = (events, {
   });
   const entries = [...longTasks]
     .sort((left, right) => right.duration - left.duration || left.startTime - right.startTime)
-    .slice(0, maximumEntries)
+    .slice(0, Math.min(maximumEntries, MAX_RETAINED_LONG_TASK_ENTRIES))
     .sort((left, right) => left.startTime - right.startTime);
   return { totalCount: longTasks.length, entries };
 };

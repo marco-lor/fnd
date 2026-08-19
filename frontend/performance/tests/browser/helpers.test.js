@@ -93,6 +93,20 @@ test('retains bounded native long-task timings with the phase active at task sta
   });
 });
 
+test('never retains more than the hard long-task diagnostic cap', () => {
+  const events = Array.from({ length: 80 }, (_, index) => ({
+    category: 'runtime',
+    metric: 'long-task',
+    value: index + 1,
+    tags: { startTime: index },
+  }));
+
+  const retained = retainLongTaskEntries(events, { maximumEntries: 1_000 });
+
+  assert.equal(retained.totalCount, 80);
+  assert.equal(retained.entries.length, 64);
+});
+
 test('separates write acknowledgement from each peer render settlement', () => {
   assert.deepEqual(summarizePeerTransitionTimings({
     startedAt: 1_000,
@@ -1240,8 +1254,8 @@ test('page asset tracking waits for finite fetches and ignores known streams and
     pendingCount: 2,
     quietForMs: 0,
     pending: [
-      { ageMs: 0, path: 'unknown', resourceType: 'script' },
-      { ageMs: 0, path: '/api/config', resourceType: 'fetch' },
+      { ageMs: 0, pathnameCategory: 'unknown', resourceType: 'script' },
+      { ageMs: 0, pathnameCategory: 'api', resourceType: 'fetch' },
     ],
   });
   now = 460;
@@ -1264,49 +1278,120 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   assert.equal(tracker.isQuiet(), true);
 });
 
-test('image registry settlement rejects early idle and waits for a stable complete fixture', async () => {
-  const registrySnapshots = [
-    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
-    { loadedRecordCount: 14, activeRequestCount: 0, queuedRequestCount: 0 },
-    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
-    {
-      recordCount: 40,
-      loadedRecordCount: 40,
-      activeRequestCount: 0,
-      queuedRequestCount: 0,
-      decodedBytes: 40 * 36_864,
-      unpinnedDecodedBytes: 39 * 36_864,
-      unpinnedRecordCount: 39,
+test('page asset snapshots retain a bounded categorical head and tail without opaque paths', () => {
+  let now = 0;
+  let snapshotPhase = false;
+  const opaqueIdentifier = 'opaque-user-identifier-that-must-not-escape';
+  const longSegment = 'x'.repeat(5_000);
+  const tracker = createPageAssetTracker({ now: () => now });
+  const requests = Array.from({ length: 70 }, (_, index) => ({
+    resourceType: () => (snapshotPhase && index === 0 ? 'websocket' : 'script'),
+    url: () => {
+      if (index === 0) return `http://127.0.0.1:5000/static/${opaqueIdentifier}`;
+      if (index === 1) return `http://127.0.0.1:5000/static/${longSegment}`;
+      if (index < 16) return `http://127.0.0.1:5000/static/asset-${index}.js`;
+      if (index < 22) return `http://127.0.0.1:5000/api/dropped-${index}`;
+      return `http://127.0.0.1:5000/private/item-${index}`;
     },
-    {
-      recordCount: 40,
-      loadedRecordCount: 40,
-      activeRequestCount: 0,
-      queuedRequestCount: 0,
-      decodedBytes: 40 * 36_864,
-      unpinnedDecodedBytes: 39 * 36_864,
-      unpinnedRecordCount: 39,
-    },
-  ];
-  let evaluateCalls = 0;
+  }));
+  requests.forEach((request) => {
+    tracker.begin(request);
+    now += 1;
+  });
+  now = 700_100;
+  snapshotPhase = true;
+
+  const snapshot = tracker.snapshot();
+  const serialized = JSON.stringify(snapshot);
+
+  assert.equal(snapshot.pendingCount, 70);
+  assert.equal(snapshot.pending.length, 64);
+  assert.equal(snapshot.pending.slice(0, 16).every((entry) => (
+    entry.pathnameCategory === 'static'
+  )), true);
+  assert.equal(snapshot.pending.slice(16).every((entry) => (
+    entry.pathnameCategory === 'other'
+  )), true);
+  assert.equal(snapshot.pending.every((entry) => entry.ageMs === 600_000), true);
+  assert.equal(snapshot.pending[0].resourceType, 'other');
+  assert.deepEqual(Object.keys(snapshot.pending[0]).sort(), [
+    'ageMs',
+    'pathnameCategory',
+    'resourceType',
+  ]);
+  assert.equal(serialized.includes(opaqueIdentifier), false);
+  assert.equal(serialized.includes(longSegment), false);
+  assert.equal(serialized.includes('http://'), false);
+});
+
+const settledImageRegistrySnapshot = {
+  recordCount: 40,
+  loadedRecordCount: 40,
+  activeRequestCount: 0,
+  queuedRequestCount: 0,
+  decodedBytes: 40 * 36_864,
+  unpinnedDecodedBytes: 39 * 36_864,
+  unpinnedRecordCount: 39,
+};
+
+test('image registry settlement flushes painted frames only after idle qualification', async () => {
+  const calls = [];
   const page = {
-    evaluate: async () => {
-      evaluateCalls += 1;
-      if (evaluateCalls === 1) return undefined;
-      return registrySnapshots.shift();
+    evaluate: async (callback) => {
+      if (String(callback).includes('requestAnimationFrame')) {
+        calls.push('frames');
+        return undefined;
+      }
+      calls.push('registry');
+      return settledImageRegistrySnapshot;
     },
-    waitForTimeout: async () => new Promise((resolve) => setTimeout(resolve, 2)),
+    waitForTimeout: async () => {},
   };
 
   const settled = await waitForImageRegistrySettlement(page, {
     minimumLoadedRecords: 40,
-    quietMs: 1,
+    quietMs: 0,
   });
 
   assert.equal(settled.loadedRecordCount, 40);
+  assert.deepEqual(calls, ['registry', 'frames', 'registry']);
+});
+
+test('image registry settlement resumes polling when painted frames requeue work', async () => {
+  const calls = [];
+  const registrySnapshots = [
+    settledImageRegistrySnapshot,
+    { ...settledImageRegistrySnapshot, activeRequestCount: 1 },
+    settledImageRegistrySnapshot,
+    settledImageRegistrySnapshot,
+  ];
+  const page = {
+    evaluate: async (callback) => {
+      if (String(callback).includes('requestAnimationFrame')) {
+        calls.push('frames');
+        return undefined;
+      }
+      calls.push('registry');
+      return registrySnapshots.shift();
+    },
+    waitForTimeout: async () => {},
+  };
+
+  const settled = await waitForImageRegistrySettlement(page, {
+    minimumLoadedRecords: 40,
+    quietMs: 0,
+  });
+
   assert.equal(settled.activeRequestCount, 0);
-  assert.equal(evaluateCalls, 6);
   assert.equal(registrySnapshots.length, 0);
+  assert.deepEqual(calls, [
+    'registry',
+    'frames',
+    'registry',
+    'registry',
+    'frames',
+    'registry',
+  ]);
 });
 
 test('resource summaries preserve requests and separate canonical inventory from streams', () => {
