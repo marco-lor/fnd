@@ -3333,6 +3333,58 @@ describe('GrigliataBoard', () => {
     });
   });
 
+  test.each([
+    {
+      label: 'media-less',
+      imageUrl: '',
+      snapshot: { status: 'idle', image: null, error: null },
+    },
+    {
+      label: 'failed-media',
+      imageUrl: 'https://example.com/failed-geometry.png',
+      snapshot: { status: 'error', image: null, error: new Error('fixture failure') },
+    },
+  ])('allows ordinary token media after the $label geometry fallback settles', async ({
+    imageUrl,
+    label,
+    snapshot,
+  }) => {
+    useImageAssetSnapshot.mockImplementation(() => snapshot);
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: `map-${label}`,
+            name: label,
+            imageUrl,
+            imageWidth: 0,
+            imageHeight: 0,
+          },
+          tokens: [{
+            tokenId: `ordinary-${label}`,
+            id: `ordinary-${label}`,
+            ownerUid: 'another-user',
+            tokenType: 'character',
+            label,
+            imageUrl: `https://example.com/ordinary-${label}.png`,
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        `https://example.com/ordinary-${label}.png`
+      );
+    });
+  });
+
   test('preserves the completed token-media fit across wheel zoom updates', async () => {
     render(
       <GrigliataBoard

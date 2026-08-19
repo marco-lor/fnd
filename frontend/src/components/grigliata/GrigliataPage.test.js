@@ -5616,10 +5616,11 @@ describe('GrigliataPage', () => {
       updatedBy: 'user-1',
     }]);
 
-    render(<GrigliataPage />);
+    const { container } = render(<GrigliataPage />);
 
     await waitFor(() => {
       expect(screen.getByText('Aldor')).toBeInTheDocument();
+      expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
     });
     expect(firestore.setDoc.mock.calls.filter(([target]) => (
       target?.path === 'grigliata_tokens/user-1'
