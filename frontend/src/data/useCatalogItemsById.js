@@ -7,6 +7,117 @@ import {
 
 export const CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY = 4;
 
+const catalogStartupSchedulers = new Map();
+
+const createCatalogStartupScheduler = (scopeKey) => {
+  const scheduler = {
+    consumers: [],
+    cursor: 0,
+    drainScheduled: false,
+    draining: false,
+    inFlight: 0,
+    scopeKey,
+  };
+
+  const hasQueuedWork = () => scheduler.consumers.some((consumer) => (
+    consumer.active && consumer.nextIndex < consumer.starts.length
+  ));
+  const removeIfIdle = () => {
+    if (
+      scheduler.inFlight === 0
+      && !hasQueuedWork()
+      && catalogStartupSchedulers.get(scopeKey) === scheduler
+    ) {
+      catalogStartupSchedulers.delete(scopeKey);
+    }
+  };
+  const takeNextStart = () => {
+    const { consumers } = scheduler;
+    if (!consumers.length) return null;
+    for (let offset = 0; offset < consumers.length; offset += 1) {
+      const index = (scheduler.cursor + offset) % consumers.length;
+      const consumer = consumers[index];
+      if (!consumer.active || consumer.nextIndex >= consumer.starts.length) continue;
+      const start = consumer.starts[consumer.nextIndex];
+      consumer.nextIndex += 1;
+      scheduler.cursor = (index + 1) % consumers.length;
+      return start;
+    }
+    return null;
+  };
+  const drain = () => {
+    if (scheduler.draining) return;
+    scheduler.draining = true;
+    try {
+      while (scheduler.inFlight < CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY) {
+        const start = takeNextStart();
+        if (!start) break;
+        scheduler.inFlight += 1;
+        let released = false;
+        const release = ({ deferDrain = false } = {}) => {
+          if (released) return;
+          released = true;
+          scheduler.inFlight -= 1;
+          if (deferDrain) {
+            if (!scheduler.drainScheduled) {
+              scheduler.drainScheduled = true;
+              Promise.resolve().then(() => {
+                scheduler.drainScheduled = false;
+                drain();
+                removeIfIdle();
+              });
+            }
+          } else {
+            drain();
+            removeIfIdle();
+          }
+        };
+        start(release);
+      }
+    } finally {
+      scheduler.draining = false;
+    }
+    removeIfIdle();
+  };
+
+  scheduler.register = (starts) => {
+    const consumer = {
+      active: true,
+      nextIndex: 0,
+      starts,
+    };
+    scheduler.consumers.push(consumer);
+    if (scheduler.inFlight >= CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY) {
+      scheduler.cursor = scheduler.consumers.length - 1;
+    }
+    drain();
+
+    return () => {
+      if (!consumer.active) return;
+      consumer.active = false;
+      const index = scheduler.consumers.indexOf(consumer);
+      if (index >= 0) {
+        scheduler.consumers.splice(index, 1);
+        if (index < scheduler.cursor) scheduler.cursor -= 1;
+        if (scheduler.cursor >= scheduler.consumers.length) scheduler.cursor = 0;
+      }
+      drain();
+      removeIfIdle();
+    };
+  };
+
+  return scheduler;
+};
+
+const registerCatalogStartupConsumer = (scopeKey, starts) => {
+  let scheduler = catalogStartupSchedulers.get(scopeKey);
+  if (!scheduler) {
+    scheduler = createCatalogStartupScheduler(scopeKey);
+    catalogStartupSchedulers.set(scopeKey, scheduler);
+  }
+  return scheduler.register(starts);
+};
+
 export const normalizeCatalogItemIds = (itemIds) => Array.from(new Set(
   (Array.isArray(itemIds) ? itemIds : [])
     .filter((itemId) => typeof itemId === 'string' && itemId.trim() && !itemId.includes('/'))
@@ -39,6 +150,9 @@ export const useCatalogItemsById = (itemIds) => {
   const scopeKey = user?.uid
     ? JSON.stringify([user.uid, repositoryAccessGeneration, normalizedIds])
     : null;
+  const startupScopeKey = user?.uid
+    ? JSON.stringify([user.uid, repositoryAccessGeneration])
+    : null;
   const [state, setState] = useState(() => emptyState());
 
   useEffect(() => {
@@ -56,15 +170,13 @@ export const useCatalogItemsById = (itemIds) => {
     const chunkKeys = chunks.map((chunk) => JSON.stringify(chunk));
     const pending = new Set(chunkKeys);
     const itemsByChunkKey = new Map();
-    let nextChunkIndex = 0;
-    let subscriptionsStarting = 0;
     let firstError = null;
-    const unsubscribes = [];
+    const startedSubscriptions = [];
     const publish = () => {
       if (!active) return;
-      const itemsById = Object.assign({}, ...chunkKeys.map((chunkKey) => (
-        itemsByChunkKey.get(chunkKey) || {}
-      )));
+      const itemsById = Object.freeze(Object.fromEntries(chunkKeys.flatMap((chunkKey) => (
+        Object.entries(itemsByChunkKey.get(chunkKey) || {})
+      ))));
       setState({
         scopeKey,
         itemsById,
@@ -78,14 +190,11 @@ export const useCatalogItemsById = (itemIds) => {
       if (error) firstError ||= error;
       itemsByChunkKey.set(chunkKey, chunkItemsById || {});
       pending.delete(chunkKey);
-      subscriptionsStarting -= 1;
       publish();
-      startNextSubscriptions();
     };
-    const startSubscription = (chunkIndex) => {
+    const startSubscription = (chunkIndex, releaseStartupSlot) => {
       const chunk = chunks[chunkIndex];
       let initialSettled = false;
-      subscriptionsStarting += 1;
       try {
         const unsubscribe = subscribeCatalogItems(chunk, {
           next: (chunkItemsById) => {
@@ -93,6 +202,7 @@ export const useCatalogItemsById = (itemIds) => {
             if (!initialSettled) {
               initialSettled = true;
               settleInitialChunk(chunkIndex, chunkItemsById);
+              releaseStartupSlot();
               return;
             }
             itemsByChunkKey.set(chunkKeys[chunkIndex], chunkItemsById || {});
@@ -105,40 +215,44 @@ export const useCatalogItemsById = (itemIds) => {
             if (!initialSettled) {
               initialSettled = true;
               settleInitialChunk(chunkIndex, {}, resolvedError);
+              releaseStartupSlot();
               return;
             }
             firstError ||= resolvedError;
             publish();
           },
         });
-        if (active) unsubscribes.push(unsubscribe);
-        else unsubscribe?.();
+        const cancel = () => {
+          if (!initialSettled) {
+            initialSettled = true;
+            releaseStartupSlot({ deferDrain: true });
+          }
+          unsubscribe?.();
+        };
+        if (active) startedSubscriptions.push(cancel);
+        else cancel();
       } catch (error) {
         if (!initialSettled) {
           initialSettled = true;
           settleInitialChunk(chunkIndex, {}, error);
+          releaseStartupSlot();
         }
       }
     };
-    function startNextSubscriptions() {
-      while (
-        active
-        && subscriptionsStarting < CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY
-        && nextChunkIndex < chunks.length
-      ) {
-        const chunkIndex = nextChunkIndex;
-        nextChunkIndex += 1;
-        startSubscription(chunkIndex);
-      }
-    }
     setState(emptyState(scopeKey, 'loading'));
-    startNextSubscriptions();
+    const cancelQueuedSubscriptions = registerCatalogStartupConsumer(
+      startupScopeKey,
+      chunks.map((_, chunkIndex) => (
+        (releaseStartupSlot) => startSubscription(chunkIndex, releaseStartupSlot)
+      ))
+    );
 
     return () => {
       active = false;
-      unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+      cancelQueuedSubscriptions();
+      startedSubscriptions.forEach((cancel) => cancel());
     };
-  }, [normalizedIds, scopeKey]);
+  }, [normalizedIds, scopeKey, startupScopeKey]);
 
   const visibleState = state.scopeKey === scopeKey
     ? state

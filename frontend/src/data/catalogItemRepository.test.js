@@ -49,11 +49,11 @@ describe('catalogItemRepository', () => {
     const second = jest.fn();
 
     const unsubscribeFirst = subscribeCatalogItems(
-      ['sword-1', 'shield-1'],
+      ['sword-1', 'shield-1', 'sword-1'],
       first
     );
     const unsubscribeSecond = subscribeCatalogItems(
-      ['shield-1', 'sword-1'],
+      ['shield-1', 'sword-1', 'shield-1'],
       second
     );
 

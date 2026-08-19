@@ -68,6 +68,63 @@ describe('useCatalogItemsById', () => {
     expect(subscriptions).toHaveLength(CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY + 2);
   });
 
+  test('shares a cancellable four-start scheduler across consumers and access generations', async () => {
+    const firstIds = Array.from(
+      { length: 60 },
+      (_, index) => `first-${String(index).padStart(3, '0')}`
+    );
+    const secondIds = Array.from(
+      { length: 60 },
+      (_, index) => `second-${String(index).padStart(3, '0')}`
+    );
+    const { result, rerender } = renderHook(
+      ({ first, second }) => ({
+        first: useCatalogItemsById(first),
+        second: useCatalogItemsById(second),
+      }),
+      { initialProps: { first: firstIds, second: secondIds } }
+    );
+
+    expect(subscriptions).toHaveLength(CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY);
+
+    act(() => subscriptions[0].observer.next({}));
+    expect(subscriptions).toHaveLength(CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY + 1);
+    expect(subscriptions[4].ids).toEqual(secondIds.slice(0, 10));
+
+    act(() => subscriptions[1].observer.error(new Error('first batch denied')));
+    expect(subscriptions).toHaveLength(CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY + 2);
+    expect(subscriptions[5].ids).toEqual(firstIds.slice(40, 50));
+
+    rerender({ first: firstIds, second: [] });
+    await act(async () => Promise.resolve());
+    expect(subscriptions[4].unsubscribe).toHaveBeenCalledTimes(1);
+
+    act(() => subscriptions[2].observer.next({}));
+    expect(subscriptions[6].ids).toEqual(firstIds.slice(50, 60));
+    expect(subscriptions.some(({ ids }) => ids.includes('second-010'))).toBe(false);
+
+    const firstGeneration = [...subscriptions];
+    useAuthSession.mockReturnValue({
+      user: { uid: 'user-1' },
+      repositoryAccessGeneration: 2,
+    });
+    rerender({ first: firstIds, second: [] });
+    await act(async () => Promise.resolve());
+
+    const secondGenerationStartCount = subscriptions.length;
+    expect(subscriptions.slice(secondGenerationStartCount - 4)).toHaveLength(4);
+    expect(firstGeneration
+      .filter(({ ids }) => ids[0]?.startsWith('first-'))
+      .every(({ unsubscribe }) => unsubscribe.mock.calls.length === 1)).toBe(true);
+
+    act(() => {
+      firstGeneration[0].observer.next({ stale: { id: 'stale' } });
+      firstGeneration[3].observer.error(new Error('late generation error'));
+    });
+    expect(subscriptions).toHaveLength(secondGenerationStartCount);
+    expect(result.current.first.itemsById).toEqual({});
+  });
+
   test('settles missing documents after every initial snapshot and applies realtime updates', () => {
     const ids = Array.from({ length: 12 }, (_, index) => `item-${String(index).padStart(2, '0')}`);
     const { result } = renderHook(() => useCatalogItemsById(ids));
@@ -143,6 +200,19 @@ describe('useCatalogItemsById', () => {
 
     unmount();
     expect(subscriptions[0].unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  test('preserves __proto__ as an own item on a frozen map with an ordinary prototype', () => {
+    const { result } = renderHook(() => useCatalogItemsById(['__proto__']));
+    const protoItem = { id: '__proto__', name: 'Prototype Relic' };
+    const batch = Object.freeze(Object.fromEntries([['__proto__', protoItem]]));
+
+    act(() => subscriptions[0].observer.next(batch));
+
+    expect(Object.hasOwn(result.current.itemsById, '__proto__')).toBe(true);
+    expect(result.current.itemsById.__proto__).toBe(protoItem);
+    expect(Object.getPrototypeOf(result.current.itemsById)).toBe(Object.prototype);
+    expect(Object.isFrozen(result.current.itemsById)).toBe(true);
   });
 
   test('replaces a subscription when distinct ID sets contain the former key delimiter', () => {
