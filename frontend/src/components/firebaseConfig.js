@@ -12,6 +12,12 @@ export const FIREBASE_CONFIG_ENDPOINT = "/fatins-runtime/firebase-client";
 
 const performanceMode = process.env.REACT_APP_FND_PERF === "1";
 const performanceProjectId = process.env.REACT_APP_FND_PERF_PROJECT_ID || "demo-fnd-perf";
+const getPerformanceFirestoreSettings = () => (
+  typeof window !== "undefined"
+  && window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ === true
+    ? { experimentalForceLongPolling: true }
+    : {}
+);
 const requiredConfigKeys = [
   "apiKey",
   "authDomain",
@@ -142,9 +148,7 @@ const initializeFirebaseServices = (config, {
 
   auth = getAuth(app);
   db = performanceMode
-    ? initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: false,
-    })
+    ? initializeFirestore(app, getPerformanceFirestoreSettings())
     : getFirestore(app);
 
   if (performanceMode && !emulatorsConnected) {
