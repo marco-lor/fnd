@@ -12,6 +12,10 @@ const {
   sha256,
   writeJson,
 } = require('./common');
+const {
+  assertBaselineReferenceMachine,
+  assertBaselineRepeatability,
+} = require('./baseline-source');
 const { evaluateBudget, evaluateStructuralGates, worstBudgetEvaluation } = require('./compare');
 
 if (!process.argv.includes('--accept')) {
@@ -29,7 +33,6 @@ const repeatability = assertSchemaVersion(readJson(repeatabilityPath), 'repeatab
 const aggregateBytes = fs.readFileSync(aggregatePath);
 if (
   repeatability.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION
-  || repeatability.status !== 'pass'
   || repeatability.aggregateSha256 !== sha256(aggregateBytes)
 ) {
   console.error('The authoritative aggregate is stale or its repeatability gate did not pass.');
@@ -39,6 +42,13 @@ const report = JSON.parse(aggregateBytes.toString('utf8'));
 assertSchemaVersion(report, 'authoritative aggregate');
 if (report.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION) {
   console.error('The authoritative aggregate uses a stale measurement contract.');
+  process.exit(1);
+}
+try {
+  assertBaselineReferenceMachine(report);
+  assertBaselineRepeatability(repeatability, report);
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
 if (!report.build || !report.fixture || !report.browser) {
@@ -71,7 +81,8 @@ const lines = [
   '',
   `- Runs: ${repeatability.runIds.join(', ')}`,
   `- Maximum allowed timing variance: ${repeatability.maximumVariancePercent}%`,
-  `- Maximum observed timing variance: ${repeatability.observedMaximumVariancePercent.toFixed(2)}%`,
+  `- Maximum gated timing variance: ${repeatability.maximumGatedVariancePercent.toFixed(2)}%`,
+  `- Raw maximum observed timing variance: ${repeatability.observedMaximumVariancePercent.toFixed(2)}%`,
   '',
   '## Scenario coverage',
   '',

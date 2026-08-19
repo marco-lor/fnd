@@ -43,6 +43,20 @@ test('Task 07 media caps retain the worst observed shell measurement', () => {
   assert.equal(metrics['task07-media-shell:task07.attachedImages'], 90);
 });
 
+test('maximum long-task metrics retain the worst observed iteration', () => {
+  const metrics = buildMetricMap({
+    browserReport: {
+      scenarios: [307, 152, 165].map((value) => ({
+        id: 'dm-dashboard',
+        metrics: { 'runtime.maxLongTaskMs': value },
+      })),
+    },
+  });
+
+  assert.equal(metrics['dm-dashboard:runtime.maxLongTaskMs'], 307);
+  assert.equal(metrics['dm-dashboard:runtime.maxLongTaskMs.p95'], 307);
+});
+
 test('commit identity always comes from HEAD and rejects a stale inherited GITHUB_SHA', () => {
   const head = 'a'.repeat(40);
   const execFileSync = () => `${head}\n`;

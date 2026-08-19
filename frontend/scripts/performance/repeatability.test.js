@@ -1,6 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateReports, compareReports, relativeDifferencePercent } = require('./repeatability');
+const { PERFORMANCE_MEASUREMENT_CONTRACT_VERSION } = require('./common');
+const {
+  GITHUB_HOSTED_LONG_TASK_JITTER_MS,
+  GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS,
+  LONG_TASK_ENTRY_THRESHOLD_MS,
+  TTFB_ABSOLUTE_JITTER_MS,
+  aggregateReports,
+  compareReports,
+  relativeDifferencePercent,
+} = require('./repeatability');
 
 const scenario = (id, timing, delivered = 10, iteration = 1, extraMetrics = {}) => ({
   scenarioId: id,
@@ -41,7 +50,7 @@ const report = (id, timing, delivered = 10) => {
   const deliveries = repeatThree(delivered);
   return {
     schemaVersion: 1,
-    measurementContractVersion: 2,
+    measurementContractVersion: PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
     commit: 'a'.repeat(40),
     projectId: 'demo-fnd-perf',
     run: { id, authoritative: true, retainedIterations: 3 },
@@ -103,6 +112,30 @@ test('relative timing variance is symmetric and bounded', () => {
   assert.ok(relativeDifferencePercent(100, 110) < 10);
 });
 
+test('tiny local TTFB jitter uses an explicit millisecond floor without relaxing LCP', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  setScenarioMetric(left, 'web-vital.TTFB', 6.8);
+  setScenarioMetric(right, 'web-vital.TTFB', 8.7);
+
+  const withinFloor = compare(left, right, 15);
+  const ttfb = withinFloor.timing.find(({ key }) => key === 'home:web-vital.TTFB');
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(ttfb.absoluteToleranceMs, TTFB_ABSOLUTE_JITTER_MS);
+  assert.ok(ttfb.variancePercent > 15);
+  assert.equal(ttfb.gatedVariancePercent, 0);
+  assert.equal(withinFloor.observedMaximumVariancePercent, ttfb.variancePercent);
+  assert.equal(withinFloor.maximumGatedVariancePercent, 0);
+
+  setScenarioMetric(left, 'web-vital.TTFB', 100);
+  setScenarioMetric(right, 'web-vital.TTFB', 120);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:web-vital.TTFB').status,
+    'fail'
+  );
+});
+
 test('matching authoritative reports pass and aggregate all retained scenarios', () => {
   const left = report('run-a', 1000);
   const right = report('run-b', 1100);
@@ -161,6 +194,214 @@ test('timing repeatability compares complete retained-sample medians', () => {
     }
   );
   assert.equal(result.timing.some(({ key }) => key.endsWith('.p95')), false);
+});
+
+test('maximum long-task repeatability compares the worst retained samples', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  setScenarioMetric(left, 'runtime.maxLongTaskMs', [307, 152, 165]);
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [312, 308, 284]);
+
+  const stable = compare(left, right, 15);
+  const longTask = stable.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(stable.status, 'pass');
+  assert.equal(longTask.aggregation, 'maximum');
+  assert.equal(longTask.left, 307);
+  assert.equal(longTask.right, 312);
+  assert.deepEqual(longTask.leftSamples, [307, 152, 165]);
+  assert.deepEqual(longTask.rightSamples, [312, 308, 284]);
+
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [200, 198, 190]);
+  const drifted = compare(left, right, 15);
+  assert.equal(
+    drifted.timing.find(({ key }) => key === 'home:runtime.maxLongTaskMs').status,
+    'fail'
+  );
+});
+
+test('GitHub-hosted long-task jitter uses the observer threshold without hiding larger drift', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(left, 'runtime.maxLongTaskMs', [0, 0, 0]);
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [93, 0, 0]);
+
+  const withinFloor = compare(left, right, 15);
+  const longTask = withinFloor.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(GITHUB_HOSTED_LONG_TASK_JITTER_MS, 50);
+  assert.equal(LONG_TASK_ENTRY_THRESHOLD_MS, 50);
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(longTask.left, 0);
+  assert.equal(longTask.right, 93);
+  assert.equal(longTask.absoluteDifference, 93);
+  assert.equal(longTask.absoluteComparisonFloorMs, 50);
+  assert.equal(longTask.gatedAbsoluteDifferenceMs, 43);
+  assert.equal(longTask.absoluteToleranceMs, 50);
+  assert.equal(longTask.variancePercent, 100);
+  assert.equal(longTask.gatedVariancePercent, 0);
+
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [101, 0, 0]);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:runtime.maxLongTaskMs').status,
+    'fail'
+  );
+
+  left.environment.referenceMachine = 'test-machine';
+  right.environment.referenceMachine = 'test-machine';
+  setScenarioMetric(right, 'runtime.maxLongTaskMs', [93, 0, 0]);
+  const controlledMachine = compare(left, right, 15);
+  const controlledLongTask = controlledMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(controlledMachine.status, 'fail');
+  assert.equal(controlledLongTask.absoluteToleranceMs, 0);
+  assert.equal(controlledLongTask.absoluteComparisonFloorMs, 0);
+
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'test-machine';
+  const mismatchedMachine = compare(left, right, 15);
+  const mismatchedLongTask = mismatchedMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(mismatchedLongTask.status, 'fail');
+  assert.equal(mismatchedLongTask.absoluteToleranceMs, 0);
+  assert.equal(mismatchedLongTask.absoluteComparisonFloorMs, 0);
+
+  delete right.environment.referenceMachine;
+  const missingMachine = compare(left, right, 15);
+  const missingLongTask = missingMachine.timing.find(
+    ({ key }) => key === 'home:runtime.maxLongTaskMs'
+  );
+  assert.equal(missingLongTask.status, 'fail');
+  assert.equal(missingLongTask.absoluteToleranceMs, 0);
+  assert.equal(missingLongTask.absoluteComparisonFloorMs, 0);
+});
+
+test('GitHub-hosted sub-millisecond microbenchmark jitter remains raw evidence', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(left, 'microbenchmark.visibility.p95', [0.4, 0.6, 0.6]);
+  setScenarioMetric(right, 'microbenchmark.visibility.p95', [1.4, 2.3, 0.4]);
+
+  const withinFloor = compare(left, right, 15);
+  const visibility = withinFloor.timing.find(
+    ({ key }) => key === 'home:microbenchmark.visibility.p95'
+  );
+  assert.equal(GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS, 1);
+  assert.equal(withinFloor.status, 'pass');
+  assert.equal(visibility.left, 0.6);
+  assert.equal(visibility.right, 1.4);
+  assert.ok(visibility.variancePercent > 15);
+  assert.equal(visibility.absoluteToleranceMs, 1);
+  assert.ok(Math.abs(visibility.gatedAbsoluteDifferenceMs - 0.8) < 1e-9);
+  assert.equal(visibility.gatedVariancePercent, 0);
+
+  setScenarioMetric(right, 'microbenchmark.visibility.p95', [1.7, 2.3, 0.4]);
+  const outsideFloor = compare(left, right, 15);
+  assert.equal(
+    outsideFloor.timing.find(({ key }) => key === 'home:microbenchmark.visibility.p95').status,
+    'fail'
+  );
+});
+
+test('GitHub-hosted variance-only failures remain raw failures but are advisory to the execution gate', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+
+  const result = compare(left, right, 15);
+  const lcp = result.timing.find(({ key }) => key === 'home:web-vital.LCP');
+
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'pass');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'hosted-timing-advisory');
+  assert.equal(result.gateStatus, 'pass');
+  assert.equal(lcp.status, 'fail');
+  assert.ok(lcp.gatedVariancePercent > 15);
+});
+
+test('GitHub-hosted incomplete timing evidence remains blocking', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  delete right.browser.scenarios[1].metrics['web-vital.LCP'];
+
+  const result = compare(left, right, 15);
+  const lcp = result.timing.find(({ key }) => key === 'home:web-vital.LCP');
+
+  assert.equal(lcp.complete, false);
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'fail');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'hosted-timing-advisory');
+  assert.equal(result.gateStatus, 'fail');
+});
+
+test('GitHub-hosted deterministic or compatibility drift remains blocking', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1400);
+  left.environment.referenceMachine = 'github-hosted-runner';
+  right.environment.referenceMachine = 'github-hosted-runner';
+  setScenarioMetric(right, 'runtime.consoleErrors', [1, 1, 1]);
+
+  const deterministicDrift = compare(left, right, 15);
+  assert.equal(deterministicDrift.evidenceStatus, 'fail');
+  assert.equal(deterministicDrift.gateStatus, 'fail');
+
+  right.environment.referenceMachine = 'different-runner';
+  const identityDrift = compare(left, right, 15);
+  assert.equal(identityDrift.evidenceStatus, 'fail');
+  assert.equal(identityDrift.gateMode, 'strict');
+  assert.equal(identityDrift.gateStatus, 'fail');
+
+  left.environment.referenceMachine = 'unknown';
+  right.environment.referenceMachine = 'unknown';
+  const unknownIdentity = compare(left, right, 15);
+  assert.equal(
+    unknownIdentity.compatibility
+      .find(({ id }) => id === 'reference-machine-identity').status,
+    'fail'
+  );
+  assert.equal(unknownIdentity.evidenceStatus, 'fail');
+  assert.equal(unknownIdentity.gateMode, 'strict');
+  assert.equal(unknownIdentity.gateStatus, 'fail');
+});
+
+test('controlled reference machines keep timing variance strictly blocking', () => {
+  const result = compare(report('run-a', 1000), report('run-b', 1400), 15);
+
+  assert.equal(result.status, 'fail');
+  assert.equal(result.evidenceStatus, 'pass');
+  assert.equal(result.timingStatus, 'fail');
+  assert.equal(result.gateMode, 'strict');
+  assert.equal(result.gateStatus, 'fail');
+});
+
+test('malformed variance thresholds fail closed for hosted and controlled runs', () => {
+  for (const referenceMachine of ['github-hosted-runner', 'local-reference']) {
+    for (const maximumVariancePercent of [Number.NaN, Number.POSITIVE_INFINITY, -1, 101]) {
+      const left = report('run-a', 1000);
+      const right = report('run-b', 1400);
+      left.environment.referenceMachine = referenceMachine;
+      right.environment.referenceMachine = referenceMachine;
+
+      assert.throws(
+        () => compare(left, right, maximumVariancePercent),
+        /maximum timing variance.*finite.*0.*100/i
+      );
+    }
+  }
 });
 
 test('advisory INP samples do not control the authoritative repeatability gate', () => {
@@ -259,6 +500,65 @@ test('scheduled-only scenarios require exactly one iteration-one record', () => 
   ));
   const failing = compare(left, right, 15);
   assert.equal(failing.status, 'fail');
+});
+
+test('scheduled auxiliary scenarios use their explicit metric contract and remain deterministic', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  const manifestScenario = {
+    id: 'task07-registry-desktop',
+    route: '/grigliata',
+    role: 'dm',
+    interaction: 'desktop-registry-budget',
+    scheduledOnly: true,
+    requiredMetrics: [
+      'task07.registryRequestConcurrencyLimit',
+      'task07.unpinnedRegistryRecords',
+    ],
+  };
+  for (const current of [left, right]) {
+    current.scenarioManifest.scenarios.push(manifestScenario);
+    current.browser.scenarios.push({
+      scenarioId: manifestScenario.id,
+      route: manifestScenario.route,
+      role: manifestScenario.role,
+      iteration: 1,
+      environment: {
+        browserName: 'chromium',
+        browserVersion: '123',
+        projectName: 'chromium',
+      },
+      metrics: {
+        'task07.registryRequestConcurrencyLimit': 4,
+        'task07.unpinnedRegistryRecords': 72,
+      },
+    });
+  }
+
+  const passing = compare(left, right, 15);
+  assert.equal(passing.status, 'pass');
+  assert.equal(
+    passing.compatibility
+      .find(({ id }) => id === 'scenario-required-metrics:task07-registry-desktop').status,
+    'pass'
+  );
+
+  right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'] = 71;
+  const drift = compare(left, right, 15);
+  assert.equal(drift.status, 'fail');
+  assert.equal(
+    drift.deterministic
+      .find(({ key }) => key === 'task07-registry-desktop:task07.unpinnedRegistryRecords').status,
+    'fail'
+  );
+
+  delete right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'];
+  const missing = compare(left, right, 15);
+  assert.equal(
+    missing.compatibility
+      .find(({ id }) => id === 'scenario-required-metrics:task07-registry-desktop').status,
+    'fail'
+  );
 });
 
 test('authoritative identities require distinct run IDs, matching browser IDs, and real commits', () => {

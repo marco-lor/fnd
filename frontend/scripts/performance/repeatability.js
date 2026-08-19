@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const {
   assertSchemaVersion,
+  GITHUB_HOSTED_REFERENCE_MACHINE,
   median,
+  PERFORMANCE_MAX_VARIANCE_PERCENT,
   PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   readJson,
   resultsDir,
@@ -14,7 +16,11 @@ const {
 } = require('./common');
 const { buildMetricMap } = require('./report');
 
-const DEFAULT_MAX_VARIANCE_PERCENT = 15;
+const DEFAULT_MAX_VARIANCE_PERCENT = PERFORMANCE_MAX_VARIANCE_PERCENT;
+const TTFB_ABSOLUTE_JITTER_MS = 5;
+const GITHUB_HOSTED_LONG_TASK_JITTER_MS = 50;
+const GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS = 1;
+const LONG_TASK_ENTRY_THRESHOLD_MS = 50;
 
 const argumentValue = (name) => {
   const index = process.argv.indexOf(name);
@@ -61,7 +67,34 @@ const isDeterministicMetric = (key) => (
   || /:resource\.(javascript|css|image|font)\.(uniqueCount|uniqueGzipBytes|uniqueFingerprint)$/.test(key)
   || /:resource\.other\.(uniqueCount|uniqueFingerprint)$/.test(key)
   || /:task07\.(attachedImages|audioNodes|farOffscreenAttachedImages|managedImages|musicStreamListeners|reducedMotionMeteors|uniqueFixtureImageRequests)$/.test(key)
+  || /:task07\.(registryRequestConcurrencyLimit|unpinnedRegistryRecords|unpinnedEstimatedDecodedBytes|totalEstimatedDecodedBytes|lowPriorityQueuedPreloads)$/.test(key)
   || key.startsWith('build:')
+);
+
+const absoluteJitterToleranceMs = (key, { referenceMachine = '' } = {}) => {
+  if (/:web-vital\.TTFB$/.test(key)) return TTFB_ABSOLUTE_JITTER_MS;
+  if (referenceMachine !== GITHUB_HOSTED_REFERENCE_MACHINE) return 0;
+  if (/:runtime\.maxLongTaskMs$/.test(key)) return GITHUB_HOSTED_LONG_TASK_JITTER_MS;
+  if (/:microbenchmark\..*\.(median|p95)$/.test(key)) {
+    return GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS;
+  }
+  return 0;
+};
+
+const assertMaximumVariancePercent = (value) => {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(
+      'Maximum timing variance must be finite and between 0 and 100 percent.'
+    );
+  }
+  return value;
+};
+
+const timingAbsoluteComparisonFloorMs = (key, { referenceMachine = '' } = {}) => (
+  referenceMachine === GITHUB_HOSTED_REFERENCE_MACHINE
+  && /:runtime\.maxLongTaskMs$/.test(key)
+    ? LONG_TASK_ENTRY_THRESHOLD_MS
+    : 0
 );
 
 const buildFingerprint = (report) => (report.build?.assets || [])
@@ -176,9 +209,13 @@ const scenarioMetadataDetails = (report, manifestScenario) => {
 
 const scenarioMetricCoverageDetails = (report, manifestScenario) => {
   if (!manifestScenario) return { required: [], missing: [], valid: false };
-  const required = manifestScenario.scheduledOnly === true
-    ? SCHEDULED_REQUIRED_SCENARIO_METRICS
-    : ROUTE_REQUIRED_SCENARIO_METRICS;
+  const required = Array.isArray(manifestScenario.requiredMetrics)
+    ? manifestScenario.requiredMetrics
+    : (
+      manifestScenario.scheduledOnly === true
+        ? SCHEDULED_REQUIRED_SCENARIO_METRICS
+        : ROUTE_REQUIRED_SCENARIO_METRICS
+    );
   const records = (report.browser?.scenarios || [])
     .filter((entry) => (entry.scenarioId || entry.id) === manifestScenario.id);
   const missing = [];
@@ -234,11 +271,19 @@ const collectScenarioMetricSamples = (report, predicate) => {
   return { metrics, recordCounts };
 };
 
-const buildTimingMedianMetricMap = (report) => {
+const timingAggregation = (key) => (
+  /:runtime\.maxLongTaskMs$/.test(key) ? 'maximum' : 'median'
+);
+
+const aggregateTimingSamples = (key, values) => (
+  timingAggregation(key) === 'maximum' ? Math.max(...values) : median(values)
+);
+
+const buildTimingMetricMap = (report) => {
   const { metrics } = collectScenarioMetricSamples(report, isTimingMetric);
   return Object.fromEntries(Object.entries(metrics).map(([key, samples]) => [
     key,
-    samples.complete ? median(samples.values) : null,
+    samples.complete ? aggregateTimingSamples(key, samples.values) : null,
   ]));
 };
 
@@ -285,8 +330,13 @@ const aggregateReports = (left, right, repeatability) => {
     },
     repeatability: {
       status: repeatability.status,
+      evidenceStatus: repeatability.evidenceStatus,
+      timingStatus: repeatability.timingStatus,
+      gateMode: repeatability.gateMode,
+      gateStatus: repeatability.gateStatus,
       maximumVariancePercent: repeatability.maximumVariancePercent,
       observedMaximumVariancePercent: repeatability.observedMaximumVariancePercent,
+      maximumGatedVariancePercent: repeatability.maximumGatedVariancePercent,
       runIds: repeatability.runIds,
     },
   };
@@ -300,6 +350,7 @@ const compareReports = (
   maximumVariancePercent = DEFAULT_MAX_VARIANCE_PERCENT,
   canonicalScenarioManifest = readJson(scenariosPath)
 ) => {
+  maximumVariancePercent = assertMaximumVariancePercent(maximumVariancePercent);
   const compatibility = [];
   const compareExact = (id, leftValue, rightValue) => compatibility.push({
     id,
@@ -324,6 +375,21 @@ const compareReports = (
   for (const field of ['platform', 'architecture', 'node', 'referenceMachine', 'cpuModel', 'cpuCount']) {
     compareExact(`environment-${field}`, left.environment?.[field], right.environment?.[field]);
   }
+  const normalizeReferenceMachine = (value) => (
+    typeof value === 'string' ? value.trim() : ''
+  );
+  const leftReferenceMachine = normalizeReferenceMachine(left.environment?.referenceMachine);
+  const rightReferenceMachine = normalizeReferenceMachine(right.environment?.referenceMachine);
+  compatibility.push({
+    id: 'reference-machine-identity',
+    status: leftReferenceMachine
+      && rightReferenceMachine
+      && leftReferenceMachine.toLowerCase() !== 'unknown'
+      && rightReferenceMachine.toLowerCase() !== 'unknown'
+      && leftReferenceMachine === rightReferenceMachine ? 'pass' : 'fail',
+    left: leftReferenceMachine || null,
+    right: rightReferenceMachine || null,
+  });
   compareExact('browser', browserFingerprint(left), browserFingerprint(right));
   compareExact('build-assets', buildFingerprint(left), buildFingerprint(right));
   const identityDetails = (report) => {
@@ -389,7 +455,21 @@ const compareReports = (
       && typeof manifest.locale === 'string' && manifest.locale.length > 0
       && typeof manifest.timezoneId === 'string' && manifest.timezoneId.length > 0
       && scenarios.length > 0
-      && scenarios.every(({ id }) => typeof id === 'string' && id.length > 0)
+      && scenarios.every(({ id, requiredMetrics }) => (
+        typeof id === 'string'
+        && id.length > 0
+        && (
+          requiredMetrics == null
+          || (
+            Array.isArray(requiredMetrics)
+            && requiredMetrics.length > 0
+            && requiredMetrics.every((metric) => (
+              typeof metric === 'string' && metric.length > 0
+            ))
+            && new Set(requiredMetrics).size === requiredMetrics.length
+          )
+        )
+      ))
       && new Set(scenarios.map(({ id }) => id)).size === scenarios.length;
   };
   compatibility.push({
@@ -515,6 +595,11 @@ const compareReports = (
     ...Object.keys(leftTimingMetrics),
     ...Object.keys(rightTimingMetrics),
   ])].sort();
+  const matchingReferenceMachine = leftReferenceMachine
+    && leftReferenceMachine === rightReferenceMachine
+    ? leftReferenceMachine
+    : '';
+  const timingJitterContext = { referenceMachine: matchingReferenceMachine };
   const timing = timingKeys.map((key) => {
     const scenarioId = key.slice(0, key.indexOf(':'));
     const comparison = buildSampleComparison(
@@ -524,34 +609,89 @@ const compareReports = (
       leftTimingCollection.recordCounts[scenarioId],
       rightTimingCollection.recordCounts[scenarioId]
     );
-    const leftValue = comparison.complete ? median(comparison.leftSamples) : null;
-    const rightValue = comparison.complete ? median(comparison.rightSamples) : null;
+    const aggregation = timingAggregation(key);
+    const leftValue = comparison.complete
+      ? aggregateTimingSamples(key, comparison.leftSamples)
+      : null;
+    const rightValue = comparison.complete
+      ? aggregateTimingSamples(key, comparison.rightSamples)
+      : null;
     const variancePercent = Number.isFinite(leftValue) && Number.isFinite(rightValue)
       ? relativeDifferencePercent(leftValue, rightValue)
       : null;
+    const absoluteDifference = Number.isFinite(leftValue) && Number.isFinite(rightValue)
+      ? Math.abs(leftValue - rightValue)
+      : null;
+    const absoluteComparisonFloorMs = timingAbsoluteComparisonFloorMs(key, timingJitterContext);
+    const gatedAbsoluteDifferenceMs = Number.isFinite(leftValue) && Number.isFinite(rightValue)
+      ? Math.abs(
+        Math.max(leftValue, absoluteComparisonFloorMs)
+        - Math.max(rightValue, absoluteComparisonFloorMs)
+      )
+      : null;
+    const absoluteToleranceMs = absoluteJitterToleranceMs(key, timingJitterContext);
+    const withinAbsoluteTolerance = absoluteToleranceMs > 0
+      && Number.isFinite(gatedAbsoluteDifferenceMs)
+      && gatedAbsoluteDifferenceMs <= absoluteToleranceMs;
+    const gatedVariancePercent = withinAbsoluteTolerance ? 0 : variancePercent;
     return {
       ...comparison,
+      aggregation,
       left: leftValue,
       right: rightValue,
+      absoluteDifference,
+      absoluteComparisonFloorMs,
+      gatedAbsoluteDifferenceMs,
+      absoluteToleranceMs,
       variancePercent,
+      gatedVariancePercent,
       status: comparison.complete
         && stableJson(comparison.leftIterations) === stableJson(comparison.rightIterations)
-        && Number.isFinite(variancePercent)
-        && variancePercent <= maximumVariancePercent ? 'pass' : 'fail',
+        && Number.isFinite(gatedVariancePercent)
+        && gatedVariancePercent <= maximumVariancePercent ? 'pass' : 'fail',
     };
   });
   const observedMaximumVariancePercent = Math.max(0, ...timing
     .map((entry) => entry.variancePercent)
     .filter(Number.isFinite));
-  const status = [...compatibility, ...deterministic, ...timing]
-    .some((entry) => entry.status !== 'pass') ? 'fail' : 'pass';
+  const maximumGatedVariancePercent = Math.max(0, ...timing
+    .map((entry) => entry.gatedVariancePercent)
+    .filter(Number.isFinite));
+  const compatibilityStatus = compatibility.some((entry) => entry.status !== 'pass')
+    ? 'fail' : 'pass';
+  const deterministicStatus = deterministic.some((entry) => entry.status !== 'pass')
+    ? 'fail' : 'pass';
+  const completeTimingEvidence = timing.every((entry) => (
+    entry.complete === true
+    && stableJson(entry.leftIterations) === stableJson(entry.rightIterations)
+    && Number.isFinite(entry.left)
+    && Number.isFinite(entry.right)
+    && Number.isFinite(entry.variancePercent)
+    && Number.isFinite(entry.gatedVariancePercent)
+  ));
+  const evidenceStatus = compatibilityStatus === 'pass'
+    && deterministicStatus === 'pass'
+    && completeTimingEvidence ? 'pass' : 'fail';
+  const timingStatus = timing.some((entry) => entry.status !== 'pass') ? 'fail' : 'pass';
+  const status = evidenceStatus === 'pass' && timingStatus === 'pass' ? 'pass' : 'fail';
+  const gateMode = matchingReferenceMachine === GITHUB_HOSTED_REFERENCE_MACHINE
+    ? 'hosted-timing-advisory'
+    : 'strict';
+  const gateStatus = evidenceStatus === 'pass'
+    && (timingStatus === 'pass' || gateMode === 'hosted-timing-advisory')
+    ? 'pass' : 'fail';
   return {
     schemaVersion: 1,
     measurementContractVersion: PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
     generatedAt: new Date().toISOString(),
     status,
+    evidenceStatus,
+    timingStatus,
+    gateMode,
+    gateStatus,
     maximumVariancePercent,
     observedMaximumVariancePercent,
+    maximumGatedVariancePercent,
     runIds: [left.run?.id || null, right.run?.id || null],
     compatibility,
     deterministic,
@@ -578,8 +718,18 @@ const runRepeatability = ({
   for (const entry of [...repeatability.compatibility, ...repeatability.deterministic, ...repeatability.timing]) {
     if (entry.status !== 'pass') console.error(`FAIL repeatability ${entry.id || entry.key}`);
   }
-  console.log(`${repeatability.status.toUpperCase()} repeatability (maximum observed variance ${repeatability.observedMaximumVariancePercent.toFixed(2)}%).`);
-  if (repeatability.status !== 'pass') process.exitCode = 1;
+  console.log(
+    `${repeatability.status.toUpperCase()} repeatability `
+    + `(maximum gated variance ${repeatability.maximumGatedVariancePercent.toFixed(2)}%; `
+    + `raw observed maximum ${repeatability.observedMaximumVariancePercent.toFixed(2)}%).`
+  );
+  if (repeatability.status !== 'pass' && repeatability.gateStatus === 'pass') {
+    console.warn(
+      'ADVISORY GitHub-hosted timing variance retained as failed evidence; '
+      + 'complete compatibility and deterministic evidence passed.'
+    );
+  }
+  if (repeatability.gateStatus !== 'pass') process.exitCode = 1;
   return { repeatability, aggregate };
 };
 
@@ -587,12 +737,21 @@ if (require.main === module) runRepeatability();
 
 module.exports = {
   DEFAULT_MAX_VARIANCE_PERCENT,
+  GITHUB_HOSTED_LONG_TASK_JITTER_MS,
+  GITHUB_HOSTED_MICROBENCHMARK_JITTER_MS,
+  LONG_TASK_ENTRY_THRESHOLD_MS,
+  TTFB_ABSOLUTE_JITTER_MS,
   aggregateReports,
-  buildTimingMedianMetricMap,
+  absoluteJitterToleranceMs,
+  aggregateTimingSamples,
+  assertMaximumVariancePercent,
+  buildTimingMetricMap,
   collectScenarioMetricSamples,
   compareReports,
   isDeterministicMetric,
   isTimingMetric,
   relativeDifferencePercent,
   runRepeatability,
+  timingAggregation,
+  timingAbsoluteComparisonFloorMs,
 };

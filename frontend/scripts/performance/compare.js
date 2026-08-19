@@ -68,7 +68,7 @@ const evaluateStructuralGates = (current) => {
   const expected = current.scenarioManifest.scenarios.map((scenario) => scenario.id);
   const actual = new Set((current.browser?.scenarios || []).map((scenario) => scenario.scenarioId || scenario.id));
   const missing = expected.filter((scenarioId) => !actual.has(scenarioId));
-  const requiredMetrics = [
+  const commonRequiredMetrics = [
     'runtime.consoleErrors',
     'runtime.unhandledErrors',
     'runtime.failedRequests',
@@ -77,9 +77,14 @@ const evaluateStructuralGates = (current) => {
     'runtime.activeTimeoutsAfterCleanup',
     'runtime.activeMediaAfterCleanup',
   ];
-  const missingMetrics = expected.flatMap((scenarioId) => requiredMetrics
-    .filter((metric) => !Number.isFinite(current.metrics?.[`${scenarioId}:${metric}`]))
-    .map((metric) => `${scenarioId}:${metric}`));
+  const missingMetrics = current.scenarioManifest.scenarios.flatMap((scenario) => {
+    const requiredMetrics = Array.isArray(scenario.requiredMetrics)
+      ? scenario.requiredMetrics
+      : commonRequiredMetrics;
+    return requiredMetrics
+      .filter((metric) => !Number.isFinite(current.metrics?.[`${scenario.id}:${metric}`]))
+      .map((metric) => `${scenario.id}:${metric}`);
+  });
   const fixtureCountsValid = Object.entries(current.fixtureManifest?.counts || {})
     .every(([collectionName, expected]) => current.fixture?.counts?.[collectionName] === expected);
   const fixtureValid = Boolean(current.fixture?.hash)

@@ -66,6 +66,10 @@ test('authoritative flow checks cleanliness at entry and immediately before ever
     assert.equal(build, buildGuard + 1);
     assert.equal(snapshot, snapshotGuard + 1);
   }
+  assert.deepEqual(
+    events.filter((event) => event.startsWith('run:')).slice(-2),
+    ['run:repeatability.js:-', 'run:compare.js:-']
+  );
 });
 
 test('authoritative flow stops before a snapshot if the worktree becomes dirty', async () => {

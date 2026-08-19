@@ -47,6 +47,7 @@ const sumBuildAssets = (buildReport, predicate, property) => (
 );
 
 const WORST_CASE_METRICS = new Set([
+  'runtime.maxLongTaskMs',
   'runtime.consoleErrors',
   'runtime.explainedFirestoreEmulatorStartupWarnings',
   'runtime.unhandledErrors',
