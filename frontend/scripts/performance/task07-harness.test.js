@@ -24,7 +24,15 @@ const {
   resolveTask07SoakRuntime,
   resolveTask07SoakSmokeMode,
 } = require('./task07-soak-contract');
-const { validateRenderSchedulerSnapshot } = require('./task07-render-scheduler');
+const {
+  isCrossfadeBattlemapObservation,
+  summarizeCrossfadeBattlemapObservation,
+  validateRenderSchedulerSnapshot,
+} = require('./task07-render-scheduler');
+const {
+  createFivePeerFailureAttachment,
+  summarizeFivePeerSuccessDiagnostics,
+} = require('./task07-five-peer-evidence');
 
 const frontendRoot = path.resolve(__dirname, '..', '..');
 const workflowPath = path.resolve(frontendRoot, '..', '.github', 'workflows', 'performance.yml');
@@ -305,7 +313,7 @@ test('Task 07 browser soak activates every fixture map and proves overlapping na
   assert.match(soak, /new URL\(baseURL\)\.origin !== 'http:\/\/127\.0\.0\.1:5000'/);
   assert.match(soak, /activateGalleryBackground\(page, background\)/);
   assert.match(soak, /activatedBackgrounds\.size\)\.toBe\(TASK07_SOAK_BACKGROUND_COUNT\)/);
-  assert.match(soak, /ACTIVE_BOARD_PIN,[\s\S]*CROSSFADE_PIN/);
+  assert.match(soak, /waitForCrossfadeLayerAndRegistry\(page, \{ backgroundId: background\.id \}\)/);
   assert.match(soak, /performance\.now\(\) - lifecycleStartedAtMs < soakRuntime\.durationMs/);
   assert.match(playwrightConfig, /workers:\s*1/);
   assert.match(playwrightConfig, /name:\s*'task07-soak'[\s\S]*timeout:\s*task07SoakRuntime\.timeoutMs/);
@@ -376,6 +384,72 @@ test('Task 07 render-scheduler evidence accepts only a visible settled stage-fre
     cycle: 1,
     route: '/home',
   }), /did not settle/);
+});
+
+test('Task 07 crossfade requires active and outgoing layers in the same pinned observation', () => {
+  const validLayer = { height: 720, opacity: 0.5, width: 1280 };
+  const pinnedRegistry = {
+    activeRequestCount: 0,
+    namedPins: ['grigliata-active-board', 'grigliata-crossfade'],
+    pinnedRecordCount: 2,
+    queuedRequestCount: 0,
+  };
+  const pinsOnly = summarizeCrossfadeBattlemapObservation({
+    active: [validLayer],
+    outgoing: [],
+    registry: pinnedRegistry,
+  });
+  const overlap = summarizeCrossfadeBattlemapObservation({
+    active: [validLayer],
+    outgoing: [validLayer],
+    registry: pinnedRegistry,
+  });
+
+  assert.equal(isCrossfadeBattlemapObservation(pinsOnly), false);
+  assert.equal(isCrossfadeBattlemapObservation(overlap), true);
+  assert.deepEqual(overlap, {
+    activeLayerCount: 1,
+    activeRequestCount: 0,
+    hasActiveBoardPin: true,
+    hasCrossfadePin: true,
+    outgoingLayerCount: 1,
+    pinnedRecordCount: 2,
+    queuedRequestCount: 0,
+  });
+  assert.equal(JSON.stringify(overlap).includes('grigliata-active-board'), false);
+});
+
+test('Task 07 five-peer success diagnostics omit failure arrays while failure attachments retain them', () => {
+  const diagnostics = {
+    assetSettlement: {
+      network: { pendingCount: 0 },
+      registry: { activeRequestCount: 0, queuedRequestCount: 0 },
+    },
+    explainedActiveWriteTurnoverCount: 1,
+    explainedActiveWriteTurnovers: [{ classification: 'active-write-turnover' }],
+    explainedCleanupTransportCancellationCount: 2,
+    explainedCleanupTransportCancellations: [{ classification: 'cleanup-transport-cancellation' }],
+    explainedRecaptchaCancellationCount: 3,
+    explainedRecaptchaCancellations: [{ classification: 'recaptcha-cancellation' }],
+    failedRequestCount: 4,
+    failedRequests: [{ classification: 'unexpected' }],
+    requestFailureDiagnosticErrorCount: 0,
+    requestFailureDiagnosticErrors: [],
+    visibilityState: 'visible',
+  };
+  const peers = [{ diagnostics, role: 'player' }];
+  const success = summarizeFivePeerSuccessDiagnostics(peers, {
+    explainedStartupWarningCount: 1,
+  });
+  const failure = createFivePeerFailureAttachment(peers);
+  const successSerialized = JSON.stringify(success);
+  const failureSerialized = JSON.stringify(failure);
+
+  assert.equal(successSerialized.includes('failedRequests'), false);
+  assert.equal(successSerialized.includes('explainedActiveWriteTurnovers'), false);
+  assert.equal(successSerialized.includes('requestFailureDiagnosticErrors'), false);
+  assert.match(failureSerialized, /"unexpected"/);
+  assert.match(failureSerialized, /"active-write-turnover"/);
 });
 
 test('Task 07 soak accepts a settled 50-background and 200-token registry plateau', () => {

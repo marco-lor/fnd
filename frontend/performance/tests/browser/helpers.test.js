@@ -33,6 +33,7 @@ const {
   retainImageResourceTimings,
   retainLongTaskEntries,
   resolvePlaywrightResponseStatus,
+  runFoesHubRowInteraction,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
   sanitizeFivePeerRequestFailure,
@@ -44,6 +45,51 @@ const {
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('Foes Hub scrolls, settles finite assets, then expands the measured row', async () => {
+  const calls = [];
+  const row = {
+    evaluate: async (callback) => callback({
+      scrollIntoView: (options) => calls.push({ action: 'scroll', options }),
+    }),
+    getByLabel: (name) => ({
+      click: async () => calls.push({ action: 'expand', name }),
+    }),
+  };
+
+  await runFoesHubRowInteraction(row, {
+    settleFiniteAssets: async (phase) => calls.push({ action: 'settle', phase }),
+    assertExpanded: async () => calls.push({ action: 'verify-expanded' }),
+  });
+
+  assert.deepEqual(calls, [
+    {
+      action: 'scroll',
+      options: { behavior: 'auto', block: 'center', inline: 'nearest' },
+    },
+    { action: 'settle', phase: 'after deterministic Foes Hub scroll' },
+    { action: 'expand', name: 'expand' },
+    { action: 'verify-expanded' },
+  ]);
+});
+
+test('Foes Hub rejects missing finite-asset settlement after its deterministic scroll', async () => {
+  const calls = [];
+  const row = {
+    evaluate: async (callback) => callback({
+      scrollIntoView: () => calls.push('scroll'),
+    }),
+    getByLabel: () => ({
+      click: async () => calls.push('expand'),
+    }),
+  };
+
+  await assert.rejects(
+    () => runFoesHubRowInteraction(row),
+    /requires finite-asset settlement/
+  );
+  assert.deepEqual(calls, ['scroll']);
+});
 
 test('retains bounded native long-task timings with the phase active at task start', () => {
   const events = [

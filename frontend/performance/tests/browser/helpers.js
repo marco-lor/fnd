@@ -1213,7 +1213,24 @@ const locateDmDashboardPlayerCard = (page, playerName) => {
   );
 };
 
-const runInteraction = async (page, scenario) => {
+const runFoesHubRowInteraction = async (row, {
+  settleFiniteAssets,
+  assertExpanded = async () => expect(row).toHaveAttribute('aria-expanded', 'true'),
+} = {}) => {
+  await row.evaluate((node) => node.scrollIntoView({
+    behavior: 'auto',
+    block: 'center',
+    inline: 'nearest',
+  }));
+  if (typeof settleFiniteAssets !== 'function') {
+    throw new TypeError('Foes Hub measurement requires finite-asset settlement.');
+  }
+  await settleFiniteAssets('after deterministic Foes Hub scroll');
+  await row.getByLabel('expand').click();
+  await assertExpanded(row);
+};
+
+const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
   switch (scenario.id) {
     case 'login-cold':
     case 'login-warm': {
@@ -1287,7 +1304,7 @@ const runInteraction = async (page, scenario) => {
     case 'foes-hub': {
       const row = page.locator('[role="button"]').filter({ hasText: 'Fixture foe 42' }).first();
       await expect(row).toBeVisible();
-      await row.getByLabel('expand').click();
+      await runFoesHubRowInteraction(row, { settleFiniteAssets });
       break;
     }
     case 'admin': {
@@ -1731,6 +1748,7 @@ module.exports = {
   resolvePlaywrightResponseStatus,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
+  runFoesHubRowInteraction,
   runStaticAssetWarmupPass,
   sanitizeFivePeerRequestFailure,
   runInteraction,

@@ -8,6 +8,11 @@ const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
+  MAX_RETAINED_FIVE_PEER_REQUEST_FAILURES,
+  createFivePeerFailureAttachment,
+  summarizeFivePeerSuccessDiagnostics,
+} = require('../../../scripts/performance/task07-five-peer-evidence');
+const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
   assertVisiblePeerStates,
   createPageAssetTracker,
@@ -43,7 +48,6 @@ const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
 const FIVE_PEER_ASSET_SETTLEMENT_TIMEOUT_MS = 15_000;
 const FIVE_PEER_TEST_TIMEOUT_MS = 240_000;
 const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
-const MAX_RETAINED_FIVE_PEER_REQUEST_FAILURES = 16;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
   'legacyPlacementDeadStateCleanupCompletedAt',
@@ -89,50 +93,6 @@ const settlePeerRequestFailureDiagnostics = async (peerPages) => {
   }
   throw new Error('Five-peer request-failure diagnostics did not reach a stable task count.');
 };
-
-const createRequestFailureAttachment = (peerPages) => ({
-  schemaVersion: 1,
-  peers: peerPages.map(({ role, diagnostics }) => ({
-    role,
-    counts: {
-      unexpected: diagnostics.failedRequestCount,
-      activeWriteTurnover: diagnostics.explainedActiveWriteTurnoverCount,
-      cleanupTransportCancellation: diagnostics.explainedCleanupTransportCancellationCount,
-      recaptchaCancellation: diagnostics.explainedRecaptchaCancellationCount,
-      diagnosticError: diagnostics.requestFailureDiagnosticErrorCount,
-    },
-    omitted: {
-      unexpected: Math.max(0, diagnostics.failedRequestCount - diagnostics.failedRequests.length),
-      activeWriteTurnover: Math.max(
-        0,
-        diagnostics.explainedActiveWriteTurnoverCount
-          - diagnostics.explainedActiveWriteTurnovers.length
-      ),
-      cleanupTransportCancellation: Math.max(
-        0,
-        diagnostics.explainedCleanupTransportCancellationCount
-          - diagnostics.explainedCleanupTransportCancellations.length
-      ),
-      recaptchaCancellation: Math.max(
-        0,
-        diagnostics.explainedRecaptchaCancellationCount
-          - diagnostics.explainedRecaptchaCancellations.length
-      ),
-      diagnosticError: Math.max(
-        0,
-        diagnostics.requestFailureDiagnosticErrorCount
-          - diagnostics.requestFailureDiagnosticErrors.length
-      ),
-    },
-    evidence: {
-      unexpected: diagnostics.failedRequests,
-      activeWriteTurnover: diagnostics.explainedActiveWriteTurnovers,
-      cleanupTransportCancellation: diagnostics.explainedCleanupTransportCancellations,
-      recaptchaCancellation: diagnostics.explainedRecaptchaCancellations,
-    },
-    diagnosticErrors: diagnostics.requestFailureDiagnosticErrors,
-  })),
-});
 
 const waitForRouteCleanup = async ({ page, role }) => {
   try {
@@ -604,8 +564,9 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       readiness: { 'shell-visible': true, 'data-ready': true, interactive: true },
       peerCount: pages.length,
       diagnostics: {
-        peers: pages.map(({ role, diagnostics }) => ({ role, ...diagnostics })),
-        explainedStartupWarnings,
+        ...summarizeFivePeerSuccessDiagnostics(pages, {
+          explainedStartupWarningCount: explainedStartupWarnings.length,
+        }),
         warmup: {
           forwardDurationMs: warmupForward.durationMs,
           reverseDurationMs: warmupReverse.durationMs,
@@ -669,7 +630,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     try {
       await settlePeerRequestFailureDiagnostics(pages);
       await testInfo.attach('five-peer-request-failure-evidence.json', {
-        body: JSON.stringify(createRequestFailureAttachment(pages), null, 2),
+        body: JSON.stringify(createFivePeerFailureAttachment(pages), null, 2),
         contentType: 'application/json',
       });
     } catch (diagnosticError) {

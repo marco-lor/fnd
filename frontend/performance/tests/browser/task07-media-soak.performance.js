@@ -12,6 +12,8 @@ const {
 } = require('../../../scripts/performance/common');
 const {
   drainRouteRenderScheduler,
+  isCrossfadeBattlemapObservation,
+  summarizeCrossfadeBattlemapObservation,
 } = require('../../../scripts/performance/task07-render-scheduler');
 const {
   countRouteResources,
@@ -200,6 +202,33 @@ const waitForRegistryLeaseState = async (page, {
   return observation;
 };
 
+const waitForCrossfadeLayerAndRegistry = async (page, { backgroundId }) => {
+  let lastObservation = null;
+  try {
+    await expect.poll(async () => {
+      const [layers, registry] = await Promise.all([
+        readBattlemapLayerState(page),
+        readImageRegistry(page),
+      ]);
+      lastObservation = summarizeCrossfadeBattlemapObservation({
+        ...layers,
+        registry,
+      });
+      return isCrossfadeBattlemapObservation(lastObservation);
+    }, {
+      intervals: [50, 100],
+      timeout: 10_000,
+    }).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `Task 07 crossfade layers did not overlap for ${backgroundId || 'unknown background'}: `
+      + JSON.stringify(lastObservation),
+      { cause: error }
+    );
+  }
+  return lastObservation;
+};
+
 const selectGalleryFolder = async (page, folderName) => {
   const expectedRowIds = backgroundCatalog
     .filter((background) => background.folderName === folderName)
@@ -250,12 +279,8 @@ const activateGalleryBackground = async (page, background) => {
   });
   await expect(useButton).toBeEnabled();
   await useButton.click();
-  const [transitionRegistry] = await Promise.all([
-    waitForRegistryLeaseState(page, {
-      backgroundId: background.id,
-      crossfade: true,
-      stage: 'crossfade',
-    }),
+  const [crossfadeObservation] = await Promise.all([
+    waitForCrossfadeLayerAndRegistry(page, { backgroundId: background.id }),
     expect(activeBadge).toHaveCount(1),
   ]);
   await waitForRegistryLeaseState(page, {
@@ -267,7 +292,7 @@ const activateGalleryBackground = async (page, background) => {
     backgroundId: background.id,
     stage: 'after-crossfade',
   });
-  return { changed: true, transitionRegistry };
+  return { changed: true, crossfadeObservation };
 };
 
 const traverseVisibleGallery = async (page) => {
@@ -404,6 +429,7 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
       const activatedBackgrounds = new Set();
       const attachedGalleryImages = new Set();
       let crossfadeLeaseObservations = 0;
+      const crossfadeLayerObservations = [];
       let tokenNodeCount = 0;
       for (const folder of galleryFolders) {
         await selectGalleryFolder(page, folder.name);
@@ -420,11 +446,14 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
           activatedBackgrounds.add(background.id);
           if (activation.changed) {
             crossfadeLeaseObservations += 1;
-            expect(activation.transitionRegistry.namedPins).toEqual(expect.arrayContaining([
-              ACTIVE_BOARD_PIN,
-              CROSSFADE_PIN,
-            ]));
-            expect(activation.transitionRegistry.pinnedRecordCount).toBeGreaterThanOrEqual(2);
+            crossfadeLayerObservations.push(activation.crossfadeObservation);
+            expect(activation.crossfadeObservation).toMatchObject({
+              activeLayerCount: 1,
+              hasActiveBoardPin: true,
+              hasCrossfadePin: true,
+              outgoingLayerCount: 1,
+            });
+            expect(activation.crossfadeObservation.pinnedRecordCount).toBeGreaterThanOrEqual(2);
           }
 
           if (background.id === 'perf-map') {
@@ -475,6 +504,10 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
         galleryBackgroundsVisited: visitedBackgrounds.size,
         tokenNodeCount,
         attachedGalleryImageCount: attachedGalleryImages.size,
+        crossfadeLayerObservations: crossfadeLayerObservations.slice(
+          0,
+          TASK07_SOAK_BACKGROUND_COUNT
+        ),
         crossfadeLeaseObservations,
         registry,
       });

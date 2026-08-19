@@ -1,4 +1,6 @@
 const RENDER_SCHEDULER_DRAIN_TIMEOUT_MS = 2_000;
+const ACTIVE_BOARD_PIN = 'grigliata-active-board';
+const CROSSFADE_PIN = 'grigliata-crossfade';
 
 const schedulerContext = ({ cycle, route }) => ({
   cycle: Number.isInteger(cycle) && cycle > 0 ? cycle : null,
@@ -27,6 +29,33 @@ const validateRenderSchedulerSnapshot = (snapshot, context = {}) => {
   }
   return snapshot;
 };
+
+const isValidBattlemapLayer = (layer) => (
+  Number(layer?.height) > 0
+  && Number(layer?.opacity) > 0
+  && Number(layer?.width) > 0
+);
+
+const summarizeCrossfadeBattlemapObservation = ({ active, outgoing, registry } = {}) => {
+  const namedPins = Array.isArray(registry?.namedPins) ? registry.namedPins : [];
+  return {
+    activeLayerCount: (Array.isArray(active) ? active : []).filter(isValidBattlemapLayer).length,
+    activeRequestCount: Number(registry?.activeRequestCount || 0),
+    hasActiveBoardPin: namedPins.includes(ACTIVE_BOARD_PIN),
+    hasCrossfadePin: namedPins.includes(CROSSFADE_PIN),
+    outgoingLayerCount: (Array.isArray(outgoing) ? outgoing : []).filter(isValidBattlemapLayer).length,
+    pinnedRecordCount: Number(registry?.pinnedRecordCount || 0),
+    queuedRequestCount: Number(registry?.queuedRequestCount || 0),
+  };
+};
+
+const isCrossfadeBattlemapObservation = (observation) => (
+  observation?.activeLayerCount === 1
+  && observation?.outgoingLayerCount === 1
+  && observation?.hasActiveBoardPin === true
+  && observation?.hasCrossfadePin === true
+  && observation?.pinnedRecordCount >= 2
+);
 
 const drainRouteRenderScheduler = async (page, {
   cycle,
@@ -97,7 +126,11 @@ const drainRouteRenderScheduler = async (page, {
 };
 
 module.exports = {
+  ACTIVE_BOARD_PIN,
+  CROSSFADE_PIN,
   RENDER_SCHEDULER_DRAIN_TIMEOUT_MS,
   drainRouteRenderScheduler,
+  isCrossfadeBattlemapObservation,
+  summarizeCrossfadeBattlemapObservation,
   validateRenderSchedulerSnapshot,
 };
