@@ -465,6 +465,7 @@ export const installPerformanceRuntime = () => {
         metric: 'long-task',
         value: entry.duration,
         unit: 'ms',
+        tags: { startTime: entry.startTime },
       }));
     });
     longTaskObserver.observe({ type: 'longtask', buffered: true });
@@ -608,7 +609,11 @@ export const installPerformanceRuntime = () => {
       return originalTimers.clearInterval(id);
     };
     window.requestAnimationFrame = (callback) => {
-      const resource = registerAsyncResource('animation-frame');
+      const resource = registerAsyncResource(
+        'animation-frame',
+        undefined,
+        describeTimerCallback(callback)
+      );
       const id = originalTimers.requestAnimationFrame((timestamp) => {
         resource.close();
         frames.delete(id);

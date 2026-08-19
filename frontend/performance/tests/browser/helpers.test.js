@@ -6,14 +6,17 @@ const path = require('node:path');
 const { sha256 } = require('../../../scripts/performance/common');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
+  assertVisiblePeerStates,
   assertStaticAssetWarmupInventory,
   countChangedDocumentsForTarget,
   createPageAssetTracker,
   createStaticAssetWarmupBatches,
   drainPageConnections,
   installDeterministicFontRoutes,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedFirestoreLifecycleCancellation,
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
@@ -22,18 +25,231 @@ const {
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
+  retainImageResourceTimings,
+  retainLongTaskEntries,
+  resolvePlaywrightResponseStatus,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
+  sanitizeFivePeerRequestFailure,
   scenarioRestorePatch,
+  summarizePeerTransitionTimings,
   summarizeResourceEntries,
   warmBrowserAssetDelivery,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('retains bounded native long-task timings with the phase active at task start', () => {
+  const events = [
+    { category: 'route', metric: 'start', timestamp: 5 },
+    { category: 'custom', metric: 'scenario-phase', timestamp: 20, tags: { phase: 'interaction' } },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 160,
+      value: 80,
+      tags: { startTime: 40 },
+    },
+    { category: 'custom', metric: 'scenario-phase', timestamp: 100, tags: { phase: 'post-interaction-settlement' } },
+    { category: 'route', metric: 'interactive', timestamp: 105 },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 240,
+      value: 120,
+      tags: { startTime: 110 },
+    },
+    {
+      category: 'runtime',
+      metric: 'long-task',
+      timestamp: 300,
+      value: 60,
+      tags: { startTime: 15 },
+    },
+  ];
+
+  assert.deepEqual(retainLongTaskEntries(events, { maximumEntries: 2 }), {
+    totalCount: 3,
+    entries: [
+      {
+        startTime: 40,
+        duration: 80,
+        scenarioPhase: 'interaction',
+        routePhase: 'route-start',
+      },
+      {
+        startTime: 110,
+        duration: 120,
+        scenarioPhase: 'post-interaction-settlement',
+        routePhase: 'interactive',
+      },
+    ],
+  });
+});
+
+test('separates write acknowledgement from each peer render settlement', () => {
+  assert.deepEqual(summarizePeerTransitionTimings({
+    startedAt: 1_000,
+    writeAcknowledgedAt: 1_120,
+    peerSettledAt: [1_180, 1_260, 1_200],
+  }), {
+    durationMs: 260,
+    writeAckMs: 120,
+    peerConvergenceMs: [180, 260, 200],
+    postWriteAckConvergenceMs: [60, 140, 80],
+  });
+});
+
+test('keeps an acknowledgement-dominant write in total peer convergence', () => {
+  assert.deepEqual(summarizePeerTransitionTimings({
+    startedAt: 1_000,
+    writeAcknowledgedAt: 1_400,
+    peerSettledAt: [1_100, 1_250],
+  }), {
+    durationMs: 400,
+    writeAckMs: 400,
+    peerConvergenceMs: [100, 250],
+    postWriteAckConvergenceMs: [0, 0],
+  });
+});
+
+test('drains every attached peer waiter before propagating a write rejection', async () => {
+  const writeFailure = new Error('write failed');
+  let releaseSlowPeer;
+  let slowPeerDrained = false;
+  const measurement = measurePeerTransitionTimings({
+    performWrite: async () => { throw writeFailure; },
+    waitForPeers: [
+      () => new Promise((resolve) => {
+        releaseSlowPeer = () => {
+          slowPeerDrained = true;
+          resolve();
+        };
+      }),
+      async () => { throw new Error('peer poll failed'); },
+    ],
+    now: () => 1_000,
+  });
+  let settled = false;
+  const outcome = measurement.then(
+    () => ({ status: 'resolved' }),
+    (error) => ({ status: 'rejected', error })
+  ).finally(() => { settled = true; });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+  releaseSlowPeer();
+  const result = await outcome;
+  assert.equal(slowPeerDrained, true);
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.error, writeFailure);
+});
+
+test('observes an early peer failure while the write is still pending', async () => {
+  const peerFailure = new Error('peer failed');
+  let acknowledgeWrite;
+  const measurement = measurePeerTransitionTimings({
+    performWrite: () => new Promise((resolve) => { acknowledgeWrite = resolve; }),
+    waitForPeers: [async () => { throw peerFailure; }],
+    now: () => 1_000,
+  });
+  let settled = false;
+  const outcome = measurement.then(
+    () => ({ status: 'resolved' }),
+    (error) => ({ status: 'rejected', error })
+  ).finally(() => { settled = true; });
+
+  await Promise.resolve();
+  assert.equal(settled, false);
+  acknowledgeWrite();
+  const result = await outcome;
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.error, peerFailure);
+});
+
+test('rejects a hidden peer before convergence timing is accepted', () => {
+  assert.deepEqual(
+    assertVisiblePeerStates(['visible', 'visible'], ['player', 'dm']),
+    ['visible', 'visible']
+  );
+  assert.throws(
+    () => assertVisiblePeerStates(['visible', 'hidden'], ['player', 'peer-2']),
+    /peer-2 must be visible during convergence measurement; received hidden/
+  );
+});
+
+const browserContextStub = (browserName, capture) => ({
+  addInitScript: async (script, argument) => capture(script, argument),
+  browser: () => ({
+    browserType: () => ({ name: () => browserName }),
+  }),
+});
+
+test('owned emulator WebKit contexts force the SDK long-polling fallback', async () => {
+  let initScript;
+  let initArgument;
+  await installOwnedEmulatorFirestoreTransport(browserContextStub(
+    'webkit',
+    (script, argument) => {
+      initScript = script;
+      initArgument = argument;
+    }
+  ));
+  assert.equal(typeof initScript, 'function');
+
+  const previousWindow = global.window;
+  global.window = {};
+  try {
+    initScript(initArgument);
+    assert.equal(global.window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__, true);
+  } finally {
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
+  }
+});
+
+test('owned emulator Chromium and Firefox contexts retain the SDK default transport', async () => {
+  for (const browserName of ['chromium', 'firefox']) {
+    let initScript;
+    let initArgument;
+    await installOwnedEmulatorFirestoreTransport(browserContextStub(
+      browserName,
+      (script, argument) => {
+        initScript = script;
+        initArgument = argument;
+      }
+    ));
+
+    const previousWindow = global.window;
+    global.window = { __FND_PERF_FORCE_FIRESTORE_LONG_POLLING__: true };
+    try {
+      initScript(initArgument);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(
+          global.window,
+          '__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__'
+        ),
+        false
+      );
+    } finally {
+      if (previousWindow === undefined) delete global.window;
+      else global.window = previousWindow;
+    }
+  }
+});
+
+test('owned emulator transport fails closed when the browser engine is unknown', async () => {
+  await assert.rejects(
+    installOwnedEmulatorFirestoreTransport(browserContextStub('unknown', () => {})),
+    /could not classify browser: unknown/
+  );
+});
 
 test('document accounting preserves totals and exposes route-scoped deliveries', () => {
   const capture = {
@@ -640,6 +856,96 @@ test('only successful demo Write-channel turnover is explained during the five-p
   }
 });
 
+test('five-peer request diagnostics retain protocol evidence without session values', () => {
+  const rawSid = 'I4sZ0bMAEY4XeEvOj7Ks4Q==';
+  const rawAid = '1452';
+  const rawZx = '9afmshv1j87t';
+  const rawDatabase = 'projects/demo-fnd-perf/databases/(default)';
+  const evidence = sanitizeFivePeerRequestFailure({
+    role: 'dm',
+    lifecyclePhase: 'route-active',
+    sequence: 3,
+    elapsedMs: 125.6,
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    responseStatus: undefined,
+    url: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Write/channel'
+      + `?VER=8&database=${encodeURIComponent(rawDatabase)}`
+      + `&SID=${encodeURIComponent(rawSid)}&RID=92943&AID=${rawAid}`
+      + `&TYPE=xmlhttp&zx=${rawZx}&t=1&${encodeURIComponent('unsafe=key')}=discarded`,
+  });
+
+  assert.deepEqual(evidence, {
+    schemaVersion: 1,
+    role: 'dm',
+    lifecyclePhase: 'route-active',
+    sequence: 3,
+    elapsedMs: 126,
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    path: '/google.firestore.v1.Firestore/Write/channel',
+    responseObserved: false,
+    responseStatus: null,
+    ownedEmulatorOrigin: true,
+    expectedDatabase: true,
+    operation: 'Write',
+    query: {
+      keys: ['AID', 'RID', 'SID', 'TYPE', 'VER', '[redacted]', 'database', 't', 'zx'],
+      omittedKeyCount: 0,
+      protocol: {
+        ver: '8',
+        rid: 'numeric',
+        ci: 'missing',
+        type: 'xmlhttp',
+        t: '1',
+      },
+      opaque: {
+        sid: { present: true, length: rawSid.length, format: 'token' },
+        aid: { present: true, length: rawAid.length, format: 'digits' },
+        zx: { present: true, length: rawZx.length, format: 'token' },
+      },
+    },
+  });
+  const serialized = JSON.stringify(evidence);
+  for (const secret of [rawSid, rawAid, rawZx, rawDatabase, 'unsafe=key']) {
+    assert.equal(serialized.includes(secret), false, `redacts ${secret}`);
+  }
+  assert.equal(sanitizeFivePeerRequestFailure({
+    failure: `net::ERR_${'A'.repeat(100)}`,
+  }).failure, 'other');
+});
+
+test('five-peer response diagnostics prefer observed status and safely query the request fallback', async () => {
+  const observedRequest = {
+    response: async () => {
+      throw new Error('the response fallback must not run when an event status exists');
+    },
+  };
+  const observedStatuses = new WeakMap([[observedRequest, 200]]);
+  assert.equal(
+    await resolvePlaywrightResponseStatus(observedRequest, observedStatuses),
+    200
+  );
+
+  const fallbackRequest = {
+    response: async () => ({ status: () => 204 }),
+  };
+  assert.equal(
+    await resolvePlaywrightResponseStatus(fallbackRequest, new WeakMap()),
+    204
+  );
+  assert.equal(await resolvePlaywrightResponseStatus({
+    response: async () => null,
+  }, new WeakMap()), undefined);
+  assert.equal(await resolvePlaywrightResponseStatus({
+    response: async () => {
+      throw new Error('request was already disposed');
+    },
+  }, new WeakMap()), undefined);
+});
+
 test('only intentional Task 07 fixture-image detach aborts are explained', () => {
   const exact = {
     lifecyclePhase: 'auth-transition',
@@ -759,6 +1065,23 @@ test('route measurements wire the strict demo reCAPTCHA report-only classifier',
   );
   assert.match(routeSource, /isExpectedDemoRecaptchaReportOnlyWarning\(text, \{baseURL\}\)/);
   assert.match(routeSource, /explainedRecaptchaReportOnlyWarnings\.push\(text\.slice\(0, 500\)\)/);
+});
+
+test('authoritative image diagnostics retain a bounded head and tail', () => {
+  const timings = Array.from({ length: 200 }, (_, index) => ({ startTime: index }));
+  const retained = retainImageResourceTimings(timings);
+  assert.equal(retained.length, MAX_RETAINED_IMAGE_RESOURCE_TIMINGS);
+  assert.deepEqual(
+    retained.slice(0, 32).map(({ startTime }) => startTime),
+    Array.from({ length: 32 }, (_, index) => index)
+  );
+  assert.deepEqual(
+    retained.slice(32).map(({ startTime }) => startTime),
+    Array.from({ length: 96 }, (_, index) => index + 104)
+  );
+  const alreadyBounded = timings.slice(0, 4);
+  assert.equal(retainImageResourceTimings(alreadyBounded), alreadyBounded);
+  assert.deepEqual(retainImageResourceTimings(null), []);
 });
 
 test('font routing keeps optional Google font requests deterministic and local', async () => {
@@ -913,6 +1236,14 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   tracker.begin(finiteFetch);
   tracker.begin(firestoreStream);
   assert.equal(tracker.pendingCount(), 2);
+  assert.deepEqual(tracker.snapshot(), {
+    pendingCount: 2,
+    quietForMs: 0,
+    pending: [
+      { ageMs: 0, path: 'unknown', resourceType: 'script' },
+      { ageMs: 0, path: '/api/config', resourceType: 'fetch' },
+    ],
+  });
   now = 460;
   tracker.complete(script);
   assert.equal(tracker.pendingCount(), 1);
@@ -920,12 +1251,62 @@ test('page asset tracking waits for finite fetches and ignores known streams and
   assert.equal(tracker.isQuiet(), false);
   now = 959;
   assert.equal(tracker.isQuiet(), false);
+  assert.deepEqual(tracker.snapshot(), {
+    pendingCount: 0,
+    quietForMs: 499,
+    pending: [],
+  });
   now = 960;
   assert.equal(tracker.isQuiet(), true);
   tracker.beginQuietWindow();
   assert.equal(tracker.isQuiet(), false);
   now = 1460;
   assert.equal(tracker.isQuiet(), true);
+});
+
+test('image registry settlement rejects early idle and waits for a stable complete fixture', async () => {
+  const registrySnapshots = [
+    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
+    { loadedRecordCount: 14, activeRequestCount: 0, queuedRequestCount: 0 },
+    { loadedRecordCount: 14, activeRequestCount: 2, queuedRequestCount: 0 },
+    {
+      recordCount: 40,
+      loadedRecordCount: 40,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      decodedBytes: 40 * 36_864,
+      unpinnedDecodedBytes: 39 * 36_864,
+      unpinnedRecordCount: 39,
+    },
+    {
+      recordCount: 40,
+      loadedRecordCount: 40,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      decodedBytes: 40 * 36_864,
+      unpinnedDecodedBytes: 39 * 36_864,
+      unpinnedRecordCount: 39,
+    },
+  ];
+  let evaluateCalls = 0;
+  const page = {
+    evaluate: async () => {
+      evaluateCalls += 1;
+      if (evaluateCalls === 1) return undefined;
+      return registrySnapshots.shift();
+    },
+    waitForTimeout: async () => new Promise((resolve) => setTimeout(resolve, 2)),
+  };
+
+  const settled = await waitForImageRegistrySettlement(page, {
+    minimumLoadedRecords: 40,
+    quietMs: 1,
+  });
+
+  assert.equal(settled.loadedRecordCount, 40);
+  assert.equal(settled.activeRequestCount, 0);
+  assert.equal(evaluateCalls, 6);
+  assert.equal(registrySnapshots.length, 0);
 });
 
 test('resource summaries preserve requests and separate canonical inventory from streams', () => {

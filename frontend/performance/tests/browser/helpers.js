@@ -28,7 +28,41 @@ const FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS = [
   't',
   'zx',
 ];
+const FIVE_PEER_DIAGNOSTIC_ROLES = new Set(['player', 'peer-2', 'peer-3', 'peer-4', 'dm']);
+const FIVE_PEER_DIAGNOSTIC_PHASES = new Set([
+  'route-navigation',
+  'route-active',
+  'route-cleanup',
+]);
+const FIVE_PEER_DIAGNOSTIC_RESOURCE_TYPES = new Set([
+  'document',
+  'fetch',
+  'image',
+  'media',
+  'script',
+  'stylesheet',
+  'xhr',
+]);
+const FIVE_PEER_DIAGNOSTIC_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT']);
+const MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS = 16;
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
+const MAX_RETAINED_IMAGE_RESOURCE_TIMINGS = 128;
+const MAX_RETAINED_LONG_TASK_ENTRIES = 64;
+const LONG_TASK_SCENARIO_PHASES = new Set([
+  'route-readiness',
+  'route-active',
+  'asset-settlement',
+  'lcp-settlement',
+  'interaction',
+  'post-interaction-settlement',
+  'capture',
+]);
+const LONG_TASK_ROUTE_PHASES = new Map([
+  ['start', 'route-start'],
+  ['shell-visible', 'shell-visible'],
+  ['data-ready', 'data-ready'],
+  ['interactive', 'interactive'],
+]);
 
 const demoFirestoreStreamOperation = (url) => {
   let parsed;
@@ -493,6 +527,122 @@ const isExpectedFirestoreLifecycleCancellation = ({
   return Boolean(operation && allowedOperations.has(operation));
 };
 
+const isHttpResponseStatus = (value) => (
+  Number.isInteger(value) && value >= 0 && value <= 999
+);
+
+const resolvePlaywrightResponseStatus = async (request, observedStatuses) => {
+  const observed = observedStatuses?.get?.(request);
+  if (isHttpResponseStatus(observed)) return observed;
+  try {
+    const response = await request?.response?.();
+    const status = response?.status?.();
+    return isHttpResponseStatus(status) ? status : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+};
+
+const classifyProtocolLiteral = (value, expected) => {
+  if (value === null) return 'missing';
+  return expected.includes(value) ? value : 'other';
+};
+
+const classifyRequestId = (value) => {
+  if (value === null) return 'missing';
+  if (value === 'rpc') return 'rpc';
+  if (/^\d+$/.test(value)) return 'numeric';
+  return 'other';
+};
+
+const describeOpaqueQueryValue = (value, pattern, matchedFormat = 'token') => ({
+  present: value !== null,
+  length: value === null ? 0 : Math.min(value.length, 4096),
+  format: value === null ? 'missing' : pattern.test(value) ? matchedFormat : 'other',
+});
+
+const sanitizeFivePeerRequestFailure = ({
+  role,
+  lifecyclePhase,
+  sequence,
+  elapsedMs,
+  resourceType,
+  failure,
+  method,
+  responseStatus,
+  url,
+} = {}) => {
+  let parsed = null;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    // Invalid URLs stay fail-closed while retaining only categorical evidence.
+  }
+  const rawKeys = parsed ? [...parsed.searchParams.keys()] : [];
+  const sanitizedKeys = rawKeys
+    .map((key) => (/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(key) ? key : '[redacted]'))
+    .sort();
+  const retainedKeys = sanitizedKeys.slice(0, MAX_FIVE_PEER_DIAGNOSTIC_QUERY_KEYS);
+  const pathname = parsed?.pathname || '';
+  const operation = pathname.match(FIRESTORE_STREAM_PATH)?.[1] || null;
+  const safePath = operation && pathname.length <= 160 ? pathname : '[redacted]';
+  const status = isHttpResponseStatus(responseStatus) ? responseStatus : null;
+  const safeElapsedMs = Number.isFinite(elapsedMs)
+    ? Math.min(600_000, Math.max(0, Math.round(elapsedMs)))
+    : 0;
+  const failureText = String(failure || '');
+  const safeFailure = failureText.length <= 64 && /^net::ERR_[A-Z0-9_]+$/.test(failureText)
+    ? failureText
+    : failure === 'unknown' ? 'unknown' : 'other';
+
+  return {
+    schemaVersion: 1,
+    role: FIVE_PEER_DIAGNOSTIC_ROLES.has(role) ? role : 'unknown',
+    lifecyclePhase: FIVE_PEER_DIAGNOSTIC_PHASES.has(lifecyclePhase)
+      ? lifecyclePhase
+      : 'unknown',
+    sequence: Number.isSafeInteger(sequence) && sequence > 0 ? sequence : 0,
+    elapsedMs: safeElapsedMs,
+    resourceType: FIVE_PEER_DIAGNOSTIC_RESOURCE_TYPES.has(resourceType)
+      ? resourceType
+      : 'other',
+    failure: safeFailure,
+    method: FIVE_PEER_DIAGNOSTIC_METHODS.has(method) ? method : 'other',
+    path: safePath,
+    responseObserved: status !== null,
+    responseStatus: status,
+    ownedEmulatorOrigin: parsed?.origin === FIRESTORE_EMULATOR_ORIGIN,
+    expectedDatabase: parsed?.searchParams.get('database') === FIRESTORE_EMULATOR_DATABASE,
+    operation,
+    query: {
+      keys: retainedKeys,
+      omittedKeyCount: Math.max(0, sanitizedKeys.length - retainedKeys.length),
+      protocol: {
+        ver: classifyProtocolLiteral(parsed?.searchParams.get('VER') ?? null, ['8']),
+        rid: classifyRequestId(parsed?.searchParams.get('RID') ?? null),
+        ci: classifyProtocolLiteral(parsed?.searchParams.get('CI') ?? null, ['0', '1']),
+        type: classifyProtocolLiteral(parsed?.searchParams.get('TYPE') ?? null, ['xmlhttp']),
+        t: classifyProtocolLiteral(parsed?.searchParams.get('t') ?? null, ['1']),
+      },
+      opaque: {
+        sid: describeOpaqueQueryValue(
+          parsed?.searchParams.get('SID') ?? null,
+          /^[A-Za-z0-9+/=_-]{8,}$/
+        ),
+        aid: describeOpaqueQueryValue(
+          parsed?.searchParams.get('AID') ?? null,
+          /^\d+$/,
+          'digits'
+        ),
+        zx: describeOpaqueQueryValue(
+          parsed?.searchParams.get('zx') ?? null,
+          /^[A-Za-z0-9_-]{6,}$/
+        ),
+      },
+    },
+  };
+};
+
 const isExpectedFivePeerFirestoreWriteTurnover = ({
   lifecyclePhase,
   resourceType,
@@ -655,7 +805,7 @@ const createPageAssetTracker = ({
     const requestUrl = typeof request.url === 'function' ? request.url() : '';
     return !demoFirestoreStreamOperation(requestUrl);
   };
-  const pending = new Set();
+  const pending = new Map();
   let lastActivityAt = now();
   const touch = () => {
     lastActivityAt = now();
@@ -663,7 +813,7 @@ const createPageAssetTracker = ({
   return {
     begin(request) {
       if (!shouldTrack(request)) return;
-      pending.add(request);
+      pending.set(request, { startedAt: now() });
       touch();
     },
     complete(request) {
@@ -679,10 +829,110 @@ const createPageAssetTracker = ({
     pendingCount() {
       return pending.size;
     },
+    snapshot() {
+      const capturedAt = now();
+      return {
+        pendingCount: pending.size,
+        quietForMs: Math.max(0, capturedAt - lastActivityAt),
+        pending: [...pending.entries()].map(([request, metadata]) => {
+          const rawUrl = typeof request?.url === 'function' ? request.url() : '';
+          let path = 'unknown';
+          try {
+            path = new URL(rawUrl).pathname || '/';
+          } catch (_error) {
+            // Diagnostics intentionally omit malformed or non-URL request text.
+          }
+          return {
+            ageMs: Math.max(0, capturedAt - metadata.startedAt),
+            path,
+            resourceType: typeof request?.resourceType === 'function'
+              ? request.resourceType()
+              : 'unknown',
+          };
+        }),
+      };
+    },
   };
 };
 
+const flushBrowserObservers = async (page) => {
+  await page.evaluate(() => new Promise((resolve) => {
+    const afterIdle = () => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(afterIdle, { timeout: 250 });
+      return;
+    }
+    window.setTimeout(afterIdle, 0);
+  }));
+};
+
+const waitForImageRegistrySettlement = async (page, {
+  minimumLoadedRecords = 0,
+  quietMs = 250,
+  timeoutMs = 15_000,
+} = {}) => {
+  await flushBrowserObservers(page);
+  const deadline = Date.now() + timeoutMs;
+  let lastSignature = '';
+  let unchangedSince = Date.now();
+  let latest = null;
+
+  while (Date.now() < deadline) {
+    latest = await page.evaluate(() => {
+      const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
+      return typeof getStats === 'function' ? getStats() : null;
+    });
+    const settled = latest
+      && Number(latest.loadedRecordCount) >= minimumLoadedRecords
+      && Number(latest.activeRequestCount) === 0
+      && Number(latest.queuedRequestCount) === 0;
+    const signature = settled ? JSON.stringify([
+      Number(latest.recordCount),
+      Number(latest.loadedRecordCount),
+      Number(latest.decodedBytes),
+      Number(latest.unpinnedDecodedBytes),
+      Number(latest.unpinnedRecordCount),
+    ]) : '';
+
+    if (signature && signature === lastSignature) {
+      if (Date.now() - unchangedSince >= quietMs) return latest;
+    } else {
+      lastSignature = signature;
+      unchangedSince = Date.now();
+    }
+    await page.waitForTimeout(50);
+  }
+
+  throw new Error(
+    `Image registry did not settle: ${JSON.stringify({ minimumLoadedRecords, latest })}`
+  );
+};
+
+const installOwnedEmulatorFirestoreTransport = async (context) => {
+  if (!context || typeof context.addInitScript !== 'function') {
+    throw new TypeError('Owned emulator Firestore transport requires a browser context.');
+  }
+  const browserName = context.browser?.()?.browserType?.()?.name?.();
+  if (!['chromium', 'firefox', 'webkit'].includes(browserName)) {
+    throw new TypeError(`Owned emulator Firestore transport could not classify browser: ${browserName || 'unknown'}.`);
+  }
+  await context.addInitScript(({ forceLongPolling }) => {
+    // WebKit can buffer the emulator's WebChannel response indefinitely. Use
+    // the SDK-supported fallback only for that affected engine. Chromium and
+    // Firefox retain the SDK default because forced long polling can strand a
+    // later target on their shared channel under multi-context load.
+    if (forceLongPolling) {
+      window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true;
+    } else {
+      delete window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__;
+    }
+  }, { forceLongPolling: browserName === 'webkit' });
+};
+
 const installBootstrap = async (context, scenario, iteration) => {
+  await installOwnedEmulatorFirestoreTransport(context);
   await context.addInitScript(({
     scenarioId,
     role,
@@ -692,6 +942,37 @@ const installBootstrap = async (context, scenario, iteration) => {
     resourceTimingBufferSize,
   }) => {
     window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__ = false;
+    window.__FND_PERF_LCP_CANDIDATES__ = [];
+    if (
+      typeof PerformanceObserver !== 'undefined'
+      && PerformanceObserver.supportedEntryTypes?.includes('largest-contentful-paint')
+    ) {
+      const lcpObserver = new PerformanceObserver((list) => {
+        list.getEntries().forEach((entry) => {
+          const element = entry.element;
+          const rect = element?.getBoundingClientRect?.();
+          window.__FND_PERF_LCP_CANDIDATES__.push({
+            startTime: Number(entry.startTime) || 0,
+            renderTime: Number(entry.renderTime) || 0,
+            loadTime: Number(entry.loadTime) || 0,
+            size: Number(entry.size) || 0,
+            tagName: String(element?.tagName || '').toLowerCase().slice(0, 32),
+            className: typeof element?.className === 'string'
+              ? element.className.slice(0, 240)
+              : '',
+            testId: String(element?.getAttribute?.('data-testid') || '').slice(0, 120),
+            textLength: String(element?.textContent || '').length,
+            childElementCount: Number(element?.childElementCount) || 0,
+            width: Number(rect?.width) || 0,
+            height: Number(rect?.height) || 0,
+          });
+          if (window.__FND_PERF_LCP_CANDIDATES__.length > 24) {
+            window.__FND_PERF_LCP_CANDIDATES__.shift();
+          }
+        });
+      });
+      lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+    }
     if (typeof performance.setResourceTimingBufferSize === 'function') {
       performance.setResourceTimingBufferSize(resourceTimingBufferSize);
     }
@@ -1008,11 +1289,29 @@ const captureBrowserMetrics = async (page, diagnostics) => {
       transferSize: entry.transferSize,
       encodedBodySize: entry.encodedBodySize,
     }));
+    const imageResourceTimings = performance.getEntriesByType('resource')
+      .filter((entry) => entry.initiatorType === 'img')
+      .map((entry) => ({
+        startTime: Number(entry.startTime) || 0,
+        fetchStart: Number(entry.fetchStart) || 0,
+        requestStart: Number(entry.requestStart) || 0,
+        responseStart: Number(entry.responseStart) || 0,
+        responseEnd: Number(entry.responseEnd) || 0,
+        duration: Number(entry.duration) || 0,
+        transferSize: Number(entry.transferSize) || 0,
+        encodedBodySize: Number(entry.encodedBodySize) || 0,
+      }));
     return {
       snapshot,
       resourceEntries,
       resourceTimingBufferOverflow: Boolean(window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__),
-      diagnostics: capturedDiagnostics,
+      diagnostics: {
+        ...capturedDiagnostics,
+        lcpCandidates: Array.isArray(window.__FND_PERF_LCP_CANDIDATES__)
+          ? window.__FND_PERF_LCP_CANDIDATES__
+          : [],
+        imageResourceTimings,
+      },
     };
   }, diagnostics);
   let cdp = null;
@@ -1031,6 +1330,155 @@ const captureBrowserMetrics = async (page, diagnostics) => {
     resources: summarizeResourceEntries(resourceEntries),
     cdp,
   };
+};
+
+const retainImageResourceTimings = (timings) => {
+  if (!Array.isArray(timings)) return [];
+  if (timings.length <= MAX_RETAINED_IMAGE_RESOURCE_TIMINGS) return timings;
+  const retainedHeadCount = 32;
+  return [
+    ...timings.slice(0, retainedHeadCount),
+    ...timings.slice(-(MAX_RETAINED_IMAGE_RESOURCE_TIMINGS - retainedHeadCount)),
+  ];
+};
+
+const retainLongTaskEntries = (events, {
+  maximumEntries = MAX_RETAINED_LONG_TASK_ENTRIES,
+} = {}) => {
+  if (!Array.isArray(events)) return { totalCount: 0, entries: [] };
+  if (!Number.isInteger(maximumEntries) || maximumEntries < 1) {
+    throw new TypeError('Long-task diagnostics require a positive integer bound.');
+  }
+  const routePhaseMarkers = events.flatMap((event) => {
+    const timestamp = Number(event?.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp < 0) return [];
+    if (event.category === 'route' && LONG_TASK_ROUTE_PHASES.has(event.metric)) {
+      return [{ timestamp, phase: LONG_TASK_ROUTE_PHASES.get(event.metric) }];
+    }
+    return [];
+  }).sort((left, right) => left.timestamp - right.timestamp);
+  const scenarioPhaseMarkers = events.flatMap((event) => {
+    const timestamp = Number(event?.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp < 0) return [];
+    const phase = event?.tags?.phase;
+    if (
+      event.category === 'custom'
+      && event.metric === 'scenario-phase'
+      && LONG_TASK_SCENARIO_PHASES.has(phase)
+    ) {
+      return [{ timestamp, phase }];
+    }
+    return [];
+  }).sort((left, right) => left.timestamp - right.timestamp);
+  const phaseAt = (markers, startTime) => markers.reduce((latest, marker) => (
+    marker.timestamp <= startTime ? marker.phase : latest
+  ), 'unattributed');
+  const longTasks = events.flatMap((event) => {
+    if (event?.category !== 'runtime' || event?.metric !== 'long-task') return [];
+    const startTime = Number(event?.tags?.startTime);
+    const duration = Number(event?.value);
+    if (!Number.isFinite(startTime) || startTime < 0 || !Number.isFinite(duration) || duration < 0) {
+      return [];
+    }
+    return [{
+      startTime,
+      duration,
+      scenarioPhase: phaseAt(scenarioPhaseMarkers, startTime),
+      routePhase: phaseAt(routePhaseMarkers, startTime),
+    }];
+  });
+  const entries = [...longTasks]
+    .sort((left, right) => right.duration - left.duration || left.startTime - right.startTime)
+    .slice(0, maximumEntries)
+    .sort((left, right) => left.startTime - right.startTime);
+  return { totalCount: longTasks.length, entries };
+};
+
+const summarizePeerTransitionTimings = ({
+  startedAt,
+  writeAcknowledgedAt,
+  peerSettledAt,
+}) => {
+  const start = Number(startedAt);
+  const writeAck = Number(writeAcknowledgedAt);
+  const peerSettlements = Array.isArray(peerSettledAt) ? peerSettledAt.map(Number) : [];
+  if (
+    !Number.isFinite(start)
+    || !Number.isFinite(writeAck)
+    || writeAck < start
+    || !peerSettlements.length
+    || peerSettlements.some((settledAt) => !Number.isFinite(settledAt) || settledAt < start)
+  ) {
+    throw new TypeError('Peer transition timing requires ordered finite timestamps.');
+  }
+  const writeAckMs = writeAck - start;
+  const peerConvergenceMs = peerSettlements.map((settledAt) => settledAt - start);
+  return {
+    durationMs: Math.max(writeAckMs, ...peerConvergenceMs),
+    writeAckMs,
+    peerConvergenceMs,
+    postWriteAckConvergenceMs: peerConvergenceMs.map((duration) => (
+      Math.max(0, duration - writeAckMs)
+    )),
+  };
+};
+
+const assertVisiblePeerStates = (visibilityStates, roles) => {
+  if (
+    !Array.isArray(visibilityStates)
+    || !Array.isArray(roles)
+    || !visibilityStates.length
+    || visibilityStates.length !== roles.length
+  ) {
+    throw new TypeError('Peer visibility requires one state for every role.');
+  }
+  visibilityStates.forEach((visibilityState, index) => {
+    if (visibilityState !== 'visible') {
+      throw new Error(
+        `${String(roles[index] || `peer-${index + 1}`)} must be visible during convergence measurement; `
+        + `received ${String(visibilityState || 'unknown')}.`
+      );
+    }
+  });
+  return visibilityStates;
+};
+
+const measurePeerTransitionTimings = async ({
+  performWrite,
+  waitForPeers,
+  now = Date.now,
+}) => {
+  if (
+    typeof performWrite !== 'function'
+    || !Array.isArray(waitForPeers)
+    || !waitForPeers.length
+    || waitForPeers.some((waitForPeer) => typeof waitForPeer !== 'function')
+    || typeof now !== 'function'
+  ) {
+    throw new TypeError('Peer transition measurement requires a write and peer waiters.');
+  }
+  const startedAt = now();
+  const peerSettlementsPromise = Promise.allSettled(waitForPeers.map(async (waitForPeer) => {
+    await waitForPeer();
+    return now();
+  }));
+  let writeAcknowledgedAt = null;
+  let writeError = null;
+  try {
+    await performWrite();
+    writeAcknowledgedAt = now();
+  } catch (error) {
+    writeError = error;
+  }
+  const peerSettlements = await peerSettlementsPromise;
+  if (writeError) throw writeError;
+  const rejectedPeer = peerSettlements.find((settlement) => settlement.status === 'rejected');
+  if (rejectedPeer) throw rejectedPeer.reason;
+  return summarizePeerTransitionTimings({
+    startedAt,
+    writeAcknowledgedAt,
+    peerSettledAt: peerSettlements.map((settlement) => settlement.value),
+  });
 };
 
 const aggregateMetrics = (capture, cleanup) => {
@@ -1206,8 +1654,11 @@ const restoreScenarioState = async (scenarioId) => {
 module.exports = {
   ACCOUNT,
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
+  MAX_RETAINED_LONG_TASK_ENTRIES,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
+  assertVisiblePeerStates,
   captureBrowserMetrics,
   countChangedDocumentsForTarget,
   countRouteResources,
@@ -1215,8 +1666,10 @@ module.exports = {
   createStaticAssetWarmupBatches,
   assertStaticAssetWarmupInventory,
   drainPageConnections,
+  flushBrowserObservers,
   installBootstrap,
   installDeterministicFontRoutes,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedFirestoreLifecycleCancellation,
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
@@ -1225,20 +1678,27 @@ module.exports = {
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
+  retainImageResourceTimings,
+  retainLongTaskEntries,
+  resolvePlaywrightResponseStatus,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
+  sanitizeFivePeerRequestFailure,
   runInteraction,
   scenarioRestorePatch,
+  summarizePeerTransitionTimings,
   summarizeResourceEntries,
   storageStateForRole,
   warmBrowserAssetDelivery,
   waitForBridge,
   waitForKonvaTokenMove,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   writeScenarioRaw,
   writeScenarioResult,

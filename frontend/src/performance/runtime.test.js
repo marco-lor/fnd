@@ -120,6 +120,45 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
+  test('retains the native start time for long-task phase attribution', () => {
+    const originalPerformanceObserver = global.PerformanceObserver;
+    let observerCallback;
+    class MockPerformanceObserver {
+      static supportedEntryTypes = ['longtask'];
+
+      constructor(callback) {
+        observerCallback = callback;
+      }
+
+      observe() {}
+
+      disconnect() {}
+    }
+    global.PerformanceObserver = MockPerformanceObserver;
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'long-task-attribution', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      observerCallback({
+        getEntries: () => [{ startTime: 123.5, duration: 87.25 }],
+      });
+
+      const event = window.__FND_PERF__.snapshot().events.find(
+        (candidate) => candidate.category === 'runtime' && candidate.metric === 'long-task'
+      );
+      expect(event).toMatchObject({
+        value: 87.25,
+        unit: 'ms',
+        tags: { startTime: 123.5 },
+      });
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+      if (originalPerformanceObserver === undefined) delete global.PerformanceObserver;
+      else global.PerformanceObserver = originalPerformanceObserver;
+    }
+  });
+
   test('tracks and releases route-owned timers', () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'timer-test', actorRole: 'player' };
@@ -130,6 +169,35 @@ describe('performance runtime', () => {
     window.clearInterval(interval);
     expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
     runtime.teardownPerformanceRuntimeForTests();
+  });
+
+  test('records bounded callback diagnostics for route-owned animation frames', () => {
+    const originalAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    window.requestAnimationFrame = jest.fn(() => 73);
+    window.cancelAnimationFrame = jest.fn();
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'frame-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const frame = window.requestAnimationFrame(function routeRenderFrame() {});
+
+      expect(window.__FND_PERF__.snapshot().activeResourceDiagnostics).toContainEqual(
+        expect.objectContaining({
+          callback: 'function routeRenderFrame() {}',
+          ownerRoute: '/grigliata',
+          type: 'animation-frame',
+        })
+      );
+
+      window.cancelAnimationFrame(frame);
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+      window.requestAnimationFrame = originalAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
   });
 
   test('propagates Firestore ownership without claiming an uncorrelated WebChannel-shaped timer', async () => {
