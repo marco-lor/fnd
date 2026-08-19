@@ -13,6 +13,9 @@ const passingRepeatability = () => ({
   gateMode: 'strict',
   gateStatus: 'pass',
   maximumVariancePercent: 15,
+  observedMaximumVariancePercent: 12.5,
+  maximumGatedVariancePercent: 7.5,
+  runIds: ['run-a', 'run-b'],
 });
 
 const aggregateFor = (repeatability) => ({
@@ -76,12 +79,41 @@ test('baseline acceptance rejects custom thresholds and aggregate disagreement',
     'gateMode',
     'gateStatus',
     'maximumVariancePercent',
+    'observedMaximumVariancePercent',
+    'maximumGatedVariancePercent',
+    'runIds',
   ]) {
     const aggregate = aggregateFor(repeatability);
-    aggregate.repeatability[field] = field === 'maximumVariancePercent' ? 14 : 'mismatch';
+    aggregate.repeatability[field] = field === 'maximumVariancePercent'
+      ? 14
+      : field === 'runIds'
+        ? ['run-a', 'different-run']
+        : field.includes('VariancePercent')
+          ? 99
+          : 'mismatch';
     assert.throws(
       () => assertBaselineRepeatability(repeatability, aggregate),
       /disagrees with the authoritative aggregate/i
     );
+  }
+});
+
+test('baseline acceptance requires finite raw and gated variance evidence', () => {
+  const repeatability = passingRepeatability();
+  const equivalentAggregate = aggregateFor(repeatability);
+  equivalentAggregate.repeatability.runIds = [...repeatability.runIds];
+  assert.doesNotThrow(() => assertBaselineRepeatability(repeatability, equivalentAggregate));
+
+  for (const field of [
+    'observedMaximumVariancePercent',
+    'maximumGatedVariancePercent',
+  ]) {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const candidate = { ...repeatability, [field]: value };
+      assert.throws(
+        () => assertBaselineRepeatability(candidate, aggregateFor(candidate)),
+        /finite variance evidence/i
+      );
+    }
   }
 });

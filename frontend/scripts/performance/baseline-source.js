@@ -29,6 +29,25 @@ const BASELINE_REPEATABILITY_CONTRACT = Object.freeze({
   gateStatus: 'pass',
 });
 
+const BASELINE_VARIANCE_FIELDS = Object.freeze([
+  'maximumVariancePercent',
+  'observedMaximumVariancePercent',
+  'maximumGatedVariancePercent',
+]);
+
+const BASELINE_AGGREGATE_FIELDS = Object.freeze([
+  ...Object.keys(BASELINE_REPEATABILITY_CONTRACT),
+  ...BASELINE_VARIANCE_FIELDS,
+  'runIds',
+]);
+
+const sameRunIds = (left, right) => (
+  Array.isArray(left)
+  && Array.isArray(right)
+  && left.length === right.length
+  && left.every((runId, index) => runId === right[index])
+);
+
 const assertBaselineRepeatability = (repeatability, aggregate) => {
   for (const [field, expected] of Object.entries(BASELINE_REPEATABILITY_CONTRACT)) {
     if (repeatability?.[field] !== expected) {
@@ -42,11 +61,18 @@ const assertBaselineRepeatability = (repeatability, aggregate) => {
       `Performance baselines require the ${PERFORMANCE_MAX_VARIANCE_PERCENT}% timing variance contract.`
     );
   }
-  for (const field of [
-    ...Object.keys(BASELINE_REPEATABILITY_CONTRACT),
-    'maximumVariancePercent',
-  ]) {
-    if (aggregate?.repeatability?.[field] !== repeatability[field]) {
+  for (const field of BASELINE_VARIANCE_FIELDS) {
+    if (!Number.isFinite(repeatability?.[field])
+      || repeatability[field] < 0
+      || repeatability[field] > 100) {
+      throw new Error('Performance baselines require finite variance evidence from 0 to 100 percent.');
+    }
+  }
+  for (const field of BASELINE_AGGREGATE_FIELDS) {
+    const matches = field === 'runIds'
+      ? sameRunIds(aggregate?.repeatability?.[field], repeatability[field])
+      : aggregate?.repeatability?.[field] === repeatability[field];
+    if (!matches) {
       throw new Error(
         'The repeatability report disagrees with the authoritative aggregate.'
       );
