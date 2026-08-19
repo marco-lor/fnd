@@ -87,14 +87,22 @@ const findSingleStep = (steps, label, predicate) => {
   return matches[0];
 };
 
+const extractPerformanceArtifactPathEntries = (step, label) => {
+  const withMapping = /^        with:\r?$/m.exec(step);
+  assert.ok(withMapping, `${label} must contain a with mapping`);
+  const withContent = step.slice(withMapping.index + withMapping[0].length);
+  const pathBlock = /^          path: \|\r?\n((?:^            [^\r\n]*(?:\r?\n|$))*)/m.exec(withContent);
+  assert.ok(pathBlock, `${label} must contain an exact path block`);
+  return pathBlock[1]
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+};
+
 const assertPerformanceArtifactPaths = (step, label) => {
+  const entries = extractPerformanceArtifactPathEntries(step, label);
   for (const artifactPath of performanceArtifactPaths) {
-    const escapedPath = artifactPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    assert.match(
-      step,
-      new RegExp(`^            ${escapedPath}\r?$`, 'm'),
-      `${label} missing required path: ${artifactPath}`
-    );
+    assert.ok(entries.includes(artifactPath), `${label} missing required path: ${artifactPath}`);
   }
 };
 
@@ -728,6 +736,24 @@ test('checked-in full benchmark captures authoritative failures before the Task 
   assert.throws(
     () => validateFullBenchmarkWorkflow(finalArtifactMissingPlaywrightReport),
     /final combined artifact missing required path: frontend\/playwright-report\/performance\//
+  );
+
+  const failureArtifactWithPathsLabel = workflow.replace(
+    /(          name: authoritative-failure-[\s\S]*?^          )path: \|/m,
+    '$1paths: |'
+  );
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(failureArtifactWithPathsLabel),
+    /authoritative failure artifact must contain an exact path block/
+  );
+
+  const finalArtifactWithPathsLabel = workflow.replace(
+    /(          name: full-performance-benchmark[\s\S]*?^          )path: \|/m,
+    '$1paths: |'
+  );
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(finalArtifactWithPathsLabel),
+    /final combined artifact must contain an exact path block/
   );
 });
 
