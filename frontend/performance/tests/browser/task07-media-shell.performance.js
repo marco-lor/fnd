@@ -2,6 +2,7 @@ const { test, expect } = require('./measured-test');
 const {
   drainPageConnections,
   installDeterministicFontRoutes,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
@@ -34,6 +35,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     storageState: storageStateForRole('player'),
     reducedMotion: 'reduce',
   });
+  await installOwnedEmulatorFirestoreTransport(context);
   await installDeterministicFontRoutes(context);
   const fixtureImageRequests = [];
   const mediaRequests = [];

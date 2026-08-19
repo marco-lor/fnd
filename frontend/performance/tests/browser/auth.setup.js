@@ -9,6 +9,7 @@ const {
   ACCOUNT,
   createPageAssetTracker,
   drainPageConnections,
+  installOwnedEmulatorFirestoreTransport,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
   isExpectedFirestoreLifecycleCancellation,
@@ -24,6 +25,10 @@ const browserAssetDiagnosticsPath = path.join(
   resultsDir,
   'browser-asset-warmup-diagnostics.json'
 );
+// Auth setup is prerequisite work, not a measured route. Match the existing
+// Task 07 browser probes so a cold 500-item inventory can finish all bounded
+// four-listener catalog startup waves without inheriting the 15 s action cap.
+const AUTH_ROUTE_READINESS_TIMEOUT_MS = 30_000;
 
 const summarizeDiagnostics = (accounts) => ({
   consoleErrors: accounts.reduce((total, account) => total + account.consoleErrors.length, 0),
@@ -58,6 +63,7 @@ test('create deterministic emulator authentication states', async ({ browser, ba
   try {
     for (const [role, account] of Object.entries(ACCOUNT)) {
       const context = await browser.newContext({ baseURL });
+      await installOwnedEmulatorFirestoreTransport(context);
       const diagnostics = {
         role,
         completed: false,
@@ -168,7 +174,10 @@ test('create deterministic emulator authentication states', async ({ browser, ba
         await page.locator('form button[type="submit"]').click();
         await expect(page).not.toHaveURL(/\/$/, { timeout: 30_000 });
         const destinationPathname = new URL(page.url()).pathname;
-        await waitForReadiness(page, { expectedPathname: destinationPathname });
+        await waitForReadiness(page, {
+          expectedPathname: destinationPathname,
+          timeoutMs: AUTH_ROUTE_READINESS_TIMEOUT_MS,
+        });
         await context.storageState({ path: path.join(authDirectory, account.state), indexedDB: true });
         await expect.poll(
           () => pageAssets.isQuiet(),

@@ -6,11 +6,14 @@ const {
   countRouteResources,
   createPageAssetTracker,
   drainPageConnections,
+  flushBrowserObservers,
   installBootstrap,
   installDeterministicFontRoutes,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
   navigateToCleanup,
+  retainImageResourceTimings,
+  retainLongTaskEntries,
   restoreScenarioState,
   runInteraction,
   storageStateForRole,
@@ -24,6 +27,10 @@ const scenarios = manifest.scenarios.filter((scenario) => scenario.scheduledOnly
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
 
+const markScenarioPhase = (page, phase) => page.evaluate((nextPhase) => {
+  window.__FND_PERF__?.mark?.('scenario-phase', { phase: nextPhase });
+}, phase);
+
 const waitForFinitePageAssets = async (pageAssets, scenarioId, phase) => {
   await expect.poll(
     () => pageAssets.isQuiet(),
@@ -34,17 +41,37 @@ const waitForFinitePageAssets = async (pageAssets, scenarioId, phase) => {
   ).toBe(true);
 };
 
-const flushBrowserObservers = async (page) => {
-  await page.evaluate(() => new Promise((resolve) => {
-    const afterIdle = () => {
-      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(afterIdle, { timeout: 250 });
-      return;
+const waitForStableLargestContentfulPaint = async (
+  page,
+  scenarioId,
+  { quietMs = 500, timeoutMs = 5_000 } = {}
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastSignature = '';
+  let unchangedSince = Date.now();
+
+  while (Date.now() < deadline) {
+    await flushBrowserObservers(page);
+    const signature = await page.evaluate(() => {
+      const events = window.__FND_PERF__?.snapshot?.().events || [];
+      const latest = [...events].reverse().find((event) => (
+        event.category === 'web-vital' && event.metric === 'LCP'
+      ));
+      return latest
+        ? `${Number(latest.value)}:${Number(latest.timestamp)}`
+        : '';
+    });
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      unchangedSince = Date.now();
     }
-    window.setTimeout(afterIdle, 0);
-  }));
+    if (lastSignature && Date.now() - unchangedSince >= quietMs) return;
+    await page.waitForTimeout(50);
+  }
+
+  throw new Error(
+    `Largest Contentful Paint did not settle before interaction for ${scenarioId}.`
+  );
 };
 
 const assertChunkIsolation = (scenario, diagnostics) => {
@@ -144,23 +171,40 @@ for (const scenario of scenarios) {
         });
 
       await page.goto(scenario.route, { waitUntil: 'domcontentloaded' });
+      await markScenarioPhase(page, 'route-readiness');
       await waitForReadiness(page);
+      await markScenarioPhase(page, 'route-active');
       lifecyclePhase = 'route-active';
       await expect(page).toHaveURL(new RegExp(`${scenario.route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
       if (scenario.cache === 'warm') {
         lifecyclePhase = 'route-navigation';
         await page.reload({ waitUntil: 'domcontentloaded' });
+        await markScenarioPhase(page, 'route-readiness');
         await waitForReadiness(page);
+        await markScenarioPhase(page, 'route-active');
         lifecyclePhase = 'route-active';
       }
+      await markScenarioPhase(page, 'asset-settlement');
       await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
-      await runInteraction(page, scenario);
+      await markScenarioPhase(page, 'lcp-settlement');
+      await waitForStableLargestContentfulPaint(page, scenario.id);
+      await markScenarioPhase(page, 'interaction');
+      await runInteraction(page, scenario, {
+        settleFiniteAssets: async (phase) => {
+          pageAssets.beginQuietWindow();
+          await flushBrowserObservers(page);
+          await waitForFinitePageAssets(pageAssets, scenario.id, phase);
+        },
+      });
+      await markScenarioPhase(page, 'post-interaction-settlement');
       assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);
       pageAssets.beginQuietWindow();
       await flushBrowserObservers(page);
       await waitForFinitePageAssets(pageAssets, scenario.id, 'after interaction and observer flush');
+      await markScenarioPhase(page, 'capture');
       const capture = await captureBrowserMetrics(page, diagnostics);
+      const retainedLongTasks = retainLongTaskEntries(capture.snapshot.events);
       expect(
         capture.resourceTimingBufferOverflow,
         `Resource Timing buffer overflowed for ${scenario.id}.`
@@ -215,6 +259,17 @@ for (const scenario of scenarios) {
             diagnostics.explainedRecaptchaReportOnlyWarnings,
           unhandledErrors: capture.diagnostics.unhandledErrors,
           failedRequests: capture.diagnostics.failedRequests,
+          // These arrays contain only the bounded, text-free fields captured
+          // by helpers.js. Keeping them in each scenario result preserves the
+          // exact candidate identity and image timeline in both authoritative
+          // snapshots; raw iteration files are intentionally reused by run B.
+          lcpCandidates: capture.diagnostics.lcpCandidates,
+          imageResourceTimingCount: capture.diagnostics.imageResourceTimings.length,
+          imageResourceTimings: retainImageResourceTimings(
+            capture.diagnostics.imageResourceTimings
+          ),
+          longTaskEntryCount: retainedLongTasks.totalCount,
+          longTaskEntries: retainedLongTasks.entries,
         },
       });
       } catch (error) {

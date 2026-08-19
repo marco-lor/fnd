@@ -9,6 +9,7 @@ const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  assertVisiblePeerStates,
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
@@ -17,10 +18,13 @@ const {
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedFirestoreLifecycleCancellation,
   isKnownDemoFirestoreStartupWarning,
+  measurePeerTransitionTimings,
   navigateToCleanup,
   readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
   readRouteCleanupSummary,
+  resolvePlaywrightResponseStatus,
+  sanitizeFivePeerRequestFailure,
   storageStateForRole,
   waitForKonvaTokenMove,
   waitForReadiness,
@@ -36,8 +40,10 @@ const PROBE_PLACEMENT_PATH = 'grigliata_token_placements/perf-map__perf-token-00
 const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
+const FIVE_PEER_ASSET_SETTLEMENT_TIMEOUT_MS = 15_000;
 const FIVE_PEER_TEST_TIMEOUT_MS = 240_000;
 const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
+const MAX_RETAINED_FIVE_PEER_REQUEST_FAILURES = 16;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
   'legacyPlacementDeadStateCleanupCompletedAt',
@@ -61,6 +67,72 @@ const countRouteResources = (resources, route) => Object.entries(resources || {}
   .filter(([key]) => key.startsWith(`${route}::`))
   .filter(([key]) => !key.startsWith(`${route}::timeout`))
   .reduce((total, [, count]) => total + Number(count || 0), 0);
+
+const retainBoundedRequestFailure = (diagnostics, bucket, countKey, evidence) => {
+  diagnostics[countKey] += 1;
+  if (diagnostics[bucket].length < MAX_RETAINED_FIVE_PEER_REQUEST_FAILURES) {
+    diagnostics[bucket].push(evidence);
+  }
+};
+
+const settlePeerRequestFailureDiagnostics = async (peerPages) => {
+  for (let pass = 0; pass < 4; pass += 1) {
+    const pending = peerPages.flatMap(({ pendingRequestFailureDiagnostics }) => (
+      pendingRequestFailureDiagnostics
+    ));
+    await Promise.all(pending);
+    await new Promise((resolve) => setImmediate(resolve));
+    const currentCount = peerPages.reduce((total, { pendingRequestFailureDiagnostics }) => (
+      total + pendingRequestFailureDiagnostics.length
+    ), 0);
+    if (currentCount === pending.length) return;
+  }
+  throw new Error('Five-peer request-failure diagnostics did not reach a stable task count.');
+};
+
+const createRequestFailureAttachment = (peerPages) => ({
+  schemaVersion: 1,
+  peers: peerPages.map(({ role, diagnostics }) => ({
+    role,
+    counts: {
+      unexpected: diagnostics.failedRequestCount,
+      activeWriteTurnover: diagnostics.explainedActiveWriteTurnoverCount,
+      cleanupTransportCancellation: diagnostics.explainedCleanupTransportCancellationCount,
+      recaptchaCancellation: diagnostics.explainedRecaptchaCancellationCount,
+      diagnosticError: diagnostics.requestFailureDiagnosticErrorCount,
+    },
+    omitted: {
+      unexpected: Math.max(0, diagnostics.failedRequestCount - diagnostics.failedRequests.length),
+      activeWriteTurnover: Math.max(
+        0,
+        diagnostics.explainedActiveWriteTurnoverCount
+          - diagnostics.explainedActiveWriteTurnovers.length
+      ),
+      cleanupTransportCancellation: Math.max(
+        0,
+        diagnostics.explainedCleanupTransportCancellationCount
+          - diagnostics.explainedCleanupTransportCancellations.length
+      ),
+      recaptchaCancellation: Math.max(
+        0,
+        diagnostics.explainedRecaptchaCancellationCount
+          - diagnostics.explainedRecaptchaCancellations.length
+      ),
+      diagnosticError: Math.max(
+        0,
+        diagnostics.requestFailureDiagnosticErrorCount
+          - diagnostics.requestFailureDiagnosticErrors.length
+      ),
+    },
+    evidence: {
+      unexpected: diagnostics.failedRequests,
+      activeWriteTurnover: diagnostics.explainedActiveWriteTurnovers,
+      cleanupTransportCancellation: diagnostics.explainedCleanupTransportCancellations,
+      recaptchaCancellation: diagnostics.explainedRecaptchaCancellations,
+    },
+    diagnosticErrors: diagnostics.requestFailureDiagnosticErrors,
+  })),
+});
 
 const waitForRouteCleanup = async ({ page, role }) => {
   try {
@@ -139,15 +211,24 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       await installBootstrap(context, { ...scenario, role }, 1);
       const page = await context.newPage();
       const pageAssets = createPageAssetTracker();
+      const pendingRequestFailureDiagnostics = [];
+      const diagnosticsStartedAt = Date.now();
+      let requestFailureSequence = 0;
       const diagnostics = {
         consoleErrors: [],
         explainedRecaptchaCancellations: [],
+        explainedRecaptchaCancellationCount: 0,
         explainedRecaptchaReportOnlyWarnings: [],
         explainedStartupWarnings: [],
         explainedActiveWriteTurnovers: [],
+        explainedActiveWriteTurnoverCount: 0,
         explainedCleanupTransportCancellations: [],
+        explainedCleanupTransportCancellationCount: 0,
         unhandledErrors: [],
         failedRequests: [],
+        failedRequestCount: 0,
+        requestFailureDiagnosticErrors: [],
+        requestFailureDiagnosticErrorCount: 0,
         cleanupStarted: false,
         lifecyclePhase: 'route-navigation',
         ready: false,
@@ -181,63 +262,130 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
       page.on('requestfailed', (request) => {
         pageAssets.complete(request);
+        requestFailureSequence += 1;
+        const sequence = requestFailureSequence;
+        const lifecyclePhase = diagnostics.lifecyclePhase;
+        const elapsedMs = Date.now() - diagnosticsStartedAt;
+        const url = request.url();
         const failure = {
           resourceType: request.resourceType(),
           failure: request.failure()?.errorText || 'unknown',
           method: request.method(),
-          path: new URL(request.url()).pathname,
+          url,
         };
-        if (isExpectedFivePeerFirestoreWriteTurnover({
-          ...failure,
-          lifecyclePhase: diagnostics.lifecyclePhase,
-          responseStatus: responseStatuses.get(request),
-          url: request.url(),
-        })) {
-          diagnostics.explainedActiveWriteTurnovers.push({
+        const diagnosticTask = (async () => {
+          const responseStatus = await resolvePlaywrightResponseStatus(request, responseStatuses);
+          const evidence = sanitizeFivePeerRequestFailure({
+            role,
+            lifecyclePhase,
+            sequence,
+            elapsedMs,
             ...failure,
-            phase: diagnostics.lifecyclePhase,
-            responseStatus: responseStatuses.get(request),
+            responseStatus,
           });
-          return;
-        }
-        if (isExpectedFirestoreLifecycleCancellation({
-          ...failure,
-          lifecyclePhase: diagnostics.lifecyclePhase,
-          url: request.url(),
-        })) {
-          diagnostics.explainedCleanupTransportCancellations.push({
+          if (isExpectedFivePeerFirestoreWriteTurnover({
             ...failure,
-            phase: 'route-cleanup',
-          });
-          return;
-        }
-        if (isExpectedDemoRecaptchaCancellation({
-          ...failure,
-          lifecyclePhase: diagnostics.lifecyclePhase,
-          url: request.url(),
-        })) {
-          diagnostics.explainedRecaptchaCancellations.push({
+            lifecyclePhase,
+            responseStatus,
+          })) {
+            retainBoundedRequestFailure(
+              diagnostics,
+              'explainedActiveWriteTurnovers',
+              'explainedActiveWriteTurnoverCount',
+              { ...evidence, classification: 'active-write-turnover' }
+            );
+            return;
+          }
+          if (isExpectedFirestoreLifecycleCancellation({
             ...failure,
-            phase: diagnostics.lifecyclePhase,
-          });
-          return;
-        }
-        diagnostics.failedRequests.push(failure);
+            lifecyclePhase,
+          })) {
+            retainBoundedRequestFailure(
+              diagnostics,
+              'explainedCleanupTransportCancellations',
+              'explainedCleanupTransportCancellationCount',
+              { ...evidence, classification: 'cleanup-transport-cancellation' }
+            );
+            return;
+          }
+          if (isExpectedDemoRecaptchaCancellation({
+            ...failure,
+            lifecyclePhase,
+          })) {
+            retainBoundedRequestFailure(
+              diagnostics,
+              'explainedRecaptchaCancellations',
+              'explainedRecaptchaCancellationCount',
+              { ...evidence, classification: 'recaptcha-cancellation' }
+            );
+            return;
+          }
+          retainBoundedRequestFailure(
+            diagnostics,
+            'failedRequests',
+            'failedRequestCount',
+            { ...evidence, classification: 'unexpected' }
+          );
+        })().catch((error) => {
+          diagnostics.requestFailureDiagnosticErrorCount += 1;
+          if (
+            diagnostics.requestFailureDiagnosticErrors.length
+            < MAX_RETAINED_FIVE_PEER_REQUEST_FAILURES
+          ) {
+            diagnostics.requestFailureDiagnosticErrors.push({
+              sequence,
+              errorName: /^[A-Za-z]+Error$/.test(String(error?.name || ''))
+                ? error.name
+                : 'Error',
+            });
+          }
+        });
+        pendingRequestFailureDiagnostics.push(diagnosticTask);
       });
-      pages.push({ page, role, diagnostics });
+      pages.push({ page, role, diagnostics, pendingRequestFailureDiagnostics });
       try {
         await enterMeasuredGrigliataRoute(page);
         diagnostics.lifecyclePhase = 'route-active';
       } catch (error) {
         throw new Error(`Five-peer readiness failed for ${role}: ${error.message}`, { cause: error });
       }
-      await expect.poll(
-        () => pageAssets.isQuiet(),
-        {
-          timeout: 10_000,
-          message: `Finite page assets did not settle before five-peer measurement for ${role}.`,
-        }
-      ).toBe(true);
+      pageAssets.beginQuietWindow();
+      let latestAssetSettlement = null;
+      try {
+        await expect.poll(
+          async () => {
+            const registry = await page.evaluate(() => {
+              const getStats = window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats;
+              if (typeof getStats !== 'function') return null;
+              const stats = getStats();
+              return {
+                activeRequestCount: Number(stats?.activeRequestCount || 0),
+                queuedRequestCount: Number(stats?.queuedRequestCount || 0),
+              };
+            });
+            latestAssetSettlement = {
+              network: pageAssets.snapshot(),
+              registry,
+            };
+            return Boolean(
+              pageAssets.isQuiet()
+              && registry
+              && registry.activeRequestCount === 0
+              && registry.queuedRequestCount === 0
+            );
+          },
+          {
+            timeout: FIVE_PEER_ASSET_SETTLEMENT_TIMEOUT_MS,
+            message: `Finite page assets did not settle before five-peer measurement for ${role}.`,
+          }
+        ).toBe(true);
+      } catch (error) {
+        throw new Error(
+          `Finite page assets did not settle for ${role}: ${JSON.stringify(latestAssetSettlement)}`,
+          { cause: error }
+        );
+      }
+      diagnostics.assetSettlement = latestAssetSettlement;
       diagnostics.ready = true;
     }
 
@@ -260,15 +408,22 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
         )
       )));
-      const startedAt = Date.now();
-      await placement.update({ col, updatedAt });
-      await Promise.all(pages.map(({ page }, index) => waitForKonvaTokenMove(page, {
-        tokenId: PROBE_TOKEN_ID,
-        from: fromPositions[index],
-        deltaX,
-        deltaY: 0,
-      })));
-      const durationMs = Date.now() - startedAt;
+      const visibilityByPeer = await Promise.all(pages.map(({ page }) => (
+        page.evaluate(() => document.visibilityState)
+      )));
+      visibilityByPeer.forEach((visibilityState, index) => {
+        pages[index].diagnostics.visibilityState = visibilityState;
+      });
+      assertVisiblePeerStates(visibilityByPeer, pages.map(({ role }) => `${label}/${role}`));
+      const transitionTimings = await measurePeerTransitionTimings({
+        performWrite: () => placement.update({ col, updatedAt }),
+        waitForPeers: pages.map(({ page }, index) => () => waitForKonvaTokenMove(page, {
+          tokenId: PROBE_TOKEN_ID,
+          from: fromPositions[index],
+          deltaX,
+          deltaY: 0,
+        })),
+      });
       const serverPlacement = (await placement.get()).data();
       expect(serverPlacement?.col, `${label}: server placement column`).toBe(col);
       expect(serverPlacement?.updatedAt, `${label}: server placement timestamp`).toBe(updatedAt);
@@ -292,7 +447,8 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         deltaX,
         label,
         deliveriesByPeer,
-        durationMs,
+        visibilityByPeer,
+        ...transitionTimings,
         nextPositions: fromPositions.map(({ x, y }) => ({ x: x + deltaX, y })),
         eventCounts: afterTelemetry.map(({ eventCount }) => eventCount),
       };
@@ -347,12 +503,20 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     observedPlacementChangeEvents.forEach((observed, index) => {
       expect(observed, `measured-${index + 1}: placement deliveries`).toBe(pages.length);
     });
+    await settlePeerRequestFailureDiagnostics(pages);
     for (const { role, diagnostics } of pages) {
       expect(diagnostics.consoleErrors, `${role}: ${diagnostics.consoleErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.unhandledErrors, `${role}: ${diagnostics.unhandledErrors.join('\n')}`).toHaveLength(0);
-      expect(diagnostics.failedRequests, `${role}: ${JSON.stringify(diagnostics.failedRequests)}`).toHaveLength(0);
       expect(
-        diagnostics.explainedActiveWriteTurnovers.length,
+        diagnostics.requestFailureDiagnosticErrorCount,
+        `${role}: ${JSON.stringify(diagnostics.requestFailureDiagnosticErrors)}`
+      ).toBe(0);
+      expect(
+        diagnostics.failedRequestCount,
+        `${role}: ${JSON.stringify(diagnostics.failedRequests)}`
+      ).toBe(0);
+      expect(
+        diagnostics.explainedActiveWriteTurnoverCount,
         `${role}: ${JSON.stringify(diagnostics.explainedActiveWriteTurnovers)}`
       ).toBeLessThanOrEqual(MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER);
     }
@@ -392,12 +556,20 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     expect(leakedRouteResources).toBe(0);
     expect(pendingRouteTimeouts).toBe(0);
     expect(activeMediaAfterCleanup).toBe(0);
+    await settlePeerRequestFailureDiagnostics(pages);
     for (const { role, diagnostics } of pages) {
       expect(diagnostics.consoleErrors, `${role}: ${diagnostics.consoleErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.unhandledErrors, `${role}: ${diagnostics.unhandledErrors.join('\n')}`).toHaveLength(0);
-      expect(diagnostics.failedRequests, `${role}: ${JSON.stringify(diagnostics.failedRequests)}`).toHaveLength(0);
       expect(
-        diagnostics.explainedCleanupTransportCancellations.length,
+        diagnostics.requestFailureDiagnosticErrorCount,
+        `${role}: ${JSON.stringify(diagnostics.requestFailureDiagnosticErrors)}`
+      ).toBe(0);
+      expect(
+        diagnostics.failedRequestCount,
+        `${role}: ${JSON.stringify(diagnostics.failedRequests)}`
+      ).toBe(0);
+      expect(
+        diagnostics.explainedCleanupTransportCancellationCount,
         `${role}: ${JSON.stringify(diagnostics.explainedCleanupTransportCancellations)}`
       ).toBeLessThanOrEqual(2);
     }
@@ -419,7 +591,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           total + peer.diagnostics.unhandledErrors.length
         ), 0),
         'runtime.failedRequests': pages.reduce((total, peer) => (
-          total + peer.diagnostics.failedRequests.length
+          total + peer.diagnostics.failedRequestCount
         ), 0),
         'firestore.activeListenersAfterCleanup': leakedRouteListeners,
         'runtime.activeResourcesAfterCleanup': leakedRouteResources,
@@ -437,6 +609,16 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         warmup: {
           forwardDurationMs: warmupForward.durationMs,
           reverseDurationMs: warmupReverse.durationMs,
+          forwardWriteAckMs: warmupForward.writeAckMs,
+          reverseWriteAckMs: warmupReverse.writeAckMs,
+          forwardPeerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            warmupForward.peerConvergenceMs[peerIndex],
+          ])),
+          reversePeerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            warmupReverse.peerConvergenceMs[peerIndex],
+          ])),
           forwardDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,
             warmupForward.deliveriesByPeer[peerIndex],
@@ -455,6 +637,19 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           fromPositions: transition.fromPositions,
           deltaX: transition.deltaX,
           durationMs: transition.durationMs,
+          writeAckMs: transition.writeAckMs,
+          peerConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.peerConvergenceMs[peerIndex],
+          ])),
+          postWriteAckConvergenceMs: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.postWriteAckConvergenceMs[peerIndex],
+          ])),
+          visibilityByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.visibilityByPeer[peerIndex],
+          ])),
           observedPlacementChangeEvents: observedPlacementChangeEvents[index],
           placementDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,
@@ -471,6 +666,18 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     });
   } catch (error) {
     primaryError = error;
+    try {
+      await settlePeerRequestFailureDiagnostics(pages);
+      await testInfo.attach('five-peer-request-failure-evidence.json', {
+        body: JSON.stringify(createRequestFailureAttachment(pages), null, 2),
+        contentType: 'application/json',
+      });
+    } catch (diagnosticError) {
+      primaryError = new global.AggregateError(
+        [error, diagnosticError],
+        'Five-peer convergence failed and failure evidence capture also failed.'
+      );
+    }
   }
 
   const cleanupErrors = [];

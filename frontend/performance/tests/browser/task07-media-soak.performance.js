@@ -11,6 +11,9 @@ const {
   projectId,
 } = require('../../../scripts/performance/common');
 const {
+  drainRouteRenderScheduler,
+} = require('../../../scripts/performance/task07-render-scheduler');
+const {
   countRouteResources,
   drainPageConnections,
   installBootstrap,
@@ -52,17 +55,53 @@ const navigateWithinApp = async (page, route, firstNavigation) => {
   }, route);
 };
 
-const waitForRouteCleanup = async (page, route) => {
+const waitForRouteCleanup = async (page, route, { cycle } = {}) => {
   await navigateToCleanup(page);
-  await expect.poll(async () => {
-    const cleanup = await page.evaluate(() => window.__FND_PERF__.snapshot());
-    return countRouteResources(cleanup.activeResources, route, {
-      includeTimeouts: true,
-    });
-  }, {
-    intervals: [100],
-    timeout: 10_000,
-  }).toBe(0);
+  const renderScheduler = await drainRouteRenderScheduler(page, { cycle, route });
+  let lastCleanup = null;
+  try {
+    await expect.poll(async () => {
+      const cleanup = await page.evaluate(() => window.__FND_PERF__.snapshot());
+      const count = countRouteResources(cleanup.activeResources, route, {
+        includeTimeouts: true,
+      });
+      if (count > 0) {
+        lastCleanup = cleanup;
+      }
+      return count;
+    }, {
+      intervals: [100],
+      timeout: 10_000,
+    }).toBe(0);
+  } catch (error) {
+    const cleanup = lastCleanup
+      || await page.evaluate(() => window.__FND_PERF__.snapshot());
+    const diagnostics = (cleanup.activeResourceDiagnostics || [])
+      .filter((resource) => resource.ownerRoute === route)
+      .slice(0, 10)
+      .map((resource) => ({
+        attribution: resource.attribution,
+        callback: typeof resource.callback === 'string'
+          ? resource.callback.slice(0, 160)
+          : undefined,
+        delayMs: resource.delayMs,
+        ownerRoute: resource.ownerRoute,
+        type: resource.type,
+      }));
+    const activeResources = Object.fromEntries(
+      Object.entries(cleanup.activeResources || {})
+        .filter(([key]) => key.startsWith(`${route}::`))
+    );
+    throw new Error(
+      `Task 07 route cleanup did not settle for ${route}: ${JSON.stringify({
+        activeResources,
+        cycle,
+        diagnostics,
+        renderScheduler,
+      })}`,
+      { cause: error }
+    );
+  }
 };
 
 const countKonvaTokenNodes = () => {
@@ -78,29 +117,104 @@ const readImageRegistry = (page) => page.evaluate(() => (
   window.__FND_PERF_BENCHMARKS__.getImageRegistryStats()
 ));
 
-const waitForRegistryLeaseState = async (page, { crossfade }) => {
+const readBattlemapLayerState = (page) => page.evaluate(() => {
+  const stages = Array.isArray(window.Konva?.stages) ? window.Konva.stages : [];
+  const layers = stages.flatMap((stage) => Array.from(stage.find((node) => (
+    ['battlemap-image-active', 'battlemap-image-outgoing'].includes(
+      String(node.getAttr?.('data-testid') || '')
+    )
+  )))).map((node) => ({
+    height: Number(node.height?.()),
+    opacity: Number(node.opacity?.()),
+    role: String(node.getAttr?.('data-testid') || ''),
+    width: Number(node.width?.()),
+  }));
+  return {
+    active: layers.filter((layer) => layer.role === 'battlemap-image-active'),
+    outgoing: layers.filter((layer) => layer.role === 'battlemap-image-outgoing'),
+  };
+});
+
+const waitForStableBattlemapLayer = async (page, { backgroundId, stage }) => {
+  let lastObservation = null;
+  try {
+    await expect.poll(async () => {
+      lastObservation = await readBattlemapLayerState(page);
+      return lastObservation.active.length === 1
+        && lastObservation.outgoing.length === 0
+        && lastObservation.active[0].height > 0
+        && lastObservation.active[0].opacity >= 0.999
+        && lastObservation.active[0].width > 0;
+    }, {
+      intervals: [50, 100],
+      timeout: 10_000,
+    }).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `Task 07 battlemap layer did not settle for ${backgroundId || 'unknown background'}`
+      + ` during ${stage || 'unknown stage'}: ${JSON.stringify(lastObservation)}`,
+      { cause: error }
+    );
+  }
+  return lastObservation;
+};
+
+const summarizeRegistryLeaseState = (registry) => ({
+  activeRequestCount: Number(registry?.activeRequestCount),
+  namedPins: Array.isArray(registry?.namedPins) ? registry.namedPins : [],
+  pinnedRecordCount: Number(registry?.pinnedRecordCount),
+  queuedRequestCount: Number(registry?.queuedRequestCount),
+  recordCount: Number(registry?.recordCount),
+  referencedRecordCount: Number(registry?.referencedRecordCount),
+});
+
+const waitForRegistryLeaseState = async (page, {
+  backgroundId,
+  crossfade,
+  stage,
+}) => {
   let observation = null;
-  await expect.poll(async () => {
-    const registry = await readImageRegistry(page);
-    const namedPins = Array.isArray(registry.namedPins) ? registry.namedPins : [];
-    const matches = namedPins.includes(ACTIVE_BOARD_PIN)
-      && (crossfade ? namedPins.includes(CROSSFADE_PIN) : !namedPins.includes(CROSSFADE_PIN))
-      && (!crossfade || Number(registry.pinnedRecordCount) >= 2);
-    if (matches) observation = registry;
-    return matches;
-  }, {
-    intervals: [50, 100],
-    timeout: 10_000,
-  }).toBe(true);
+  let lastObservation = null;
+  try {
+    await expect.poll(async () => {
+      const registry = await readImageRegistry(page);
+      lastObservation = registry;
+      const namedPins = Array.isArray(registry.namedPins) ? registry.namedPins : [];
+      const matches = namedPins.includes(ACTIVE_BOARD_PIN)
+        && (crossfade ? namedPins.includes(CROSSFADE_PIN) : !namedPins.includes(CROSSFADE_PIN))
+        && (!crossfade || Number(registry.pinnedRecordCount) >= 2);
+      if (matches) observation = registry;
+      return matches;
+    }, {
+      intervals: [50, 100],
+      timeout: 10_000,
+    }).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `Task 07 registry lease did not settle for ${backgroundId || 'unknown background'}`
+      + ` during ${stage || 'unknown stage'}: `
+      + JSON.stringify(summarizeRegistryLeaseState(lastObservation)),
+      { cause: error }
+    );
+  }
   return observation;
 };
 
 const selectGalleryFolder = async (page, folderName) => {
+  const expectedRowIds = backgroundCatalog
+    .filter((background) => background.folderName === folderName)
+    .map((background) => `background-gallery-row-${background.id}`)
+    .sort();
   await page.getByRole('button', { name: 'Filter DM Gallery by folder' }).click();
   await page.getByRole('option', { name: folderName, exact: true }).click();
-  await expect(page.locator('[data-testid^="background-gallery-row-"]')).toHaveCount(
-    TASK07_SOAK_BACKGROUND_COUNT / galleryFolders.length
-  );
+  const rows = page.locator('[data-testid^="background-gallery-row-"]');
+  await expect(rows).toHaveCount(TASK07_SOAK_BACKGROUND_COUNT / galleryFolders.length);
+  await expect.poll(async () => rows.evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute('data-testid')).sort()
+  )), {
+    intervals: [50, 100],
+    timeout: 10_000,
+  }).toEqual(expectedRowIds);
 };
 
 const activateGalleryBackground = async (page, background) => {
@@ -113,16 +227,46 @@ const activateGalleryBackground = async (page, background) => {
   await expect(row).toHaveCount(1);
 
   if (await activeBadge.count()) {
-    await waitForRegistryLeaseState(page, { crossfade: false });
+    await waitForStableBattlemapLayer(page, {
+      backgroundId: background.id,
+      stage: 'already-active',
+    });
+    await waitForRegistryLeaseState(page, {
+      backgroundId: background.id,
+      crossfade: false,
+      stage: 'already-active',
+    });
     return { changed: false, transitionRegistry: null };
   }
 
-  await waitForRegistryLeaseState(page, { crossfade: false });
+  await waitForStableBattlemapLayer(page, {
+    backgroundId: background.id,
+    stage: 'before-activation',
+  });
+  await waitForRegistryLeaseState(page, {
+    backgroundId: background.id,
+    crossfade: false,
+    stage: 'before-activation',
+  });
   await expect(useButton).toBeEnabled();
   await useButton.click();
-  await expect(activeBadge).toHaveCount(1);
-  const transitionRegistry = await waitForRegistryLeaseState(page, { crossfade: true });
-  await waitForRegistryLeaseState(page, { crossfade: false });
+  const [transitionRegistry] = await Promise.all([
+    waitForRegistryLeaseState(page, {
+      backgroundId: background.id,
+      crossfade: true,
+      stage: 'crossfade',
+    }),
+    expect(activeBadge).toHaveCount(1),
+  ]);
+  await waitForRegistryLeaseState(page, {
+    backgroundId: background.id,
+    crossfade: false,
+    stage: 'after-crossfade',
+  });
+  await waitForStableBattlemapLayer(page, {
+    backgroundId: background.id,
+    stage: 'after-crossfade',
+  });
   return { changed: true, transitionRegistry };
 };
 
@@ -206,7 +350,7 @@ const runPlayerRouteSoak = async ({ browser, baseURL, errors }) => {
         }));
         expect(snapshot.audioNodes).toBeLessThanOrEqual(4);
         expect(snapshot.managedImages).toBeGreaterThan(0);
-        await waitForRouteCleanup(page, scenario.route);
+        await waitForRouteCleanup(page, scenario.route, { cycle: cycle + 1 });
       }
     }
   } finally {
@@ -314,7 +458,7 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
           window.__FND_PERF_BENCHMARKS__.getImageRegistryStats
         );
       });
-      await waitForRouteCleanup(page, '/grigliata');
+      await waitForRouteCleanup(page, '/grigliata', { cycle });
       await page.waitForTimeout(2_200);
       const registry = await page.evaluate(async () => {
         window.gc?.();

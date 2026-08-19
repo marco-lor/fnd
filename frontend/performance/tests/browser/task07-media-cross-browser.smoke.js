@@ -52,8 +52,13 @@ test('Task 07 media shell renders and stays dormant cross-browser', async ({
       ).length,
       meteorSlots: document.querySelectorAll('.shooting-star').length,
       managedImages: document.querySelectorAll('img[data-media-state]').length,
+      catalogListeners: Object.entries(window.__FND_PERF__?.snapshot?.().activeListeners || {})
+        .filter(([key]) => key.endsWith('::catalog.items-batch.subscribe.v1'))
+        .reduce((total, [, count]) => total + Number(count || 0), 0),
     }));
-    expect(shell.managedImages).toBeGreaterThan(0);
+    expect(shell.managedImages).toBeGreaterThanOrEqual(400);
+    expect(shell.catalogListeners).toBeGreaterThan(0);
+    expect(shell.catalogListeners).toBeLessThanOrEqual(50);
     expect(shell.meteorSlots).toBe(2);
     expect(shell.activeMeteors).toBe(0);
     expect(shell.audioNodes).toBeLessThanOrEqual(4);

@@ -6,9 +6,12 @@ const {
   installDeterministicFontRoutes,
   isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
+  waitForImageRegistrySettlement,
   waitForReadiness,
   writeScenarioResult,
 } = require('./helpers');
+
+const TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT = 200;
 
 const task07RegistryMetrics = (registry) => ({
   'task07.registryRequestConcurrencyLimit': Number(registry?.limits?.maxConcurrentRequests),
@@ -102,9 +105,9 @@ for (const scenario of manifest.scenarios) {
         await page.waitForFunction(() => (
           typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
         ));
-        const registry = await page.evaluate(() => (
-          window.__FND_PERF_BENCHMARKS__.getImageRegistryStats()
-        ));
+        const registry = await waitForImageRegistrySettlement(page, {
+          minimumLoadedRecords: 1,
+        });
         expect(registry.limits).toMatchObject({
           profile: 'desktop',
           maxConcurrentRequests: 4,
@@ -113,9 +116,13 @@ for (const scenario of manifest.scenarios) {
           maxTotalDecodedBytes: 384 * 1024 * 1024,
           maxLowPriorityQueueSize: 32,
         });
-        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(96);
-        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(128 * 1024 * 1024);
+        // The fixture's full-map fit makes ordinary token art smaller than the
+        // useful-media threshold. Only bounded priority/shell records may remain.
+        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
+        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
         expect(registry.decodedBytes).toBeLessThanOrEqual(384 * 1024 * 1024);
+        expect(registry.activeRequestCount).toBe(0);
+        expect(registry.queuedRequestCount).toBe(0);
         expect(registry.lowPriorityQueuedRequestCount).toBeLessThanOrEqual(32);
         writeScenarioResult({
           id: 'task07-registry-desktop',
@@ -187,11 +194,17 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       expectedPathname: '/grigliata',
       timeoutMs: 30_000,
     });
-    await page.waitForFunction(() => (
-      typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
-    ));
+    // Readiness can precede the active board image load. Capture only after the
+    // finite registry is idle and stable, without requiring it to fill spare
+    // capacity with tiny overview token art.
+    const registry = await waitForImageRegistrySettlement(page, {
+      minimumLoadedRecords: 1,
+    });
     const snapshot = await page.evaluate(() => ({
-      registry: window.__FND_PERF_BENCHMARKS__.getImageRegistryStats(),
+      renderedTokenNodes: (Array.isArray(window.Konva?.stages) ? window.Konva.stages : [])
+        .flatMap((stage) => Array.from(stage.find((node) => (
+          String(node.getAttr?.('data-testid') || '').startsWith('token-node-')
+        )))).length,
       visibleStarFields: Array.from(
         document.querySelectorAll('.global-aurora__star-field')
       ).filter((node) => getComputedStyle(node).display !== 'none').length,
@@ -200,7 +213,7 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       ).length,
       meteorSlots: document.querySelectorAll('.shooting-star').length,
     }));
-    expect(snapshot.registry.limits).toMatchObject({
+    expect(registry.limits).toMatchObject({
       profile: 'compact',
       maxConcurrentRequests: 2,
       maxRecords: 64,
@@ -208,6 +221,17 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       maxTotalDecodedBytes: 320 * 1024 * 1024,
       maxLowPriorityQueueSize: 16,
     });
+    expect(snapshot.renderedTokenNodes).toBe(TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT);
+    expect(registry.loadedRecordCount).toBeGreaterThanOrEqual(1);
+    expect(registry.pinnedRecordCount).toBe(1);
+    expect(registry.namedPins).toContain('grigliata-active-board');
+    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
+    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
+    expect(registry.decodedBytes).toBeLessThanOrEqual(registry.limits.maxTotalDecodedBytes);
+    expect(registry.activeRequestCount).toBe(0);
+    expect(registry.queuedRequestCount).toBe(0);
+    expect(registry.lowPriorityQueuedRequestCount).toBe(0);
+    expect(registry.droppedLowPriorityRequestCount).toBe(0);
     expect(snapshot.visibleStarFields).toBe(1);
     expect(snapshot.meteorSlots).toBe(2);
     expect(snapshot.activeMeteors).toBe(0);
@@ -222,7 +246,7 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
         browserName: testInfo.project.use.browserName || testInfo.project.name,
         browserVersion: browser.version(),
       },
-      metrics: task07RegistryMetrics(snapshot.registry),
+      metrics: task07RegistryMetrics(registry),
       diagnostics: {
         consoleErrors: errors,
         explainedRecaptchaReportOnlyWarnings,
