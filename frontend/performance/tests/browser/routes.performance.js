@@ -20,7 +20,7 @@ const {
   writeScenarioResult,
 } = require('./helpers');
 
-const scenarios = manifest.scenarios.filter((scenario) => scenario.role !== 'five-peer');
+const scenarios = manifest.scenarios.filter((scenario) => scenario.scheduledOnly !== true);
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
 

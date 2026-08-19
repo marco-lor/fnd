@@ -39,7 +39,7 @@ const initializeAdmin = () => {
   bucket = getStorage(app).bucket();
 };
 
-const FIXTURE_VERSION = 'fnd-performance-v2-task05-runtime-retired-task07-media';
+const FIXTURE_VERSION = 'fnd-performance-v2-task05-runtime-retired-task07-media-codex-map';
 const FUNCTIONS_READINESS_TIMEOUT_MS = 180_000;
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
@@ -285,11 +285,12 @@ const buildUser = ({ uid, role = 'player', characterCreationDone = true }, index
 const buildCodex = () => Object.fromEntries(
   Array.from({ length: 20 }, (_, categoryIndex) => {
     const key = `categoria_${pad(categoryIndex, 2)}`;
-    const values = Array.from({ length: 250 }, (_, itemIndex) => ({
-      id: `${key}_${pad(itemIndex)}`,
-      nome: `Codex ${categoryIndex}-${itemIndex}`,
-      descrizione: `Deterministic fixture entry ${categoryIndex}-${itemIndex}`,
-    }));
+    const values = Object.fromEntries(
+      Array.from({ length: 250 }, (_, itemIndex) => ([
+        `Codex ${categoryIndex}-${itemIndex}`,
+        `Deterministic fixture entry ${categoryIndex}-${itemIndex}`,
+      ]))
+    );
     return [key, values];
   })
 );

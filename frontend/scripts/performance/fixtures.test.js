@@ -50,6 +50,17 @@ test('fixture generation is stable and contains the required scale', () => {
     ))?.data,
     TASK07_MEDIA_CONTROL
   );
+  const codex = firstDocuments.find(({path: documentPath}) => (
+    documentPath === 'utils/codex'
+  ))?.data;
+  assert.equal(Array.isArray(codex), false);
+  assert.equal(Object.keys(codex).length, 20);
+  for (const category of Object.values(codex)) {
+    assert.equal(Array.isArray(category), false);
+    assert.equal(category && typeof category, 'object');
+    assert.equal(Object.keys(category).length, 250);
+    assert.equal(Object.values(category).every((value) => typeof value === 'string'), true);
+  }
   const playerShell = firstDocuments.find(({path: documentPath}) => (
     documentPath === 'users/perf-player'
   ))?.data;

@@ -37,8 +37,10 @@ const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
 const MAX_SEED_BACKGROUND_INVOCATIONS = 150;
 const TASK07_MEDIA_INTEGRATION_ENABLED =
   process.env.FND_TASK07_MEDIA_INTEGRATION === '1';
-const READINESS_HTTP_FUNCTIONS = new Set([
+const NON_BACKGROUND_HTTP_FUNCTIONS = new Set([
   'europe-west1-clientFirebaseConfig',
+  'europe-west8-task05ListAdminUsers',
+  'europe-west8-task05UpdateResource',
   'europe-west8-task07PrepareMediaUpload',
   'europe-west8-task07GetMediaStatus',
   'europe-west8-task07ResolveCharacterMedia',
@@ -72,7 +74,7 @@ const summarizeTriggerActivityText = (contents = '') => {
   }, {});
   const cleanupInvocations = counts['europe-west1-cleanupReplacedGrigliataTokenImage'] || 0;
   const backgroundInvocations = names.filter((name) => (
-    !READINESS_HTTP_FUNCTIONS.has(name)
+    !NON_BACKGROUND_HTTP_FUNCTIONS.has(name)
   )).length;
   const activity = { counts, backgroundInvocations, cleanupInvocations };
   const failWithActivity = (message) => {
@@ -87,7 +89,7 @@ const summarizeTriggerActivityText = (contents = '') => {
     );
   }
   const unexpectedBackgroundTriggers = [...new Set(names.filter((name) => (
-    !READINESS_HTTP_FUNCTIONS.has(name)
+    !NON_BACKGROUND_HTTP_FUNCTIONS.has(name)
     && !READINESS_BACKGROUND_TRIGGERS.has(name)
   )))];
   if (unexpectedBackgroundTriggers.length) {

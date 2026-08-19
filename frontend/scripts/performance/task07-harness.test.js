@@ -44,6 +44,14 @@ const task07MediaRunnerPath = path.resolve(
   'run-media-integration.js'
 );
 const globalSetupPath = path.resolve(frontendRoot, 'performance', 'global-setup.js');
+const scenariosPath = path.resolve(frontendRoot, 'performance', 'scenarios.json');
+const routePerformancePath = path.resolve(
+  frontendRoot,
+  'performance',
+  'tests',
+  'browser',
+  'routes.performance.js'
+);
 const mebibyte = 1024 * 1024;
 
 const registrySample = (overrides = {}) => ({
@@ -344,6 +352,43 @@ test('Task 07 blocking budgets include desktop and compact registry caps', () =>
       ownerTask: '07',
     });
   });
+});
+
+test('Task 07 one-shot benchmark records are registered but excluded from route iteration', () => {
+  const manifest = JSON.parse(fs.readFileSync(scenariosPath, 'utf8'));
+  const byId = new Map(manifest.scenarios.map((scenario) => [scenario.id, scenario]));
+  const routePerformance = fs.readFileSync(routePerformancePath, 'utf8');
+  const expectedMetrics = {
+    'task07-media-shell': [
+      'task07.attachedImages',
+      'task07.audioNodes',
+      'task07.farOffscreenAttachedImages',
+      'task07.managedImages',
+      'task07.musicStreamListeners',
+      'task07.reducedMotionMeteors',
+      'task07.uniqueFixtureImageRequests',
+    ],
+    'task07-registry-compact': [
+      'task07.registryRequestConcurrencyLimit',
+      'task07.unpinnedRegistryRecords',
+      'task07.unpinnedEstimatedDecodedBytes',
+      'task07.totalEstimatedDecodedBytes',
+      'task07.lowPriorityQueuedPreloads',
+    ],
+    'task07-registry-desktop': [
+      'task07.registryRequestConcurrencyLimit',
+      'task07.unpinnedRegistryRecords',
+      'task07.unpinnedEstimatedDecodedBytes',
+      'task07.totalEstimatedDecodedBytes',
+      'task07.lowPriorityQueuedPreloads',
+    ],
+  };
+
+  for (const [scenarioId, requiredMetrics] of Object.entries(expectedMetrics)) {
+    assert.equal(byId.get(scenarioId)?.scheduledOnly, true);
+    assert.deepEqual(byId.get(scenarioId)?.requiredMetrics, requiredMetrics);
+  }
+  assert.match(routePerformance, /scenario\.scheduledOnly !== true/);
 });
 
 test('Task 07 soak evaluates only the required final three settled cycles', () => {

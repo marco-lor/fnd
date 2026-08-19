@@ -7,6 +7,7 @@ const {
 } = require('./global-setup');
 const {
   collectTeardownEvidence,
+  formatAggregateGateErrorMessage,
   reenableBackgroundTriggers,
   TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS,
 } = require('./global-teardown');
@@ -27,6 +28,8 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west8-cleanupTask07RemovedUserMedia'),
     invocation('europe-west8-cleanupTask07MediaAsset'),
     invocation('europe-west1-clientFirebaseConfig'),
+    invocation('europe-west8-task05ListAdminUsers'),
+    invocation('europe-west8-task05UpdateResource'),
     invocation('europe-west8-task07PrepareMediaUpload'),
     invocation('europe-west8-task07GetMediaStatus'),
     invocation('europe-west8-task07ResolveCharacterMedia'),
@@ -50,6 +53,8 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     'europe-west8-cleanupTask07RemovedUserMedia': 1,
     'europe-west8-cleanupTask07MediaAsset': 1,
     'europe-west1-clientFirebaseConfig': 1,
+    'europe-west8-task05ListAdminUsers': 1,
+    'europe-west8-task05UpdateResource': 1,
     'europe-west8-task07PrepareMediaUpload': 1,
     'europe-west8-task07GetMediaStatus': 1,
     'europe-west8-task07ResolveCharacterMedia': 1,
@@ -83,6 +88,21 @@ test('seed trigger summary rejects non-sentinel background activity', () => {
       return true;
     }
   );
+});
+
+test('measured Task 05 HTTPS callables never count as background trigger activity', () => {
+  const summary = summarizeTriggerActivityText([
+    invocation('europe-west8-task05UpdateResource'),
+    invocation('europe-west8-task05UpdateResource'),
+    invocation('europe-west8-task05ListAdminUsers'),
+    invocation('europe-west8-task05ListAdminUsers'),
+  ].join('\n'));
+
+  assert.equal(summary.backgroundInvocations, 0);
+  assert.deepEqual(summary.counts, {
+    'europe-west8-task05UpdateResource': 2,
+    'europe-west8-task05ListAdminUsers': 2,
+  });
 });
 
 test('teardown re-enables triggers with the bounded heavy-runtime timeout', async () => {
@@ -297,6 +317,16 @@ test('teardown preserves raw trigger and log evidence when their assertions fail
   assert.deepEqual(evidence.suppression, { expected: 6, observed: 6 });
   assert.equal(evidence.logBudget, logBudget);
   assert.deepEqual(evidence.errors, [triggerError, logError]);
+});
+
+test('aggregate teardown diagnostics include every bounded child message', () => {
+  assert.equal(
+    formatAggregateGateErrorMessage('Performance teardown failed.', [
+      new Error('unexpected trigger\nwith detail'),
+      new Error('log budget exceeded'),
+    ]),
+    'Performance teardown failed. [1] unexpected trigger with detail [2] log budget exceeded'
+  );
 });
 
 test('Playwright always starts an owned emulator server instead of reusing port 5000', () => {

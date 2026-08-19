@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "fnd-performance-v2-task05-runtime-retired-task07-media",
+  "version": "fnd-performance-v2-task05-runtime-retired-task07-media-codex-map",
   "projectId": "demo-fnd-perf",
   "documentCount": 9139,
   "storageObjectCount": 136,
-  "canonicalHash": "0ae105780dccd2d1040fa950ad84c576a1b81d5a88aedfd324aaa8e02e8f4b9d",
+  "canonicalHash": "c56b0dbae8e449e56eeaa9324e836e97575de1385e1d9f104c5515cc3e4ee194",
   "counts": {
     "app_config": 1,
     "users": 200,
