@@ -176,6 +176,7 @@ const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
 const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
+const TOKEN_MEDIA_MIN_SCREEN_SIZE_PX = 16;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -212,23 +213,35 @@ export const buildBoundedTokenMediaIdSet = ({
   viewport,
   stageSize,
   limit,
+  allowVisibleMedia = true,
 }) => {
   const boundedLimit = Math.max(0, Math.floor(Number(limit) || 0));
   if (!boundedLimit) return new Set();
 
   const candidates = (Array.isArray(tokens) ? tokens : [])
-    .map((token, index) => ({
-      token,
-      index,
-      priority: token?.isActiveTurn
+    .map((token, index) => {
+      const tokenScreenSize = Number(token?.renderPosition?.size) * Number(viewport?.scale);
+      const isUsefulVisibleMedia = (
+        allowVisibleMedia
+        && Number.isFinite(tokenScreenSize)
+        && tokenScreenSize >= TOKEN_MEDIA_MIN_SCREEN_SIZE_PX
+        && isTokenWithinStageViewport(token, viewport, stageSize)
+      );
+      const priority = token?.isActiveTurn
         ? 0
         : (token?.isSelected
           ? 1
-          : (isTokenWithinStageViewport(token, viewport, stageSize)
+          : (token?.isOwnedByViewer
             ? 2
-            : (token?.canMove ? 3 : 4))),
-    }))
-    .filter(({token}) => token?.tokenId && hasMediaAsset(token))
+            : (isUsefulVisibleMedia ? 3 : 4)));
+      return {
+        token,
+        index,
+        priority,
+        eligible: priority < 4,
+      };
+    })
+    .filter(({token, eligible}) => eligible && token?.tokenId && hasMediaAsset(token))
     .sort((left, right) => left.priority - right.priority || left.index - right.index)
     .slice(0, boundedLimit);
 
@@ -2341,7 +2354,12 @@ export default function GrigliataBoard({
   const suppressNextTokenContextMenuRef = useRef(false);
   const nextLocalPingIdRef = useRef(0);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState({
+    x: 0,
+    y: 0,
+    scale: 1,
+    fittedViewportKey: '',
+  });
   const [isDropActive, setIsDropActive] = useState(false);
   const [selectedTokenIds, setSelectedTokenIds] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
@@ -2448,8 +2466,6 @@ export default function GrigliataBoard({
   const battlemapImageAnimationLayersRef = useRef(null);
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
-  const lastFitKeyRef = useRef('');
-
   useEffect(() => {
     if (
       isNarrationOverlayActive
@@ -2991,10 +3007,13 @@ export default function GrigliataBoard({
   const tokenItems = useMemo(
     () => sortTokensByLayerOrder(placedTokens, resolvedBackground?.tokenLayerOrder).map((token) => {
       const tokenId = token.id || token.ownerUid;
-      const canMove = !!tokenId && (isManager || token.ownerUid === currentUserId || tokenId === currentUserId);
+      const isOwnedByViewer = !!tokenId
+        && (token.ownerUid === currentUserId || tokenId === currentUserId);
+      const canMove = !!tokenId && (isManager || isOwnedByViewer);
       return {
         ...token,
         tokenId,
+        isOwnedByViewer,
         canMove,
         position: getTokenPositionPx(token, normalizedGrid),
       };
@@ -3304,6 +3323,18 @@ export default function GrigliataBoard({
   const viewportFitBounds = narrationImageBounds || boardBounds;
   const backplateBounds = narrationImageBounds || boardBounds;
   const backplatePadding = narrationImageBounds ? 0 : normalizedGrid.cellSizePx;
+  const resolvedBackgroundWidth = Number(resolvedBackground?.imageWidth) || 0;
+  const resolvedBackgroundHeight = Number(resolvedBackground?.imageHeight) || 0;
+  const hasResolvedBackgroundGeometry = (
+    resolvedBackgroundWidth > 0 && resolvedBackgroundHeight > 0
+  );
+  const isViewportFitGeometryReady = Boolean(
+    narrationImageBounds
+    || !resolvedBackground
+    || activeBackgroundMediaSource.candidateCount === 0
+    || activeBackgroundMediaSource.status === 'error'
+    || hasResolvedBackgroundGeometry
+  );
   const renderedSharedInteractions = useMemo(
     () => (sharedInteractions || [])
       .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
@@ -3522,23 +3553,52 @@ export default function GrigliataBoard({
       ? `${narrationImageBounds.minX},${narrationImageBounds.minY},${narrationImageBounds.maxX},${narrationImageBounds.maxY}`
       : '',
   ].join('::');
+  const viewportFitGeometryKey = narrationImageBounds
+    ? 'narration-bounds'
+    : `${resolvedBackgroundWidth}x${resolvedBackgroundHeight}`;
+  const viewportFitKey = [
+    fitKey,
+    viewportFitGeometryKey,
+  ].join('::geometry:');
 
   const fitToBoard = useCallback(() => {
-    if (!stageSize.width || !stageSize.height) return;
-    setViewport(fitViewportToBounds(viewportFitBounds, stageSize.width, stageSize.height, BOARD_FIT_PADDING));
-    lastFitKeyRef.current = fitKey;
-  }, [fitKey, stageSize.height, stageSize.width, viewportFitBounds]);
+    if (!stageSize.width || !stageSize.height || !isViewportFitGeometryReady) return;
+    setViewport({
+      ...fitViewportToBounds(
+        viewportFitBounds,
+        stageSize.width,
+        stageSize.height,
+        BOARD_FIT_PADDING
+      ),
+      fittedViewportKey: viewportFitKey,
+    });
+  }, [
+    isViewportFitGeometryReady,
+    stageSize.height,
+    stageSize.width,
+    viewportFitBounds,
+    viewportFitKey,
+  ]);
 
   useEffect(() => {
-    if (!stageSize.width || !stageSize.height) return;
-    if (lastFitKeyRef.current === fitKey) return;
+    if (!stageSize.width || !stageSize.height || !isViewportFitGeometryReady) return;
+    if (viewport.fittedViewportKey === viewportFitKey) return;
     fitToBoard();
-  }, [fitKey, fitToBoard, stageSize.width, stageSize.height]);
+  }, [
+    fitToBoard,
+    isViewportFitGeometryReady,
+    stageSize.height,
+    stageSize.width,
+    viewport.fittedViewportKey,
+    viewportFitKey,
+  ]);
 
   useEffect(() => {
     interactionRef.current = null;
+    suppressNextTokenContextMenuRef.current = false;
     clearPingHoldTimer();
     clearPingBroadcastTimer();
+    setIsDropActive(false);
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setTokenDragState(null);
@@ -3559,6 +3619,14 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     setHoveredTokenTooltipId('');
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setTurnOrderInitiativeRollState({
+      tokenId: '',
+      status: 'idle',
+      config: null,
+    });
+    setTurnOrderInitiativeRoller(null);
   }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
@@ -4289,6 +4357,7 @@ export default function GrigliataBoard({
       };
 
       return {
+        ...currentViewport,
         scale: safeScale,
         x: referencePoint.x - (worldPoint.x * safeScale),
         y: referencePoint.y - (worldPoint.y * safeScale),
@@ -6322,12 +6391,18 @@ export default function GrigliataBoard({
     0,
     getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
   ), []);
+  const hasFittedCurrentViewport = (
+    isViewportFitGeometryReady
+    && viewport.fittedViewportKey === viewportFitKey
+  );
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
     tokens: visibleRenderedTokens,
     viewport,
     stageSize,
     limit: tokenMediaLoadLimit,
+    allowVisibleMedia: hasFittedCurrentViewport,
   }), [
+    hasFittedCurrentViewport,
     stageSize,
     tokenMediaLoadLimit,
     viewport,
@@ -6743,6 +6818,7 @@ export default function GrigliataBoard({
                 transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_DRAWER_TRANSITION}
               >
                 <TurnOrderPanel
+                  key={resolvedBackground?.id || '__grid__'}
                   currentUserId={currentUserId}
                   entries={sortedTurnOrderEntries}
                   isManager={isManager}

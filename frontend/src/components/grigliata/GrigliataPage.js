@@ -7274,7 +7274,6 @@ export default function GrigliataPage() {
             <div className="h-full min-h-[480px] xl:min-h-0">
               <PerformanceProfiler id="grigliata-board">
                 <GrigliataBoard
-                key={activeBackgroundId || '__grid__'}
                 activeBackground={displayBackground}
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}

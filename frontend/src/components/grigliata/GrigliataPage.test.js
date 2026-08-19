@@ -36,6 +36,7 @@ const mockTask05UpdateGrigliataCharacterResourcesCallable = jest.fn(() => Promis
 const mockTask07ResolveCharacterMediaCallable = jest.fn(() => Promise.resolve({
   data: { schemaVersion: 1, entries: [] },
 }));
+let mockGrigliataBoardMountCounter = 0;
 const mockLogGrigliataFogDebug = jest.fn();
 const mockRunWithDurableOperationIntent = jest.fn(({
   kind,
@@ -471,6 +472,11 @@ jest.mock('./GrigliataBoard', () => {
   const React = require('react');
 
     return function MockGrigliataBoard(props) {
+    const mountIdRef = React.useRef(0);
+    if (!mountIdRef.current) {
+      mockGrigliataBoardMountCounter += 1;
+      mountIdRef.current = mockGrigliataBoardMountCounter;
+    }
     const [initiativeRollResult, setInitiativeRollResult] = React.useState('');
     React.useEffect(() => (
       () => {
@@ -480,6 +486,7 @@ jest.mock('./GrigliataBoard', () => {
 
     return (
       <div data-testid="grigliata-board">
+        <div data-testid="board-mount-id">{String(mountIdRef.current)}</div>
         <div data-testid="board-background-name">{props.activeBackground?.name || ''}</div>
         <div data-testid="board-combat-background-name">{props.combatBackgroundName || ''}</div>
         <div data-testid="board-narration-active">{String(props.isNarrationOverlayActive)}</div>
@@ -1090,6 +1097,7 @@ describe('GrigliataPage', () => {
     mockBatchInstances.splice(0, mockBatchInstances.length);
     mockTransactionInstances.splice(0, mockTransactionInstances.length);
     mockGeneratedDocCounter = 0;
+    mockGrigliataBoardMountCounter = 0;
     useAuthSession.mockReturnValue({ repositoryAccessGeneration: 0 });
     mockFirestoreState.collections = {
       grigliata_backgrounds: [
@@ -1394,6 +1402,23 @@ describe('GrigliataPage', () => {
     expect(querySelectorSpy).not.toHaveBeenCalledWith('[data-navbar]');
 
     querySelectorSpy.mockRestore();
+  });
+
+  test('keeps the board mounted across active-map changes so its outgoing layer can crossfade', async () => {
+    render(<GrigliataPage />);
+
+    expect(await screen.findByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+    const initialMountId = screen.getByTestId('board-mount-id').textContent;
+
+    act(() => {
+      setDocData('grigliata_state/current', { activeBackgroundId: 'map-2' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-background-name')).toHaveTextContent('Iron Keep');
+    });
+    expect(screen.getByTestId('board-mount-id')).toHaveTextContent(initialMountId);
+    expect(mockGrigliataBoardMountCounter).toBe(1);
   });
 
   test('writes and refreshes non-DM page presence for users with character names', async () => {
