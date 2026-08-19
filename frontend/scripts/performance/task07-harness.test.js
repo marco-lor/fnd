@@ -91,7 +91,9 @@ const extractPerformanceArtifactPathEntries = (step, label) => {
   const withMapping = /^        with:\r?$/m.exec(step);
   assert.ok(withMapping, `${label} must contain a with mapping`);
   const withContent = step.slice(withMapping.index + withMapping[0].length);
-  const pathBlock = /^          path: \|\r?\n((?:^            [^\r\n]*(?:\r?\n|$))*)/m.exec(withContent);
+  const nextSibling = /^        \S/m.exec(withContent);
+  const withBlock = nextSibling ? withContent.slice(0, nextSibling.index) : withContent;
+  const pathBlock = /^          path: \|\r?\n((?:^            [^\r\n]*(?:\r?\n|$))*)/m.exec(withBlock);
   assert.ok(pathBlock, `${label} must contain an exact path block`);
   return pathBlock[1]
     .split(/\r?\n/)
@@ -753,6 +755,24 @@ test('checked-in full benchmark captures authoritative failures before the Task 
   );
   assert.throws(
     () => validateFullBenchmarkWorkflow(finalArtifactWithPathsLabel),
+    /final combined artifact must contain an exact path block/
+  );
+
+  const failureArtifactBorrowingEnvPath = workflow.replace(
+    /(          name: authoritative-failure-[\s\S]*?^          )path: \|\r?\n((?:            [^\r\n]*(?:\r?\n|$))*)/m,
+    '$1paths: |\n$2        env:\n          path: |\n$2'
+  );
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(failureArtifactBorrowingEnvPath),
+    /authoritative failure artifact must contain an exact path block/
+  );
+
+  const finalArtifactBorrowingEnvPath = workflow.replace(
+    /(          name: full-performance-benchmark[\s\S]*?^          )path: \|\r?\n((?:            [^\r\n]*(?:\r?\n|$))*)/m,
+    '$1paths: |\n$2        env:\n          path: |\n$2'
+  );
+  assert.throws(
+    () => validateFullBenchmarkWorkflow(finalArtifactBorrowingEnvPath),
     /final combined artifact must contain an exact path block/
   );
 });
