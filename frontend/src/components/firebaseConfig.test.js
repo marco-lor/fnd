@@ -69,6 +69,49 @@ describe("Firebase async bootstrap", () => {
     })).rejects.toThrow(message);
   });
 
+  test("rejects runtime configuration from a different explicit Firebase target", async () => {
+    const previousTarget = {
+      environment: process.env.REACT_APP_FND_ENVIRONMENT,
+      authDomain: process.env.REACT_APP_FND_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.REACT_APP_FND_FIREBASE_PROJECT_ID,
+      storageBucket: process.env.REACT_APP_FND_FIREBASE_STORAGE_BUCKET,
+    };
+    process.env.REACT_APP_FND_ENVIRONMENT = "staging";
+    process.env.REACT_APP_FND_FIREBASE_AUTH_DOMAIN = "fatin-test.firebaseapp.com";
+    process.env.REACT_APP_FND_FIREBASE_PROJECT_ID = "fatin-test";
+    process.env.REACT_APP_FND_FIREBASE_STORAGE_BUCKET = "fatin-test.firebasestorage.app";
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+
+    try {
+      const firebaseConfig = loadModule();
+      await expect(firebaseConfig.loadFirebaseConfig({
+        fetchImpl: jest.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...validConfig,
+            authDomain: "fatins.firebaseapp.com",
+            projectId: "fatins",
+            storageBucket: "fatins.firebasestorage.app",
+          }),
+        }),
+        forceRuntime: true,
+      })).rejects.toThrow(/explicit build target|projectId expected fatin-test/);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      for (const [key, value] of Object.entries({
+        REACT_APP_FND_ENVIRONMENT: previousTarget.environment,
+        REACT_APP_FND_FIREBASE_AUTH_DOMAIN: previousTarget.authDomain,
+        REACT_APP_FND_FIREBASE_PROJECT_ID: previousTarget.projectId,
+        REACT_APP_FND_FIREBASE_STORAGE_BUCKET: previousTarget.storageBucket,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   test("coalesces initialization and permits retry after a failure", async () => {
     const firebaseConfig = loadModule();
     firebaseConfig.__resetFirebaseForTests();

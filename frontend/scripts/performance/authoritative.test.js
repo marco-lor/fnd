@@ -72,6 +72,36 @@ test('authoritative flow checks cleanliness at entry and immediately before ever
   );
 });
 
+test('authoritative release build receives the explicit performance Firebase target', async () => {
+  const commands = [];
+
+  await main({
+    environment: { FND_PERF_RUN_ID: 'explicit-target' },
+    assertClean: () => {},
+    execute: (_command, args, commandEnvironment = {}) => {
+      commands.push({ args, commandEnvironment });
+    },
+    cleanup: async (operation, { waitForPorts }) => {
+      await operation();
+      await waitForPorts();
+    },
+    waitForPorts: async () => {},
+  });
+
+  const releaseBuild = commands.find(({ args }) => path.basename(args[0]) === 'build-production.js');
+  assert.ok(releaseBuild, 'authoritative flow must run the release builder');
+  assert.deepEqual(releaseBuild.args.slice(1), [
+    '--environment', 'performance',
+    '--project', 'demo-fnd-perf',
+    '--site', 'demo-fnd-perf',
+    '--bucket', 'demo-fnd-perf.appspot.com',
+  ]);
+  assert.equal(releaseBuild.commandEnvironment.FND_FIREBASE_ENVIRONMENT, 'performance');
+  assert.equal(releaseBuild.commandEnvironment.FND_FIREBASE_PROJECT_ID, 'demo-fnd-perf');
+  assert.equal(releaseBuild.commandEnvironment.FND_FIREBASE_HOSTING_SITE, 'demo-fnd-perf');
+  assert.equal(releaseBuild.commandEnvironment.FND_FIREBASE_STORAGE_BUCKET, 'demo-fnd-perf.appspot.com');
+});
+
 test('authoritative flow stops before a snapshot if the worktree becomes dirty', async () => {
   const commands = [];
 

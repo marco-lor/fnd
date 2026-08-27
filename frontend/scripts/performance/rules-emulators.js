@@ -6,6 +6,7 @@ const path = require('path');
 const {
   PERFORMANCE_PROJECT_ID,
   assertPerformanceProject,
+  configureOwnedPerformanceEnvironment,
   frontendRoot,
   resolvePortableJavaHome,
 } = require('./common');
@@ -106,6 +107,10 @@ const runRulesEmulators = async ({
     fsImpl,
     projectId,
   });
+  const ownedEnvironment = configureOwnedPerformanceEnvironment({
+    env: {...env},
+    mode: 'strict',
+  });
   await assertEmulatorPortsFreeImpl({ports: TASK06_EMULATOR_PORTS});
 
   const configRoot = path.join(
@@ -115,12 +120,12 @@ const runRulesEmulators = async ({
   );
   fsImpl.mkdirSync(configRoot, {recursive: true});
   const portableJavaHome = resolvePortableJavaHomeImpl();
-  const childEnvironment = createFirebaseCliEnvironmentImpl(env, {
+  const childEnvironment = createFirebaseCliEnvironmentImpl(ownedEnvironment, {
     XDG_CONFIG_HOME: configRoot,
     ...(portableJavaHome ? {
       JAVA_HOME: portableJavaHome,
       PATH: `${path.join(portableJavaHome, 'bin')}`
-        + `${path.delimiter}${env.PATH || ''}`,
+        + `${path.delimiter}${ownedEnvironment.PATH || ''}`,
     } : {}),
   });
 

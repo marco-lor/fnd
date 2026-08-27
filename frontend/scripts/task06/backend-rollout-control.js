@@ -7,6 +7,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 
 const CONFIG_PATH = 'app_config/task06_backend';
 const REPORT_SCHEMA_VERSION = 1;
@@ -38,7 +39,7 @@ const printHelp = () => console.log([
   `Task 06 guarded backend-control operator for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  `  node scripts/task06/backend-rollout-control.js --project ${PRODUCTION_PROJECT_ID}`,
+  `  node scripts/task06/backend-rollout-control.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_PROJECT_ID}.firebasestorage.app`,
   '    --derived-owner legacy|shadow|authoritative',
   '    --enabled-kinds <comma-separated operation kinds>',
   '    [--auth admin|firebase-cli] [--report <path>]',
@@ -72,6 +73,9 @@ const parseArguments = (args = []) => {
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
     else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--derived-owner',
       '--enabled-kinds',
       '--auth',
@@ -83,6 +87,9 @@ const parseArguments = (args = []) => {
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}.`);
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--derived-owner') options.derivedOwnerMode = value;
       if (argument === '--enabled-kinds') {
         options.enabledOperationKinds = value.split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -298,6 +305,7 @@ const createBackend = async ({projectId, authMode}) => {
 const main = async () => {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) return printHelp();
+  resolveOperatorTarget({options, allowPerformance: true});
   const target = assertSafeTarget(options);
   const desiredConfig = {
     derivedOwnerMode: options.derivedOwnerMode,

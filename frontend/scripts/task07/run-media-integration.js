@@ -8,6 +8,7 @@ const {
   waitForEmulatorPortsFree,
   withEmulatorPortCleanup,
 } = require('../performance/emulators');
+const {configureOwnedPerformanceEnvironment} = require('../performance/common');
 
 const DEFAULT_MEDIA_RUN_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_MEDIA_RUN_TIMEOUT_MS = 30 * 60 * 1000;
@@ -37,6 +38,10 @@ const runMediaIntegration = async ({
   assertPortsFree = assertEmulatorPortsFree,
   waitForPorts = waitForEmulatorPortsFree,
 } = {}) => {
+  const ownedEnvironment = configureOwnedPerformanceEnvironment({
+    env: {...environment},
+    mode: 'strict',
+  });
   await assertPortsFree();
   const playwrightCli = require.resolve('@playwright/test/cli');
   const generatedConfigPath = path.join(cwd, PERFORMANCE_FIREBASE_CONFIG_FILENAME);
@@ -61,10 +66,10 @@ const runMediaIntegration = async ({
       ],
       cwd,
       environment: {
-        ...environment,
+        ...ownedEnvironment,
         FND_TASK07_MEDIA_INTEGRATION: '1',
-        JAVA_TOOL_OPTIONS: environment.JAVA_TOOL_OPTIONS || '-Xmx512m',
-        NODE_OPTIONS: environment.NODE_OPTIONS || '--max-old-space-size=768',
+        JAVA_TOOL_OPTIONS: ownedEnvironment.JAVA_TOOL_OPTIONS || '-Xmx512m',
+        NODE_OPTIONS: ownedEnvironment.NODE_OPTIONS || '--max-old-space-size=768',
       },
       timeoutMs,
       label: 'Task 07 Playwright and Firebase emulator integration',

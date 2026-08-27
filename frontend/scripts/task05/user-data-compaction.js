@@ -12,6 +12,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 const {
   DRAIN_ID_PATTERN,
   scopeFingerprint,
@@ -791,7 +792,7 @@ const printHelp = () => console.log([
   'Task 05 User Data V2 legacy-root compaction.',
   '',
   'Dry-run:',
-  '  node scripts/task05/user-data-compaction.js --project <project>',
+  '  node scripts/task05/user-data-compaction.js --environment <production|staging|performance> --project <project> --site <site> --bucket <bucket>',
   '    --cutover-id <completed-global-cutover-id>',
   '    --cutover-verification-report <sealed-verification-report>',
   '    [--auth admin|firebase-cli] [--report <path>] [--verify]',
@@ -848,6 +849,9 @@ const parseArguments = (args = []) => {
       '--cutover-id',
       '--cutover-verification-report',
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--report',
       '--result',
     ].includes(argument)) {
@@ -864,6 +868,9 @@ const parseArguments = (args = []) => {
         options.cutoverVerificationReportPath = path.resolve(value);
       }
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--result') options.resultPath = path.resolve(value);
     } else throw new Error(`Unknown argument: ${argument}`);
@@ -1140,6 +1147,7 @@ const main = async (args = process.argv.slice(2), env = process.env) => {
     printHelp();
     return;
   }
+  resolveOperatorTarget({options, environment: env, allowPerformance: true});
   const target = assertSafeTarget(options, env);
   const cutoverVerificationReport = readJson(
     options.cutoverVerificationReportPath,

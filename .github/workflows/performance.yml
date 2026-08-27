@@ -12,6 +12,14 @@ defaults:
   run:
     working-directory: frontend
 
+# Every job in this workflow is performance-only. Keep its Firebase identity
+# explicit even when the workflow is triggered from main or devs.
+env:
+  FND_FIREBASE_ENVIRONMENT: performance
+  FND_FIREBASE_PROJECT_ID: demo-fnd-perf
+  FND_FIREBASE_HOSTING_SITE: demo-fnd-perf
+  FND_FIREBASE_STORAGE_BUCKET: demo-fnd-perf.appspot.com
+
 jobs:
   frontend-unit:
     runs-on: ubuntu-latest
@@ -104,7 +112,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
-      - run: npm run build:production
+      - run: npm run build:performance
       - run: npm run perf:verify-disabled
       - run: npm run perf:build
       - uses: actions/upload-artifact@v4
@@ -124,7 +132,7 @@ jobs:
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run build:production
+      - run: npm run build:performance
       - run: npm run perf:verify-disabled
       - run: npm run perf:build
       - run: npm run perf:run

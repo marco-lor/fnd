@@ -7,8 +7,12 @@ const path = require('path');
 const { createDeterministicBuildServer } = require('./deterministic-static-server');
 const {
   assertPerformanceProject,
+  configureOwnedPerformanceEnvironment,
   ensureDirectory,
   frontendRoot,
+  PERFORMANCE_AUTH_DOMAIN,
+  PERFORMANCE_HOSTING_SITE,
+  PERFORMANCE_STORAGE_BUCKET,
   projectId,
   resolvePortableJavaHome,
   resultsDir,
@@ -108,6 +112,7 @@ const createFirebaseEmulatorArguments = ({
   if (!firebaseCli || !configPath) {
     throw new TypeError('Firebase CLI and generated config paths are required.');
   }
+  assertPerformanceProject(lifecycleProjectId);
   return [
     firebaseCli,
     'emulators:start',
@@ -387,11 +392,15 @@ const waitForOwnedChildExit = (child, timeoutMs = 10_000) => {
 
 const run = async () => {
   assertPerformanceProject(projectId);
+  const ownedEnvironment = configureOwnedPerformanceEnvironment({
+    env: {...process.env},
+    mode: 'strict',
+  });
 
   const preflight = childProcess.spawnSync(
     process.execPath,
     [path.join(__dirname, 'preflight.js'), '--skip-browser'],
-    { cwd: frontendRoot, stdio: 'inherit' }
+    { cwd: frontendRoot, env: ownedEnvironment, stdio: 'inherit' }
   );
   if (preflight.status !== 0) process.exit(preflight.status || 1);
 
@@ -410,9 +419,9 @@ const run = async () => {
   const functionsEnvironmentPath = path.join(frontendRoot, 'functions', `.env.${projectId}`);
   fs.writeFileSync(functionsEnvironmentPath, [
     'FATINS_FIREBASE_API_KEY=demo-api-key',
-    `FATINS_FIREBASE_AUTH_DOMAIN=${projectId}.firebaseapp.com`,
+    `FATINS_FIREBASE_AUTH_DOMAIN=${PERFORMANCE_AUTH_DOMAIN}`,
     `FATINS_FIREBASE_PROJECT_ID=${projectId}`,
-    `FATINS_FIREBASE_STORAGE_BUCKET=${projectId}.appspot.com`,
+    `FATINS_FIREBASE_STORAGE_BUCKET=${PERFORMANCE_STORAGE_BUCKET}`,
     'FATINS_FIREBASE_MESSAGING_SENDER_ID=000000000000',
     'FATINS_FIREBASE_APP_ID=1:000000000000:web:performance',
     'FATINS_FIREBASE_MEASUREMENT_ID=',
@@ -450,19 +459,28 @@ const run = async () => {
     }),
     {
       cwd: frontendRoot,
-      env: createFirebaseCliEnvironment(process.env, {
+      env: createFirebaseCliEnvironment(ownedEnvironment, {
         ...(portableJavaHome ? {
           JAVA_HOME: portableJavaHome,
           PATH: `${path.join(portableJavaHome, 'bin')}${path.delimiter}${process.env.PATH || ''}`,
         } : {}),
         XDG_CONFIG_HOME: configRoot,
         FATINS_FIREBASE_API_KEY: 'demo-api-key',
-        FATINS_FIREBASE_AUTH_DOMAIN: `${projectId}.firebaseapp.com`,
+        FATINS_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
         FATINS_FIREBASE_PROJECT_ID: projectId,
-        FATINS_FIREBASE_STORAGE_BUCKET: `${projectId}.appspot.com`,
+        FATINS_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
         FATINS_FIREBASE_MESSAGING_SENDER_ID: '000000000000',
         FATINS_FIREBASE_APP_ID: '1:000000000000:web:performance',
         FATINS_FIREBASE_MEASUREMENT_ID: '',
+        FND_FIREBASE_ENVIRONMENT: 'performance',
+        FND_FIREBASE_PROJECT_ID: projectId,
+        FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+        FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
+        FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+        REACT_APP_FND_ENVIRONMENT: 'performance',
+        REACT_APP_FND_FIREBASE_PROJECT_ID: projectId,
+        REACT_APP_FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+        REACT_APP_FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
       }),
       stdio: ['ignore', emulatorLog, emulatorLog],
       shell: false,

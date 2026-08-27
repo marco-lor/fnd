@@ -8,6 +8,10 @@ const zlib = require('zlib');
 const {
   ensureDirectory,
   frontendRoot,
+  PERFORMANCE_AUTH_DOMAIN,
+  PERFORMANCE_HOSTING_SITE,
+  PERFORMANCE_STORAGE_BUCKET,
+  configureOwnedPerformanceEnvironment,
   projectId,
   resultsDir,
   writeJson,
@@ -21,6 +25,20 @@ const requiredChunks = JSON.parse(fs.readFileSync(
 const PINNED_WEBCHANNEL_CALLBACK_SOURCE = 'function(){e()}';
 const PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE = 'setTimeout((function(){e()}),';
 const countOccurrences = (source, needle) => source.split(needle).length - 1;
+
+const performanceEnvironment = configureOwnedPerformanceEnvironment({
+  env: {...process.env},
+  mode: 'strict',
+});
+Object.assign(performanceEnvironment, {
+  REACT_APP_FND_ENVIRONMENT: 'performance',
+  REACT_APP_FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+  REACT_APP_FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+  REACT_APP_FND_FIREBASE_PROJECT_ID: projectId,
+  REACT_APP_FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
+  REACT_APP_FND_PERF: '1',
+  REACT_APP_FND_PERF_PROJECT_ID: projectId,
+});
 
 
 const walk = (directoryPath) => {
@@ -70,10 +88,8 @@ const build = childProcess.spawnSync(
   {
     cwd: frontendRoot,
     env: {
-      ...process.env,
+      ...performanceEnvironment,
       GENERATE_SOURCEMAP: 'false',
-      REACT_APP_FND_PERF: '1',
-      REACT_APP_FND_PERF_PROJECT_ID: projectId,
     },
     stdio: 'inherit',
   }
@@ -87,10 +103,8 @@ const statsBuild = childProcess.spawnSync(
   {
     cwd: frontendRoot,
     env: {
-      ...process.env,
+      ...performanceEnvironment,
       GENERATE_SOURCEMAP: 'false',
-      REACT_APP_FND_PERF: '1',
-      REACT_APP_FND_PERF_PROJECT_ID: projectId,
     },
     stdio: 'inherit',
   }
@@ -228,8 +242,15 @@ for (const filePath of walk(buildDir)) {
 
 const verify = childProcess.spawnSync(
   process.execPath,
-  [path.join(frontendRoot, 'scripts', 'build-production.js'), '--verify-only'],
-  { cwd: frontendRoot, stdio: 'inherit' }
+  [
+    path.join(frontendRoot, 'scripts', 'build-production.js'),
+    '--verify-only',
+    '--environment', 'performance',
+    '--project', projectId,
+    '--site', PERFORMANCE_HOSTING_SITE,
+    '--bucket', PERFORMANCE_STORAGE_BUCKET,
+  ],
+  { cwd: frontendRoot, env: performanceEnvironment, stdio: 'inherit' }
 );
 if (verify.status !== 0) process.exit(verify.status || 1);
 

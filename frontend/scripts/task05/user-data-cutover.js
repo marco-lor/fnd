@@ -9,6 +9,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 
 const CUTOVER_SCHEMA_VERSION = 1;
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
@@ -87,7 +88,7 @@ const printHelp = () => console.log([
   'Task 05 user-data cutover controller.',
   '',
   'Usage:',
-  '  node scripts/task05/user-data-cutover.js --project <project>',
+  '  node scripts/task05/user-data-cutover.js --environment production --project <project> --site <site> --bucket <bucket>',
   '    --action open|seal|complete|abort --scope global|user --drain-id <id>',
   '    [--auth admin|firebase-cli]',
   '    [--drain-user <uid>] [--verification-report <path>]',
@@ -140,6 +141,9 @@ const parseArguments = (args = []) => {
       '--drain-id',
       '--drain-user',
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--report',
       '--result',
       '--scope',
@@ -158,6 +162,9 @@ const parseArguments = (args = []) => {
       if (argument === '--drain-id') options.drainId = value;
       if (argument === '--drain-user') options.drainUserId = value;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--result') options.resultPath = path.resolve(value);
       if (argument === '--scope') options.scope = value;
@@ -997,7 +1004,10 @@ const runFreshMigrationVerification = (options, {env = process.env} = {}) => {
   const reportPath = path.join(temporaryDirectory, 'verification.json');
   const argumentsList = [
     path.join(__dirname, 'user-data-migration.js'),
+    '--environment', options.environmentName,
     '--project', options.projectId,
+    '--site', options.hostingSite,
+    '--bucket', options.storageBucket,
     '--auth', options.authMode,
     '--operation', 'verify',
     '--report', reportPath,
@@ -1311,6 +1321,7 @@ const main = async () => {
     printHelp();
     return;
   }
+  resolveOperatorTarget({options, allowPerformance: true});
   const report = await runCutover(options);
   console.log(JSON.stringify({
     action: report.action,

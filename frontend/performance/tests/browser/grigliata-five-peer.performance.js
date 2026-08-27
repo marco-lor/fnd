@@ -1,4 +1,8 @@
-const { configureOwnedPerformanceEnvironment, median } = require('../../../scripts/performance/common');
+const {
+  configureOwnedPerformanceEnvironment,
+  median,
+  projectId,
+} = require('../../../scripts/performance/common');
 const { isDeepStrictEqual } = require('node:util');
 
 configureOwnedPerformanceEnvironment();
@@ -140,9 +144,9 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
   let app = null;
   let primaryError = null;
   try {
-    app = getApps()[0] || initializeApp({ projectId: 'demo-fnd-perf' });
-    if (app.options.projectId !== 'demo-fnd-perf') {
-      throw new Error(`Five-peer Admin app must use demo-fnd-perf, received ${app.options.projectId || 'unknown'}.`);
+    app = getApps()[0] || initializeApp({ projectId });
+    if (app.options.projectId !== projectId) {
+      throw new Error(`Five-peer Admin app must use ${projectId}, received ${app.options.projectId || 'unknown'}.`);
     }
     const db = getFirestore(app);
     boardState = db.doc('grigliata_state/current');

@@ -27,6 +27,7 @@ const {
   storagePathFromValue,
   validCanonicalAuditExclusion,
 } = require('./media-derivative-backfill');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 const TOKEN_RUNTIME_COVERAGE = require('./token-runtime-coverage.json');
 
 const CONTROL_PATH = 'utils/task07_media';
@@ -668,6 +669,9 @@ const parseArguments = (args = []) => {
       options.allowLiveProject = true;
     } else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--mode',
       '--auth',
       '--confirm-project',
@@ -685,6 +689,9 @@ const parseArguments = (args = []) => {
       }
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--mode') options.mode = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--confirm-project') options.confirmProject = value;
@@ -1332,7 +1339,7 @@ const printHelp = () => console.log([
   `Guarded Media V2 rollout control for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  `  node scripts/task07/media-rollout-control.js --project ${PRODUCTION_PROJECT_ID}`,
+  `  node scripts/task07/media-rollout-control.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_STORAGE_BUCKET}`,
   '    --mode v1-write|canonical-only --auth firebase-cli',
   `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --webmaster-uid <uid> --confirm-webmaster-uid <same-uid>',
@@ -1357,6 +1364,7 @@ const printHelp = () => console.log([
 const main = async (argv = process.argv.slice(2)) => {
   const options = parseArguments(argv);
   if (options.help) return printHelp();
+  resolveOperatorTarget({options});
   const target = assertSafeTarget(options);
   let verificationEvidence = null;
   let canonicalAuditReport = null;

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
 const {
+  projectId,
   resultsDir,
   writeJson,
 } = require('../../../scripts/performance/common');
@@ -236,7 +237,7 @@ test('create deterministic emulator authentication states', async ({ browser, ba
     writeJson(diagnosticsPath, {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
-      projectId: 'demo-fnd-perf',
+      projectId,
       status: setupError ? 'failed' : 'passed',
       expectedAccountCount: Object.keys(ACCOUNT).length,
       completedAccountCount: accountDiagnostics.filter(({ completed }) => completed).length,

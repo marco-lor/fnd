@@ -1,5 +1,20 @@
 {
-  "projects": {
-    "default": "fatins"
+  "projects": {},
+  "targets": {
+    "fatins": {
+      "hosting": {
+        "app": ["fatins"]
+      }
+    },
+    "fatin-test": {
+      "hosting": {
+        "app": ["fatin-test"]
+      }
+    },
+    "demo-fnd-perf": {
+      "hosting": {
+        "app": ["demo-fnd-perf"]
+      }
+    }
   }
 }

@@ -15,8 +15,13 @@ const {
   PRODUCTION_PROJECT_ID,
   PRODUCTION_STORAGE_BUCKET,
 } = require('../production-target');
+const {getFirebaseEnvironment} = require('../firebase-environment');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 
-const DEMO_PROJECT_ID = 'demo-fnd-perf';
+const PERFORMANCE_ENVIRONMENT = getFirebaseEnvironment('performance');
+const DEMO_PROJECT_ID = PERFORMANCE_ENVIRONMENT.projectId;
+const DEMO_HOSTING_SITE = PERFORMANCE_ENVIRONMENT.hostingSite;
+const DEMO_STORAGE_BUCKET = PERFORMANCE_ENVIRONMENT.storageBucket;
 const REPORT_SCHEMA_VERSION = 4;
 const PLAN_VERSION = 5;
 const CANONICAL_AUDIT_VERSION = 1;
@@ -2709,6 +2714,9 @@ const parseOptions = (argv = []) => {
     } else if ([
       '--operation',
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--auth',
       '--confirm-project',
       '--source',
@@ -2730,6 +2738,9 @@ const parseOptions = (argv = []) => {
       index += 1;
       if (argument === '--operation') options.operation = value;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--confirm-project') options.confirmProject = value;
       if (argument === '--source') {
@@ -4897,17 +4908,17 @@ const printHelp = () => console.log([
   'Task 07 legacy-media migration, active canonical audit, and rollback.',
   '',
   'Usage:',
-  '  node scripts/task07/media-derivative-backfill.js --project demo-fnd-perf',
+  `  node scripts/task07/media-derivative-backfill.js --environment performance --project ${DEMO_PROJECT_ID} --site ${DEMO_HOSTING_SITE} --bucket ${DEMO_STORAGE_BUCKET}`,
   '    [--operation backfill|verify|rollback|canonical-audit]',
   '    [--report <path>]',
   '    [--approved-backfill-report <count-bound-plan>  # verify only]',
   '    [--page-size 1..50] [--max-pages 1..100] [--json]',
-  '  node scripts/task07/media-derivative-backfill.js --project demo-fnd-perf',
+  `  node scripts/task07/media-derivative-backfill.js --environment performance --project ${DEMO_PROJECT_ID} --site ${DEMO_HOSTING_SITE} --bucket ${DEMO_STORAGE_BUCKET}`,
   '    --operation backfill|rollback --execute',
   '    --approve-fingerprint <sha256> --report <reviewed-plan>',
   '    [--checkpoint <path>] [--resume]',
   '',
-  `  node scripts/task07/media-derivative-backfill.js --project ${PRODUCTION_PROJECT_ID}`,
+  `  node scripts/task07/media-derivative-backfill.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_STORAGE_BUCKET}`,
   `    --auth firebase-cli --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --catalog-owner-uid <verified-webmaster-uid>',
   '    --confirm-catalog-owner-uid <same-uid>',
@@ -4919,7 +4930,7 @@ const printHelp = () => console.log([
   'Safety:',
   '  - Planning, verification, and canonical-audit are read-only.',
   `  - Live access is allowed only for ${PRODUCTION_PROJECT_ID}.`,
-  '  - Emulator behavior remains restricted to demo-fnd-perf loopback hosts.',
+  `  - Emulator behavior remains restricted to ${DEMO_PROJECT_ID} loopback hosts.`,
   `  - Live access is hard-locked to ${PRODUCTION_PROJECT_ID} and ${PRODUCTION_STORAGE_BUCKET}.`,
   '  - Live access requires Firebase CLI temporary ADC and every source.',
   '  - The confirmed webmaster is only a fallback for ownerless global media.',
@@ -4934,6 +4945,7 @@ const main = async (argv = process.argv.slice(2)) => {
     printHelp();
     return;
   }
+  resolveOperatorTarget({options, allowPerformance: true});
   const target = assertSafeTarget(options);
   const backend = await createAdminBackend({
     projectId: options.projectId,
@@ -5030,6 +5042,8 @@ module.exports = {
   DEFAULT_MAX_PAGES,
   DEFAULT_PAGE_SIZE,
   DEMO_PROJECT_ID,
+  DEMO_HOSTING_SITE,
+  DEMO_STORAGE_BUCKET,
   PRODUCTION_PROJECT_ID,
   PRODUCTION_STORAGE_BUCKET,
   MAX_MAX_PAGES,

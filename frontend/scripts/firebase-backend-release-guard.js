@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+const childProcess = require('node:child_process');
+const {
+  resolveEnvironmentFromProcess,
+} = require('./firebase-environment');
 const {PRODUCTION_PROJECT_ID} = require('./production-target');
 const DEPLOYMENT_PLANES = new Set([
   'firestore',
@@ -19,9 +23,35 @@ const resolveProjectId = (environment = {}) => (
   || ''
 ).trim();
 
+const resolveGitBranchOutput = ({
+  environment = process.env,
+  execFileSyncImpl = childProcess.execFileSync,
+  cwd = process.cwd(),
+} = {}) => {
+  if (
+    environment.FND_GIT_BRANCH
+    || environment.GITHUB_HEAD_REF
+    || environment.GITHUB_REF_NAME
+    || environment.BRANCH_NAME
+  ) {
+    return '';
+  }
+  try {
+    return execFileSyncImpl('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch (_error) {
+    return '';
+  }
+};
+
 const guardBackendRelease = ({
   argv = process.argv.slice(2),
   environment = process.env,
+  execFileSyncImpl = childProcess.execFileSync,
+  cwd = process.cwd(),
   writeError = (message) => process.stderr.write(`${message}\n`),
 } = {}) => {
   if (argv.length !== 1 || !DEPLOYMENT_PLANES.has(argv[0])) {
@@ -31,11 +61,27 @@ const guardBackendRelease = ({
 
   const plane = argv[0];
   const projectId = resolveProjectId(environment);
-  if (projectId !== PRODUCTION_PROJECT_ID) {
+  try {
+    const target = resolveEnvironmentFromProcess({
+      environment,
+      gitBranchOutput: resolveGitBranchOutput({environment, execFileSyncImpl, cwd}),
+    });
+    if (!target.deployable) {
+      throw new Error(
+        `Firebase environment ${target.name} is reserved for performance workflows and cannot be deployed.`
+      );
+    }
+    if (projectId !== target.projectId) {
+      throw new Error(
+        `Firebase CLI project ${projectId || '<unset>'} does not match explicit project ${target.projectId}.`
+      );
+    }
+  } catch (error) {
     writeError([
-      `BLOCKED: ${plane} deployment must target exactly ${PRODUCTION_PROJECT_ID}.`,
+      `BLOCKED: ${plane} deployment requires an explicit branch-aware Firebase target.`,
       `Received Firebase project: ${projectId || '<unset>'}.`,
-      'Every other Firebase project is refused by this production repository.',
+      'Every other Firebase project is refused by this repository.',
+      `Reason: ${error.message}`,
     ].join('\n'));
     return 1;
   }
@@ -51,6 +97,7 @@ module.exports = {
   DEPLOYMENT_PLANES,
   PRODUCTION_PROJECT_ID,
   guardBackendRelease,
+  resolveGitBranchOutput,
   resolveProjectId,
   usage,
 };

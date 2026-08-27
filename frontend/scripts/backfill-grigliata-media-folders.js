@@ -1,11 +1,22 @@
 #!/usr/bin/env node
 
 const args = process.argv.slice(2);
+const path = require('node:path');
+const {
+  resolveCurrentBranchName,
+  resolveEnvironmentSelection,
+} = require('./firebase-environment');
 const shouldWrite = args.includes('--write');
 const shouldShowHelp = args.includes('--help') || args.includes('-h');
 const projectArgIndex = args.indexOf('--project');
+const environmentArgIndex = args.indexOf('--environment');
+const siteArgIndex = args.indexOf('--site');
+const bucketArgIndex = args.indexOf('--bucket');
 const authArgIndex = args.indexOf('--auth');
 const projectId = projectArgIndex >= 0 ? args[projectArgIndex + 1] : '';
+const environmentName = environmentArgIndex >= 0 ? args[environmentArgIndex + 1] : '';
+const hostingSite = siteArgIndex >= 0 ? args[siteArgIndex + 1] : '';
+const storageBucket = bucketArgIndex >= 0 ? args[bucketArgIndex + 1] : '';
 const authMode = authArgIndex >= 0 ? args[authArgIndex + 1] : 'admin';
 
 const MEDIA_DEFINITIONS = [
@@ -28,7 +39,9 @@ const printHelp = () => {
     'Backfill Grigliata media folder fields.',
     '',
     'Usage:',
-    '  node scripts/backfill-grigliata-media-folders.js [--project <project-id>] [--auth admin|firebase-cli] [--write]',
+    '  node scripts/backfill-grigliata-media-folders.js --environment production|staging',
+    '    --project <project-id> --site <hosting-site> --bucket <storage-bucket>',
+    '    [--auth admin|firebase-cli] [--write]',
     '',
     'Default mode is a dry run. Pass --write to persist missing or invalid folder ids as an empty string.',
     'Default auth is admin, which uses Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.',
@@ -44,6 +57,17 @@ if (shouldShowHelp) {
 if (projectArgIndex >= 0 && !projectId) {
   console.error('Missing value for --project.');
   process.exit(1);
+}
+
+for (const [index, label] of [
+  [environmentArgIndex, '--environment'],
+  [siteArgIndex, '--site'],
+  [bucketArgIndex, '--bucket'],
+].filter(([index]) => index >= 0)) {
+  if (!args[index + 1]) {
+    console.error(`Missing value for ${label}.`);
+    process.exit(1);
+  }
 }
 
 if (authArgIndex >= 0 && !authMode) {
@@ -238,6 +262,16 @@ const findInvalidMediaDocs = async ({
 };
 
 const main = async () => {
+  const target = resolveEnvironmentSelection({
+    branchName: resolveCurrentBranchName({cwd: path.resolve(__dirname, '..')}),
+    environmentName,
+    hostingSite,
+    projectId,
+    storageBucket,
+  });
+  if (!target.deployable) {
+    throw new Error(`Grigliata media backfill cannot target ${target.name}.`);
+  }
   const backend = await createBackend();
   console.log(`Grigliata media folder backfill (${shouldWrite ? 'write' : 'dry-run'} mode, ${backend.label})`);
 

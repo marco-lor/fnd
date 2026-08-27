@@ -121,30 +121,55 @@ test('production build configuration fails closed when App Check is omitted', ()
 
 test('production target requires exact project, confirmation, and Firebase CLI auth', () => {
   const options = parseArguments([
+    '--environment', 'production',
     '--project', 'fatins',
+    '--site', 'fatins',
+    '--bucket', 'fatins.firebasestorage.app',
     '--auth', 'firebase-cli',
     '--allow-live-project',
     '--confirm-project', 'fatins',
   ]);
-  assert.deepEqual(assertSafeTarget(options, {}), {
+  assert.deepEqual(assertSafeTarget(options, {FND_GIT_BRANCH: 'main'}), {
+    environmentName: 'production',
     live: true,
     projectId: 'fatins',
   });
   assert.throws(
-    () => assertSafeTarget({...options, projectId: 'fatin-test'}, {}),
-    /only live project fatins/
+    () => assertSafeTarget({...options, projectId: 'fatin-test'}, {FND_GIT_BRANCH: 'main'}),
+    /target mismatch|project.*fatins|fatin-test/i
   );
   assert.throws(
-    () => assertSafeTarget({...options, allowLiveProject: false}, {}),
+    () => assertSafeTarget({...options, allowLiveProject: false}, {FND_GIT_BRANCH: 'main'}),
     /allow-live-project/
   );
   assert.throws(
-    () => assertSafeTarget({...options, authMode: 'admin'}, {}),
+    () => assertSafeTarget({...options, authMode: 'admin'}, {FND_GIT_BRANCH: 'main'}),
     /requires --auth firebase-cli/
   );
   assert.throws(
-    () => assertSafeTarget(options, {GCLOUD_PROJECT: 'fatin-test'}),
+    () => assertSafeTarget(options, {FND_GIT_BRANCH: 'main', GCLOUD_PROJECT: 'fatin-test'}),
     /does not match/
+  );
+});
+
+test('staging App Check verification accepts only the devs/fatin-test target tuple', () => {
+  const options = parseArguments([
+    '--environment', 'staging',
+    '--project', 'fatin-test',
+    '--site', 'fatin-test',
+    '--bucket', 'fatin-test.firebasestorage.app',
+    '--auth', 'firebase-cli',
+    '--allow-live-project',
+    '--confirm-project', 'fatin-test',
+  ]);
+  assert.deepEqual(assertSafeTarget(options, {FND_GIT_BRANCH: 'devs'}), {
+    environmentName: 'staging',
+    live: true,
+    projectId: 'fatin-test',
+  });
+  assert.throws(
+    () => assertSafeTarget(options, {FND_GIT_BRANCH: 'main'}),
+    /staging.*devs|devs.*staging/i
   );
 });
 

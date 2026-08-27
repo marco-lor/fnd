@@ -12,6 +12,7 @@ const {
   PRODUCTION_PROJECT_ID,
   PRODUCTION_STORAGE_BUCKET,
 } = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 const {canonicalHash} = require('./media-derivative-backfill');
 
 const REPORT_SCHEMA_VERSION = 1;
@@ -180,6 +181,9 @@ const parseArguments = (args = []) => {
       options.allowLiveProject = true;
     } else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--auth',
       '--confirm-project',
       '--compare',
@@ -192,6 +196,9 @@ const parseArguments = (args = []) => {
       }
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--confirm-project') options.confirmProject = value;
       if (argument === '--compare') options.comparePath = path.resolve(value);
@@ -238,7 +245,7 @@ const assertSafeEnvironment = (environment = process.env) => {
   return true;
 };
 
-const createBackend = async ({projectId, pageSize}) => {
+const createBackend = async ({projectId, pageSize, storageBucket}) => {
   const {deleteApp, initializeApp} = requireFromFunctions('firebase-admin/app');
   const {getStorage} = requireFromFunctions('firebase-admin/storage');
   const previousAdcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -247,7 +254,7 @@ const createBackend = async ({projectId, pageSize}) => {
   let app;
   try {
     app = initializeApp(
-      {projectId, storageBucket: PRODUCTION_STORAGE_BUCKET},
+      {projectId, storageBucket},
       `task07-storage-inventory-${process.pid}-${Date.now()}`
     );
   } catch (error) {
@@ -321,7 +328,7 @@ const printHelp = () => console.log([
   `Read-only Storage inventory for ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  `  node scripts/task07/media-storage-inventory.js --project ${PRODUCTION_PROJECT_ID}`,
+  `  node scripts/task07/media-storage-inventory.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_STORAGE_BUCKET}`,
   `    --confirm-project ${PRODUCTION_PROJECT_ID} --allow-live-project`,
   '    --auth firebase-cli [--page-size 1..1000] [--report <path>]',
   '    [--compare <pre-cutover-inventory>]',
@@ -333,15 +340,19 @@ const printHelp = () => console.log([
 const main = async (argv = process.argv.slice(2)) => {
   const options = parseArguments(argv);
   if (options.help) return printHelp();
+  const target = resolveOperatorTarget({options});
   assertSafeEnvironment();
-  const backend = await createBackend(options);
+  const backend = await createBackend({...options, storageBucket: target.storageBucket});
   try {
     const report = buildInventoryReport({
-      projectId: options.projectId,
-      storageBucket: PRODUCTION_STORAGE_BUCKET,
+      projectId: target.projectId,
+      storageBucket: target.storageBucket,
       objects: await backend.readAll(),
     });
-    validateInventoryReport(report);
+    validateInventoryReport(report, {
+      projectId: target.projectId,
+      storageBucket: target.storageBucket,
+    });
     writeJsonAtomic(options.reportPath, report);
     const comparison = options.comparePath ? compareInventoryReports({
       before: readJson(options.comparePath),

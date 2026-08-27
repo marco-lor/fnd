@@ -21,8 +21,8 @@
     ],
     "predeploy": [
       "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" hosting",
-      "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
-      "npm --prefix \"$PROJECT_DIR\" run build:production"
+      "node \"$PROJECT_DIR/scripts/verify-runtime-prerequisites.js\"",
+      "node \"$PROJECT_DIR/scripts/build-production.js\""
     ],
     "headers": [
       {
@@ -157,7 +157,7 @@
         "destination": "/index.html"
       }
     ],
-    "site": "fatins"
+    "target": "app"
   },
   "functions": [
     {
@@ -172,13 +172,13 @@
       ],
       "predeploy": [
         "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" functions",
-        "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
+        "node \"$PROJECT_DIR/scripts/verify-runtime-prerequisites.js\"",
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ],
       "postdeploy": [
-        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatins --region europe-west8 --check",
-        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatins --region europe-west1 --check"
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --environment-from-process --region europe-west8 --check",
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --environment-from-process --region europe-west1 --check"
       ]
     }
   ],

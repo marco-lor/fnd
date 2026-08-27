@@ -6,6 +6,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
+  FIREBASE_ENVIRONMENTS,
+  resolveCurrentBranchName,
+  resolveEnvironmentSelection,
+} = require('./firebase-environment');
+const {
   CALLABLE_AUDIT_REGIONS: AUDIT_REGIONS,
   PRIMARY_CALLABLE_REGION: PRODUCTION_WRITE_REGION,
   PRODUCTION_PROJECT_ID,
@@ -25,6 +30,11 @@ const DEFAULT_REPORT_PATH = path.join(
   FRONTEND_ROOT,
   'performance-results',
   'callable-invoker-policy-plan.json'
+);
+const LIVE_PROJECT_IDS = new Set(
+  Object.values(FIREBASE_ENVIRONMENTS)
+    .filter(({deployable}) => deployable)
+    .map(({projectId}) => projectId)
 );
 
 // Each region is an explicit allowlist. Adding a callable still requires an
@@ -256,21 +266,25 @@ const REQUIRED_CALLABLES_BY_REGION = Object.freeze({
 });
 
 const printHelp = () => console.log([
-  `Callable public-invoker verifier/reconciler for production ${PRODUCTION_PROJECT_ID}.`,
+  'Callable public-invoker verifier/reconciler for an explicit Firebase environment.',
   '',
   'Usage:',
   '  node scripts/callable-invoker-policy.js',
-  `    --project ${PRODUCTION_PROJECT_ID} --region <audited-region> [--check] [--report <path>]`,
+  '    --environment production|staging --project <project-id>',
+  '    --site <hosting-site> --bucket <storage-bucket>',
+  '    --region <audited-region> [--check] [--report <path>]',
   '  node scripts/callable-invoker-policy.js',
-  `    --project ${PRODUCTION_PROJECT_ID} --region ${PRODUCTION_WRITE_REGION} --execute`,
-  `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
+  '    --environment production|staging --project <project-id>',
+  '    --site <hosting-site> --bucket <storage-bucket>',
+  `    --region ${PRODUCTION_WRITE_REGION} --execute`,
+  '    --allow-live-project --confirm-project <project-id>',
   '    --approve-fingerprint <sha256> [--report <path>]',
   '',
   'Safety:',
   '  - Dry-run is the default and writes a deterministic local plan.',
   '  - --check is read-only and exits non-zero on any drift or blocker.',
   '  - Read-only audit regions: europe-west8, europe-west1.',
-  `  - Writes remain hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`,
+  `  - Writes remain hard-locked to the selected live project/${PRODUCTION_WRITE_REGION}.`,
   '  - Execution requires the exact current dry-run fingerprint.',
   '  - Only exact reviewed manifest callables for the selected region are managed.',
   '  - Unrelated IAM bindings are retained and verified after every update.',
@@ -282,11 +296,15 @@ const parseArguments = (args = []) => {
     approveFingerprint: '',
     check: false,
     confirmProject: '',
+    environmentFromProcess: false,
+    environmentName: '',
     execute: false,
     help: false,
+    hostingSite: '',
     projectId: '',
     region: '',
     reportPath: DEFAULT_REPORT_PATH,
+    storageBucket: '',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -295,8 +313,12 @@ const parseArguments = (args = []) => {
     else if (argument === '--check') options.check = true;
     else if (argument === '--execute') options.execute = true;
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
+    else if (argument === '--environment-from-process') options.environmentFromProcess = true;
     else if ([
+      '--environment',
       '--project',
+      '--site',
+      '--bucket',
       '--region',
       '--report',
       '--approve-fingerprint',
@@ -307,7 +329,10 @@ const parseArguments = (args = []) => {
         throw new Error(`Missing value for ${argument}.`);
       }
       index += 1;
+      if (argument === '--environment') options.environmentName = value;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--region') options.region = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--approve-fingerprint') options.approveFingerprint = value;
@@ -318,8 +343,11 @@ const parseArguments = (args = []) => {
   }
 
   if (options.help) return options;
-  if (options.projectId !== PRODUCTION_PROJECT_ID) {
-    throw new Error(`This production operator accepts only project ${PRODUCTION_PROJECT_ID}.`);
+  if (!options.environmentFromProcess) {
+    if (!options.environmentName) throw new Error('Explicit --environment is required.');
+    if (!options.projectId) throw new Error('Explicit --project <project-id> is required.');
+    if (!options.hostingSite) throw new Error('Explicit --site <hosting-site> is required.');
+    if (!options.storageBucket) throw new Error('Explicit --bucket <storage-bucket> is required.');
   }
   if (!AUDIT_REGIONS.includes(options.region)) {
     throw new Error(
@@ -345,18 +373,43 @@ const parseArguments = (args = []) => {
   return options;
 };
 
+const resolveProcessOptions = (options, environment = process.env) => ({
+  ...options,
+  environmentName: options.environmentName || environment.FND_FIREBASE_ENVIRONMENT || '',
+  hostingSite: options.hostingSite || environment.FND_FIREBASE_HOSTING_SITE || '',
+  projectId: options.projectId || environment.FND_FIREBASE_PROJECT_ID || '',
+  storageBucket: options.storageBucket || environment.FND_FIREBASE_STORAGE_BUCKET || '',
+});
+
 const assertSafeEnvironment = (options, environment = process.env) => {
-  for (const variable of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT']) {
-    if (environment[variable] && environment[variable] !== options.projectId) {
-      throw new Error(`${variable} does not match the explicit --project.`);
-    }
-  }
   if (environment.FUNCTIONS_EMULATOR || environment.FIREBASE_EMULATOR_HUB) {
     throw new Error('Callable IAM policy operations cannot run against emulators.');
   }
+  const resolvedOptions = resolveProcessOptions(options, environment);
+  for (const variable of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT']) {
+    if (environment[variable] && environment[variable] !== resolvedOptions.projectId) {
+      throw new Error(`${variable} does not match the explicit --project.`);
+    }
+  }
+  const target = resolveEnvironmentSelection({
+    branchName: resolveCurrentBranchName({
+      environment,
+      cwd: FRONTEND_ROOT,
+    }),
+    environmentName: resolvedOptions.environmentName,
+    hostingSite: resolvedOptions.hostingSite,
+    projectId: resolvedOptions.projectId,
+    storageBucket: resolvedOptions.storageBucket,
+  });
+  if (!target.deployable) {
+    throw new Error(`Callable IAM policy operations cannot target ${target.name}.`);
+  }
   return {
-    projectId: options.projectId,
-    region: options.region,
+    ...resolvedOptions,
+    environmentName: target.name,
+    projectId: target.projectId,
+    region: resolvedOptions.region,
+    target,
   };
 };
 
@@ -486,8 +539,8 @@ const buildPolicyPlan = async ({
   projectId = PRODUCTION_PROJECT_ID,
   region = PRODUCTION_WRITE_REGION,
 }) => {
-  if (projectId !== PRODUCTION_PROJECT_ID || !AUDIT_REGIONS.includes(region)) {
-    throw new Error(`Policy planning is hard-locked to ${PRODUCTION_PROJECT_ID} reviewed audit regions.`);
+  if (!LIVE_PROJECT_IDS.has(projectId) || !AUDIT_REGIONS.includes(region)) {
+    throw new Error('Policy planning requires a reviewed production or staging project and audit region.');
   }
   const managed = selectManagedCallables(manifest, region);
   const listing = await backend.listFunctions(projectId);
@@ -589,8 +642,12 @@ const assertApprovedPlan = ({approved, current, approveFingerprint}) => {
 };
 
 const executePolicyPlan = async ({backend, manifest, plan}) => {
-  if (plan.projectId !== PRODUCTION_PROJECT_ID || plan.region !== PRODUCTION_WRITE_REGION) {
-    throw new Error(`Policy execution is hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`);
+  if (!LIVE_PROJECT_IDS.has(plan.projectId) || plan.region !== PRODUCTION_WRITE_REGION) {
+    throw new Error(
+      plan.projectId === PRODUCTION_PROJECT_ID
+        ? `Policy execution is hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`
+        : `Policy execution is hard-locked to a reviewed live project/${PRODUCTION_WRITE_REGION}.`
+    );
   }
   if (plan.blockers.length > 0) {
     throw new Error('IAM reconciliation is blocked; no IAM writes were attempted.');
@@ -602,7 +659,7 @@ const executePolicyPlan = async ({backend, manifest, plan}) => {
       throw new Error(`IAM policy changed before write for ${entry.functionId}. Re-plan.`);
     }
     await backend.setInvokerUpdate(
-      PRODUCTION_PROJECT_ID,
+      plan.projectId,
       entry.serviceName,
       ['public']
     );
@@ -619,7 +676,7 @@ const executePolicyPlan = async ({backend, manifest, plan}) => {
   const finalPlan = await buildPolicyPlan({
     backend,
     manifest,
-    projectId: PRODUCTION_PROJECT_ID,
+    projectId: plan.projectId,
     region: PRODUCTION_WRITE_REGION,
   });
   if (!finalPlan.clean || finalPlan.blockers.length > 0 || finalPlan.counts.repair > 0) {
@@ -671,14 +728,14 @@ const main = async ({
     printHelp();
     return {help: true};
   }
-  assertSafeEnvironment(options, environment);
+  const safeOptions = assertSafeEnvironment(options, environment);
   const resolvedManifest = manifest || readManifest();
-  const backend = await backendFactory({projectId: options.projectId});
+  const backend = await backendFactory({projectId: safeOptions.projectId});
   const plan = await buildPolicyPlan({
     backend,
     manifest: resolvedManifest,
-    projectId: options.projectId,
-    region: options.region,
+    projectId: safeOptions.projectId,
+    region: safeOptions.region,
   });
 
   if (options.check) {

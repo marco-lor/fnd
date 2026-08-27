@@ -1,7 +1,15 @@
 const path = require('path');
 const { defineConfig } = require('@playwright/test');
 const manifest = require('./scenarios.json');
-const { ensureDirectory, frontendRoot, resolvePortableJavaHome } = require('../scripts/performance/common');
+const {
+  ensureDirectory,
+  frontendRoot,
+  PERFORMANCE_AUTH_DOMAIN,
+  PERFORMANCE_HOSTING_SITE,
+  PERFORMANCE_PROJECT_ID,
+  PERFORMANCE_STORAGE_BUCKET,
+  resolvePortableJavaHome,
+} = require('../scripts/performance/common');
 const { resolveTask07SoakRuntime } = require('../scripts/performance/task07-soak-contract');
 
 const portableJavaHome = resolvePortableJavaHome();
@@ -12,13 +20,23 @@ const emulatorEnvironment = {
   ...process.env,
   XDG_CONFIG_HOME: emulatorConfigRoot,
   FATINS_FIREBASE_API_KEY: 'demo-api-key',
-  FATINS_FIREBASE_AUTH_DOMAIN: 'demo-fnd-perf.firebaseapp.com',
-  FATINS_FIREBASE_PROJECT_ID: 'demo-fnd-perf',
-  FATINS_FIREBASE_STORAGE_BUCKET: 'demo-fnd-perf.appspot.com',
+  FATINS_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+  FATINS_FIREBASE_PROJECT_ID: PERFORMANCE_PROJECT_ID,
+  FATINS_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
   FATINS_FIREBASE_MESSAGING_SENDER_ID: '000000000000',
   FATINS_FIREBASE_APP_ID: '1:000000000000:web:performance',
   FATINS_FIREBASE_MEASUREMENT_ID: '',
+  FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+  FND_FIREBASE_ENVIRONMENT: 'performance',
+  FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+  FND_FIREBASE_PROJECT_ID: PERFORMANCE_PROJECT_ID,
+  FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
   FND_PERF_PLAYWRIGHT_WEBSERVER: '1',
+  REACT_APP_FND_ENVIRONMENT: 'performance',
+  REACT_APP_FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+  REACT_APP_FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+  REACT_APP_FND_FIREBASE_PROJECT_ID: PERFORMANCE_PROJECT_ID,
+  REACT_APP_FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
   ...(portableJavaHome ? {
     JAVA_HOME: portableJavaHome,
     PATH: `${path.join(portableJavaHome, 'bin')}${path.delimiter}${process.env.PATH || ''}`,

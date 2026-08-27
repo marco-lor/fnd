@@ -5,11 +5,13 @@
     "build": "node scripts/clean-lib.js && tsc && node scripts/verify-runtime-retirement.js",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.js",
     "build:watch": "tsc --watch",
-    "serve": "npm run build && firebase emulators:start --only functions --project demo-fnd-perf",
-    "shell": "npm run build && firebase functions:shell --project demo-fnd-perf",
+    "serve": "npm run build && node ../scripts/firebase-functions-command.js --command serve --environment performance --project demo-fnd-perf --site demo-fnd-perf --bucket demo-fnd-perf.appspot.com",
+    "shell": "npm run build && node ../scripts/firebase-functions-command.js --command shell --environment performance --project demo-fnd-perf --site demo-fnd-perf --bucket demo-fnd-perf.appspot.com",
     "start": "npm run shell",
-    "deploy": "firebase deploy --only functions --project fatins",
-    "logs": "firebase functions:log --project fatins"
+    "deploy": "node ../scripts/firebase-functions-command.js --command deploy --environment production --project fatins --site fatins --bucket fatins.firebasestorage.app",
+    "deploy:staging": "node ../scripts/firebase-functions-command.js --command deploy --environment staging --project fatin-test --site fatin-test --bucket fatin-test.firebasestorage.app",
+    "logs": "node ../scripts/firebase-functions-command.js --command logs --environment production --project fatins --site fatins --bucket fatins.firebasestorage.app",
+    "logs:staging": "node ../scripts/firebase-functions-command.js --command logs --environment staging --project fatin-test --site fatin-test --bucket fatin-test.firebasestorage.app"
   },
   "engines": {
     "node": "22"

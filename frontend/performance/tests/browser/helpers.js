@@ -4,6 +4,7 @@ const path = require('path');
 const { expect } = require('@playwright/test');
 const {
   configureOwnedPerformanceEnvironment,
+  PERFORMANCE_STORAGE_BUCKET,
   projectId,
   readJson,
   resultsDir,
@@ -16,7 +17,7 @@ const GOOGLE_FONT_URL = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\//;
 const FIRESTORE_EMULATOR_STARTUP_WARNING = /^(?:\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\]\s+)?@firebase\/firestore:\s+Firestore \(\d+\.\d+\.\d+\): Could not reach Cloud Firestore backend\. Backend didn't respond within 10 seconds\.\s+This typically indicates that your device does not have a healthy Internet connection at the moment\. The client will operate in offline mode until it is able to successfully connect to the backend\.$/;
 const FIRESTORE_STREAM_PATH = /^\/google\.firestore\.v1\.Firestore\/(Listen|Write)\/channel$/;
 const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
-const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
+const FIRESTORE_EMULATOR_DATABASE = `projects/${projectId}/databases/(default)`;
 const FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS = [
   'AID',
   'CI',
@@ -83,7 +84,11 @@ const demoFirestoreStreamOperation = (url) => {
 };
 
 const STORAGE_EMULATOR_ORIGIN = 'http://127.0.0.1:9199';
-const TASK07_FIXTURE_IMAGE_PATH = /^\/v0\/b\/demo-fnd-perf\.appspot\.com\/o\/performance%2Fimage-\d{3}\.png$/i;
+const TASK07_FIXTURE_IMAGE_PATH = new RegExp(
+  `^\\/v0\\/b\\/${PERFORMANCE_STORAGE_BUCKET.replace(/\./g, '\\.')}`
+    + '\\/o\\/performance%2Fimage-\\d{3}\\.png$',
+  'i'
+);
 const STATIC_ASSET_WARMUP_PATH = /^static\/(js|css)\/[^/]+\.(js|css)$/;
 const BROWSER_ASSET_WARMUP_ORIGIN = 'http://127.0.0.1:5000';
 const BROWSER_ASSET_WARMUP_BATCH_SIZE = 4;
@@ -103,9 +108,9 @@ const createStaticAssetWarmupBatches = (buildReport, { batchSize = 6 } = {}) => 
   if (
     buildReport?.schemaVersion !== 1
     || buildReport?.buildMode !== 'performance'
-    || buildReport?.projectId !== 'demo-fnd-perf'
+    || buildReport?.projectId !== projectId
   ) {
-    throw new Error('Static asset warmup requires the demo-fnd-perf performance build report.');
+    throw new Error(`Static asset warmup requires the ${projectId} performance build report.`);
   }
   if (!Array.isArray(buildReport.assets)) {
     throw new Error('Static asset warmup requires a build-report asset inventory.');
@@ -373,7 +378,7 @@ const warmBrowserAssetDelivery = async ({
   const diagnostics = {
     schemaVersion: 1,
     generatedAt: null,
-    projectId: 'demo-fnd-perf',
+    projectId,
     owner: ownerLabel,
     status: 'running',
     assetCount: 0,
@@ -497,7 +502,7 @@ const isKnownDemoFirestoreStartupWarning = (text, {
   beforeReadiness,
   firebaseProjectId = projectId,
 } = {}) => {
-  if (firebaseProjectId !== 'demo-fnd-perf' || beforeReadiness !== true) return false;
+  if (firebaseProjectId !== projectId || beforeReadiness !== true) return false;
   let hostname;
   try {
     hostname = new URL(baseURL).hostname;
@@ -517,7 +522,7 @@ const isExpectedFirestoreLifecycleCancellation = ({
 } = {}) => {
   const allowedOperations = LIFECYCLE_STREAM_OPERATIONS[lifecyclePhase];
   if (
-    firebaseProjectId !== 'demo-fnd-perf'
+    firebaseProjectId !== projectId
     || !allowedOperations
     || resourceType !== 'fetch'
     || failure !== 'net::ERR_ABORTED'
@@ -655,7 +660,7 @@ const isExpectedFivePeerFirestoreWriteTurnover = ({
   firebaseProjectId = projectId,
 } = {}) => {
   if (
-    firebaseProjectId !== 'demo-fnd-perf'
+    firebaseProjectId !== projectId
     || lifecyclePhase !== 'route-active'
     || resourceType !== 'fetch'
     || failure !== 'net::ERR_ABORTED'
@@ -701,7 +706,7 @@ const isExpectedTask07MediaDetachmentCancellation = ({
   firebaseProjectId = projectId,
 } = {}) => {
   if (
-    firebaseProjectId !== 'demo-fnd-perf'
+    firebaseProjectId !== projectId
     || lifecyclePhase !== 'auth-transition'
     || resourceType !== 'image'
     || failure !== 'net::ERR_ABORTED'
@@ -729,7 +734,7 @@ const isExpectedDemoRecaptchaCancellation = ({
   firebaseProjectId = projectId,
 } = {}) => {
   if (
-    firebaseProjectId !== 'demo-fnd-perf'
+    firebaseProjectId !== projectId
     || failure !== 'net::ERR_ABORTED'
   ) {
     return false;
@@ -766,7 +771,7 @@ const isExpectedDemoRecaptchaReportOnlyWarning = (text, {
   baseURL,
   firebaseProjectId = projectId,
 } = {}) => {
-  if (firebaseProjectId !== 'demo-fnd-perf') return false;
+  if (firebaseProjectId !== projectId) return false;
   let hostname;
   try {
     hostname = new URL(baseURL).hostname;

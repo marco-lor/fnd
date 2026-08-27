@@ -5,6 +5,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
+  getFirebaseEnvironment,
+  resolveCurrentBranchName,
+  resolveEnvironmentSelection,
+} = require('./firebase-environment');
+const {
   createFirebaseCliAdminCredential,
 } = require('./firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('./production-target');
@@ -19,10 +24,7 @@ const PRODUCTION_ENVIRONMENT_FILES = Object.freeze([
   '.env.production',
   '.env',
 ]);
-const REQUIRED_HOSTING_DOMAINS = Object.freeze([
-  'fatins.web.app',
-  'fatins.firebaseapp.com',
-]);
+const REQUIRED_HOSTING_DOMAINS = getFirebaseEnvironment('production').hostingDomains;
 const REQUIRED_SERVICE_NAMES = Object.freeze([
   'firebaseappcheck.googleapis.com',
   'recaptchaenterprise.googleapis.com',
@@ -30,13 +32,15 @@ const REQUIRED_SERVICE_NAMES = Object.freeze([
 
 const printHelp = () => {
   console.log([
-    'Verify production Firebase App Check APIs, IAM, app binding, and web-key settings.',
+    'Verify Firebase App Check APIs, IAM, app binding, and web-key settings.',
     '',
     'Usage:',
-    '  node scripts/verify-app-check-production.js --project fatins',
-    '    --auth firebase-cli --allow-live-project --confirm-project fatins',
+    '  node scripts/verify-app-check-production.js',
+    '    --environment production|staging --project <project-id>',
+    '    --site <hosting-site> --bucket <storage-bucket>',
+    '    --auth firebase-cli --allow-live-project --confirm-project <project-id>',
     '',
-    'This command is read-only and refuses every other live project.',
+    'This command is read-only and refuses implicit or mismatched live targets.',
   ].join('\n'));
 };
 
@@ -121,8 +125,11 @@ const parseArguments = (args = []) => {
     allowLiveProject: false,
     authMode: '',
     confirmProject: '',
+    environmentName: '',
     help: false,
+    hostingSite: '',
     projectId: '',
+    storageBucket: '',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -135,27 +142,36 @@ const parseArguments = (args = []) => {
       parsed.allowLiveProject = true;
       continue;
     }
-    if (['--project', '--auth', '--confirm-project'].includes(argument)) {
+    if (['--environment', '--project', '--auth', '--site', '--bucket', '--confirm-project'].includes(argument)) {
       const value = args[index + 1];
       if (!value || value.startsWith('--')) {
         throw new Error(`Missing value for ${argument}.`);
       }
       index += 1;
+      if (argument === '--environment') parsed.environmentName = value;
       if (argument === '--project') parsed.projectId = value;
       if (argument === '--auth') parsed.authMode = value;
+      if (argument === '--site') parsed.hostingSite = value;
+      if (argument === '--bucket') parsed.storageBucket = value;
       if (argument === '--confirm-project') parsed.confirmProject = value;
       continue;
     }
     throw new Error(`Unknown argument: ${argument}`);
   }
 
-  if (!parsed.help && !parsed.projectId) {
-    throw new Error('Explicit --project <project-id> is required.');
+  if (!parsed.help) {
+    if (!parsed.environmentName) throw new Error('Explicit --environment is required.');
+    if (!parsed.projectId) throw new Error('Explicit --project <project-id> is required.');
+    if (!parsed.hostingSite) throw new Error('Explicit --site <hosting-site> is required.');
+    if (!parsed.storageBucket) throw new Error('Explicit --bucket <storage-bucket> is required.');
   }
   return parsed;
 };
 
-const assertSafeTarget = (options, environment = process.env) => {
+const assertSafeTarget = (options, environment = process.env, {
+  branchName,
+  gitBranchOutput = '',
+} = {}) => {
   if (environment.FIRESTORE_EMULATOR_HOST) {
     throw new Error('Production App Check verification refuses Firestore emulator context.');
   }
@@ -172,21 +188,32 @@ const assertSafeTarget = (options, environment = process.env) => {
       );
     }
   }
-  if (options.projectId !== PRODUCTION_PROJECT_ID) {
-    throw new Error(`This verifier accepts only live project ${PRODUCTION_PROJECT_ID}.`);
+  const target = resolveEnvironmentSelection({
+    branchName: branchName || resolveCurrentBranchName({
+      environment,
+      cwd: FRONTEND_ROOT,
+      gitBranchOutput,
+    }),
+    environmentName: options.environmentName,
+    hostingSite: options.hostingSite,
+    projectId: options.projectId,
+    storageBucket: options.storageBucket,
+  });
+  if (!target.deployable) {
+    throw new Error(`This verifier accepts only live production or staging environments, not ${target.name}.`);
   }
   if (
     options.allowLiveProject !== true
-    || options.confirmProject !== PRODUCTION_PROJECT_ID
+    || options.confirmProject !== target.projectId
   ) {
     throw new Error(
-      `Live verification requires --allow-live-project and exact --confirm-project ${PRODUCTION_PROJECT_ID}.`
+      `Live verification requires --allow-live-project and exact --confirm-project ${target.projectId}.`
     );
   }
   if (options.authMode !== 'firebase-cli') {
-    throw new Error(`Live ${PRODUCTION_PROJECT_ID} verification requires --auth firebase-cli.`);
+    throw new Error(`Live ${target.name} verification requires --auth firebase-cli.`);
   }
-  return {live: true, projectId: options.projectId};
+  return {environmentName: target.name, live: true, projectId: target.projectId};
 };
 
 const fetchJson = async ({
@@ -342,7 +369,8 @@ const main = async () => {
     printHelp();
     return;
   }
-  assertSafeTarget(options);
+  const target = assertSafeTarget(options);
+  const targetProfile = getFirebaseEnvironment(target.environmentName);
   const buildConfiguration = loadProductionBuildConfiguration();
   const credential = await createFirebaseCliAdminCredential({
     projectId: options.projectId,
@@ -353,6 +381,7 @@ const main = async () => {
     appId: buildConfiguration.appId,
     expectedSiteKey: buildConfiguration.siteKey,
     projectId: options.projectId,
+    requiredHostingDomains: targetProfile.hostingDomains,
   });
   console.log(JSON.stringify({
     appCheck,

@@ -15,6 +15,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 
 const BATCH_SIZE = 100;
 const WRITE_BATCH_SIZE = 400;
@@ -132,7 +133,8 @@ const printHelp = () => console.log([
   'Task 05 user-data V2 migration, verification, archive, and reverse materialization.',
   '',
   'Usage:',
-  '  node scripts/task05/user-data-migration.js --project <project> [--operation stabilize|backfill|verify|archive|reverse]',
+  '  node scripts/task05/user-data-migration.js --environment <production|staging|performance> --project <project> --site <site> --bucket <bucket>',
+  '    [--operation stabilize|backfill|verify|archive|reverse]',
   '    [--auth admin|firebase-cli]',
   '    [--report <path>] [--checkpoint <path>] [--execute --approve-fingerprint <sha256>]',
   '    [--resume] [--max-users <count>] [--allow-live-project --confirm-project <project>]',
@@ -183,6 +185,9 @@ const parseArguments = (args = []) => {
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
     else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--auth',
       '--operation',
       '--report',
@@ -200,6 +205,9 @@ const parseArguments = (args = []) => {
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}.`);
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--operation') options.operation = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
@@ -1818,6 +1826,7 @@ const createAdminBackend = async (projectId, authMode = 'admin') => {
 const main = async () => {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) return printHelp();
+  resolveOperatorTarget({options, allowPerformance: true});
   const target = assertSafeTarget(options);
   const backend = await createAdminBackend(options.projectId, options.authMode);
   try {

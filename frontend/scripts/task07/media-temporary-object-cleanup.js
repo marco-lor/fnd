@@ -12,6 +12,7 @@ const {
   PRODUCTION_PROJECT_ID,
   PRODUCTION_STORAGE_BUCKET,
 } = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 const {canonicalHash} = require('./media-derivative-backfill');
 
 const REPORT_SCHEMA_VERSION = 1;
@@ -304,6 +305,9 @@ const parseArguments = (args = []) => {
     else if (argument === '--execute') options.execute = true;
     else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--auth',
       '--confirm-project',
       '--expected-candidates',
@@ -317,6 +321,9 @@ const parseArguments = (args = []) => {
       }
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--confirm-project') options.confirmProject = value;
       if (argument === '--expected-candidates') {
@@ -386,7 +393,7 @@ const normalizeMetadata = (file, value) => normalizeStorageObject({
   metadata: value.metadata,
 });
 
-const createBackend = async ({projectId}) => {
+const createBackend = async ({projectId, storageBucket}) => {
   const {deleteApp, initializeApp} = requireFromFunctions('firebase-admin/app');
   const {getFirestore} = requireFromFunctions('firebase-admin/firestore');
   const {getStorage} = requireFromFunctions('firebase-admin/storage');
@@ -396,7 +403,7 @@ const createBackend = async ({projectId}) => {
   let app;
   try {
     app = initializeApp(
-      {projectId, storageBucket: PRODUCTION_STORAGE_BUCKET},
+      {projectId, storageBucket},
       `task07-temporary-cleanup-${process.pid}-${Date.now()}`
     );
   } catch (error) {
@@ -484,7 +491,7 @@ const printHelp = () => console.log([
   `Generation-fenced Task 07 temporary-object cleanup for ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Dry-run:',
-  `  node scripts/task07/media-temporary-object-cleanup.js --project ${PRODUCTION_PROJECT_ID}`,
+  `  node scripts/task07/media-temporary-object-cleanup.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_STORAGE_BUCKET}`,
   `    --confirm-project ${PRODUCTION_PROJECT_ID} --allow-live-project`,
   '    --auth firebase-cli [--expected-candidates <n>] --report <plan.json>',
   '',
@@ -501,13 +508,14 @@ const printHelp = () => console.log([
 const main = async (argv = process.argv.slice(2)) => {
   const options = parseArguments(argv);
   if (options.help) return printHelp();
+  const target = resolveOperatorTarget({options});
   assertSafeEnvironment();
-  const backend = await createBackend(options);
+  const backend = await createBackend({...options, storageBucket: target.storageBucket});
   try {
     const state = await backend.readState();
     const plan = buildCleanupPlan({
-      projectId: options.projectId,
-      storageBucket: PRODUCTION_STORAGE_BUCKET,
+      projectId: target.projectId,
+      storageBucket: target.storageBucket,
       scannedObjects: state.scannedObjects,
       subjects: state.subjects,
       expectedCandidates: options.expectedCandidates,
@@ -516,7 +524,10 @@ const main = async (argv = process.argv.slice(2)) => {
     if (!plan.complete) {
       throw new Error('Temporary cleanup plan has blocking issues or count drift.');
     }
-    validateCleanupPlan(plan);
+    validateCleanupPlan(plan, {
+      projectId: target.projectId,
+      storageBucket: target.storageBucket,
+    });
     if (!options.execute) {
       console.log(JSON.stringify({
         mode: 'dry-run',
@@ -528,7 +539,11 @@ const main = async (argv = process.argv.slice(2)) => {
     }
     const approved = validateCleanupPlan(
       readJson(options.approvedReportPath),
-      {requireExecutable: true}
+      {
+        projectId: target.projectId,
+        storageBucket: target.storageBucket,
+        requireExecutable: true,
+      }
     );
     if (approved.fingerprint !== options.approveFingerprint ||
       plan.fingerprint !== approved.fingerprint ||
@@ -541,8 +556,8 @@ const main = async (argv = process.argv.slice(2)) => {
     }
     const after = await backend.readState();
     const remaining = buildCleanupPlan({
-      projectId: options.projectId,
-      storageBucket: PRODUCTION_STORAGE_BUCKET,
+      projectId: target.projectId,
+      storageBucket: target.storageBucket,
       scannedObjects: after.scannedObjects,
       subjects: after.subjects,
       expectedCandidates: 0,
@@ -553,7 +568,7 @@ const main = async (argv = process.argv.slice(2)) => {
     const execution = {
       schemaVersion: REPORT_SCHEMA_VERSION,
       projectId: options.projectId,
-      storageBucket: PRODUCTION_STORAGE_BUCKET,
+      storageBucket: target.storageBucket,
       approvedFingerprint: approved.fingerprint,
       deleted: approved.entries.map(({deletionId, temporary}) => ({
         deletionId,

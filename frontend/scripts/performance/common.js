@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const {getFirebaseEnvironment} = require('../firebase-environment');
 
 const frontendRoot = path.resolve(__dirname, '..', '..');
 const repoRoot = path.resolve(frontendRoot, '..');
@@ -11,7 +12,11 @@ const budgetsPath = path.join(frontendRoot, 'performance', 'budgets.json');
 const scenariosPath = path.join(frontendRoot, 'performance', 'scenarios.json');
 const fixtureManifestPath = path.join(frontendRoot, 'performance', 'fixture-manifest.json');
 const authoritativeResultsDir = path.join(resultsDir, 'authoritative');
-const PERFORMANCE_PROJECT_ID = 'demo-fnd-perf';
+const PERFORMANCE_ENVIRONMENT = getFirebaseEnvironment('performance');
+const PERFORMANCE_PROJECT_ID = PERFORMANCE_ENVIRONMENT.projectId;
+const PERFORMANCE_HOSTING_SITE = PERFORMANCE_ENVIRONMENT.hostingSite;
+const PERFORMANCE_STORAGE_BUCKET = PERFORMANCE_ENVIRONMENT.storageBucket;
+const PERFORMANCE_AUTH_DOMAIN = PERFORMANCE_ENVIRONMENT.authDomain;
 const PERFORMANCE_MEASUREMENT_CONTRACT_VERSION = 5;
 const PERFORMANCE_MAX_VARIANCE_PERCENT = 15;
 const GITHUB_HOSTED_REFERENCE_MACHINE = 'github-hosted-runner';
@@ -21,6 +26,11 @@ const PERFORMANCE_ENVIRONMENT_MODE = Object.freeze({
   OWNED_OVERRIDE: 'owned-override',
 });
 const OWNED_PERFORMANCE_ENVIRONMENT = Object.freeze({
+  FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+  FND_FIREBASE_ENVIRONMENT: PERFORMANCE_ENVIRONMENT.name,
+  FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+  FND_FIREBASE_PROJECT_ID: PERFORMANCE_PROJECT_ID,
+  FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
   FND_PERF_PROJECT_ID: PERFORMANCE_PROJECT_ID,
   GCLOUD_PROJECT: PERFORMANCE_PROJECT_ID,
   FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
@@ -141,9 +151,13 @@ module.exports = {
   configureOwnedPerformanceEnvironment,
   OWNED_PERFORMANCE_ENVIRONMENT,
   PERFORMANCE_ENVIRONMENT_MODE,
+  PERFORMANCE_AUTH_DOMAIN,
+  PERFORMANCE_ENVIRONMENT,
+  PERFORMANCE_HOSTING_SITE,
   PERFORMANCE_MAX_VARIANCE_PERCENT,
   PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   PERFORMANCE_PROJECT_ID,
+  PERFORMANCE_STORAGE_BUCKET,
   percentile,
   projectId,
   readJson,

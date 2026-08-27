@@ -6,6 +6,7 @@ const {
   OWNED_PERFORMANCE_ENVIRONMENT,
   assertPerformanceProject,
   configureOwnedPerformanceEnvironment,
+  PERFORMANCE_STORAGE_BUCKET,
   projectId,
   resultsDir,
   sha256,
@@ -18,7 +19,6 @@ configureOwnedPerformanceEnvironment();
 assertPerformanceProject(projectId);
 
 const { withBackgroundTriggersDisabled } = require('./emulator-control');
-const PERFORMANCE_STORAGE_BUCKET = `${projectId}.appspot.com`;
 
 let auth;
 let db;

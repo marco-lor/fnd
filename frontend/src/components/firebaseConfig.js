@@ -12,6 +12,12 @@ export const FIREBASE_CONFIG_ENDPOINT = "/fatins-runtime/firebase-client";
 
 const performanceMode = process.env.REACT_APP_FND_PERF === "1";
 const performanceProjectId = process.env.REACT_APP_FND_PERF_PROJECT_ID || "demo-fnd-perf";
+const expectedProjectId = process.env.REACT_APP_FND_FIREBASE_PROJECT_ID
+  || (performanceMode ? performanceProjectId : "");
+const expectedAuthDomain = process.env.REACT_APP_FND_FIREBASE_AUTH_DOMAIN
+  || (performanceMode ? `${performanceProjectId}.firebaseapp.com` : "");
+const expectedStorageBucket = process.env.REACT_APP_FND_FIREBASE_STORAGE_BUCKET
+  || (performanceMode ? `${performanceProjectId}.appspot.com` : "");
 const getPerformanceFirestoreSettings = () => (
   typeof window !== "undefined"
   && window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ === true
@@ -55,6 +61,18 @@ export const validateFirebaseConfig = (config) => {
 
   if (missingKeys.length) {
     throw new Error(`Firebase runtime config is missing: ${missingKeys.join(", ")}`);
+  }
+
+  const targetMismatches = [
+    ["projectId", expectedProjectId],
+    ["authDomain", expectedAuthDomain],
+    ["storageBucket", expectedStorageBucket],
+  ].filter(([key, expected]) => expected && config[key] !== expected);
+  if (targetMismatches.length) {
+    throw new Error(
+      "Firebase runtime config does not match the explicit build target: "
+      + targetMismatches.map(([key, expected]) => `${key} expected ${expected}`).join(", ")
+    );
   }
 
   return config;

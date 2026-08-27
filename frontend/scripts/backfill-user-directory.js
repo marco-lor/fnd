@@ -6,7 +6,10 @@ const path = require('path');
 const {
   createFirebaseCliAdcFile,
 } = require('./firebase-cli-admin-credential');
-const {PRODUCTION_PROJECT_ID} = require('./production-target');
+const {
+  resolveCurrentBranchName,
+  resolveEnvironmentSelection,
+} = require('./firebase-environment');
 
 const BATCH_SIZE = 200;
 const REPORT_SCHEMA_VERSION = 2;
@@ -100,18 +103,19 @@ const printHelp = () => {
     'Backfill server-owned user_directory projections.',
     '',
     'Usage:',
-    '  node scripts/backfill-user-directory.js --project <project> [--auth admin|firebase-cli]',
+    '  node scripts/backfill-user-directory.js --environment production|staging|performance',
+    '    --project <project> --site <hosting-site> --bucket <storage-bucket>',
+    '    [--auth admin|firebase-cli]',
     '    [--verify | --write --approve-fingerprint <sha256>] [--resume]',
     '    [--checkpoint <path>] [--report <path>] [--max-batches <count>]',
-    `    [--allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}]`,
+    '    [--allow-live-project --confirm-project <project>]',
     '',
     'Safety:',
     '  - Default mode is read-only and writes a local dry-run report.',
     '  - --verify is read-only and fails on missing, stale, or orphaned projections.',
     '  - --write requires the exact completed dry-run fingerprint.',
-    '  - Demo access requires a loopback Firestore emulator.',
-    `  - Live access is hard-locked to ${PRODUCTION_PROJECT_ID}, Firebase CLI auth, and exact confirmation.`,
-    '  - Every other live Firebase project is refused.',
+    '  - Performance access requires the loopback Firestore emulator and demo-fnd-perf.',
+    '  - Live access requires Firebase CLI auth and exact project confirmation.',
   ].join('\n'));
 };
 
@@ -122,13 +126,16 @@ const parseArguments = (args = []) => {
     authMode: 'admin',
     checkpointPath: DEFAULT_CHECKPOINT_PATH,
     confirmProject: '',
+    environmentName: '',
     help: false,
+    hostingSite: '',
     maxBatches: Number.POSITIVE_INFINITY,
     projectId: '',
     reportPath: DEFAULT_REPORT_PATH,
     reportPathExplicit: false,
     resume: false,
     shouldWrite: false,
+    storageBucket: '',
     verifyOnly: false,
   };
 
@@ -156,7 +163,10 @@ const parseArguments = (args = []) => {
     }
 
     if ([
+      '--environment',
       '--project',
+      '--site',
+      '--bucket',
       '--auth',
       '--checkpoint',
       '--report',
@@ -169,7 +179,10 @@ const parseArguments = (args = []) => {
         throw new Error(`Missing value for ${argument}.`);
       }
       index += 1;
+      if (argument === '--environment') parsed.environmentName = value;
       if (argument === '--project') parsed.projectId = value;
+      if (argument === '--site') parsed.hostingSite = value;
+      if (argument === '--bucket') parsed.storageBucket = value;
       if (argument === '--auth') parsed.authMode = value;
       if (argument === '--checkpoint') parsed.checkpointPath = path.resolve(value);
       if (argument === '--report') {
@@ -267,25 +280,35 @@ const assertSafeTarget = (options, env = process.env) => {
       );
     }
   }
+  const target = resolveEnvironmentSelection({
+    branchName: resolveCurrentBranchName({
+      environment: env,
+      cwd: path.resolve(__dirname, '..'),
+    }),
+    environmentName: options.environmentName,
+    hostingSite: options.hostingSite,
+    projectId,
+    storageBucket: options.storageBucket,
+  });
   if (emulator && loopbackHosts.has(emulator.hostname)) {
-    if (!String(projectId).startsWith('demo-')) {
-      throw new Error('User-directory emulator access requires a demo-* project ID.');
+    if (target.name !== 'performance') {
+      throw new Error('User-directory emulator access requires the performance environment.');
     }
     return {emulatorHost: env.FIRESTORE_EMULATOR_HOST, live: false, projectId};
   }
   if (env.FIRESTORE_EMULATOR_HOST) {
     throw new Error('Non-loopback Firestore emulator hosts are refused.');
   }
-  if (projectId !== PRODUCTION_PROJECT_ID) {
-    throw new Error(`This production backfill accepts only live project ${PRODUCTION_PROJECT_ID}.`);
+  if (!target.deployable) {
+    throw new Error(`Live user-directory access cannot target ${target.name}.`);
   }
   if (!options.allowLiveProject || options.confirmProject !== projectId) {
     throw new Error(
-      `Live Firestore access requires --allow-live-project and exact --confirm-project ${PRODUCTION_PROJECT_ID}.`
+      `Live Firestore access requires --allow-live-project and exact --confirm-project ${projectId}.`
     );
   }
   if (options.authMode !== 'firebase-cli') {
-    throw new Error(`Live ${PRODUCTION_PROJECT_ID} access requires --auth firebase-cli.`);
+    throw new Error(`Live ${target.name} access requires --auth firebase-cli.`);
   }
   return {emulatorHost: null, live: true, projectId};
 };

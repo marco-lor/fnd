@@ -5,6 +5,7 @@ const path = require('path');
 const {
   baselinePath,
   budgetsPath,
+  PERFORMANCE_PROJECT_ID,
   readJson,
   resultsDir,
   writeJson,
@@ -88,7 +89,7 @@ const evaluateStructuralGates = (current) => {
   const fixtureCountsValid = Object.entries(current.fixtureManifest?.counts || {})
     .every(([collectionName, expected]) => current.fixture?.counts?.[collectionName] === expected);
   const fixtureValid = Boolean(current.fixture?.hash)
-    && current.fixture?.projectId === 'demo-fnd-perf'
+    && current.fixture?.projectId === PERFORMANCE_PROJECT_ID
     && current.fixture?.hash === current.fixtureManifest?.canonicalHash
     && current.fixture?.documentCount === current.fixtureManifest?.documentCount
     && fixtureCountsValid;

@@ -5,7 +5,11 @@ const path = require('path');
 const {
   assertPerformanceProject,
   authoritativeResultsDir,
+  configureOwnedPerformanceEnvironment,
   frontendRoot,
+  PERFORMANCE_HOSTING_SITE,
+  PERFORMANCE_PROJECT_ID,
+  PERFORMANCE_STORAGE_BUCKET,
   projectId,
   repoRoot,
 } = require('./common');
@@ -74,17 +78,26 @@ const main = async ({
     FND_PERF_AUTHORITATIVE: '1',
     FND_PERF_ITERATIONS: '3',
   };
+  const performanceEnvironment = configureOwnedPerformanceEnvironment({
+    env: { ...environment, ...commonEnvironment },
+  });
 
-  execute(process.execPath, [path.join(__dirname, 'preflight.js')]);
-  execute(process.execPath, [path.join(frontendRoot, 'scripts', 'build-production.js')]);
-  execute(process.execPath, [path.join(__dirname, 'verify-disabled-build.js')]);
+  execute(process.execPath, [path.join(__dirname, 'preflight.js')], performanceEnvironment);
+  execute(process.execPath, [
+    path.join(frontendRoot, 'scripts', 'build-production.js'),
+    '--environment', 'performance',
+    '--project', PERFORMANCE_PROJECT_ID,
+    '--site', PERFORMANCE_HOSTING_SITE,
+    '--bucket', PERFORMANCE_STORAGE_BUCKET,
+  ], performanceEnvironment);
+  execute(process.execPath, [path.join(__dirname, 'verify-disabled-build.js')], performanceEnvironment);
 
   const snapshots = [];
   for (const suffix of ['a', 'b']) {
     const runId = `${runBase}-${suffix}`;
-    const environment = { ...commonEnvironment, FND_PERF_RUN_ID: runId };
+    const runEnvironment = { ...performanceEnvironment, FND_PERF_RUN_ID: runId };
     assertClean({ label: `authoritative run ${runId} build` });
-    execute(process.execPath, [path.join(__dirname, 'build.js')], environment);
+    execute(process.execPath, [path.join(__dirname, 'build.js')], runEnvironment);
     await cleanup(() => {
       execute(process.execPath, [
         require.resolve('@playwright/test/cli'),
@@ -93,7 +106,7 @@ const main = async ({
         'performance/playwright.config.js',
         '--project',
         'chromium',
-      ], environment);
+      ], runEnvironment);
     }, {
       label: `Authoritative run ${runId}`,
       waitForPorts: async () => {
@@ -102,7 +115,7 @@ const main = async ({
       },
     });
     assertClean({ label: `authoritative run ${runId} snapshot` });
-    execute(process.execPath, [path.join(__dirname, 'snapshot-authoritative.js'), '--run-id', runId], environment);
+    execute(process.execPath, [path.join(__dirname, 'snapshot-authoritative.js'), '--run-id', runId], runEnvironment);
     snapshots.push(path.join(authoritativeResultsDir, `${runId}.json`));
   }
 

@@ -41,13 +41,13 @@ const findDisabledBuildViolations = ({
 
 const main = () => {
   if (!fs.existsSync(path.join(buildDirectory, 'index.html'))) {
-    throw new Error('Normal production build is missing. Run npm run build:production first.');
+    throw new Error('Normal performance release build is missing. Run npm run build:performance first.');
   }
   const matches = findDisabledBuildViolations();
   const report = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    buildMode: 'normal-production',
+    buildMode: 'normal-performance-release',
     instrumentationAbsent: matches.length === 0,
     persistenceExperimentAbsent: !matches.some(({ token }) => (
       token.includes('PERSISTENCE_EXPERIMENT')
@@ -58,9 +58,9 @@ const main = () => {
   };
   writeJson(path.join(resultsDir, 'normal-build-verification.json'), report);
   if (matches.length) {
-    throw new Error(`Normal production build contains performance-only artifacts: ${JSON.stringify(matches)}`);
+    throw new Error(`Normal performance release build contains performance-only artifacts: ${JSON.stringify(matches)}`);
   }
-  console.log('Normal production build contains no performance bridge, profiler, benchmark, or persistence-experiment artifacts.');
+  console.log('Normal performance release build contains no performance bridge, profiler, benchmark, or persistence-experiment artifacts.');
   return report;
 };
 

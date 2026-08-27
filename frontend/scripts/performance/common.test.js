@@ -34,6 +34,11 @@ test('emulator lifecycle is pinned to the canonical performance project', () => 
 
 test('owned performance environment uses exact loopback Admin SDK endpoints', () => {
   assert.deepEqual(OWNED_PERFORMANCE_ENVIRONMENT, {
+    FND_FIREBASE_AUTH_DOMAIN: 'demo-fnd-perf.firebaseapp.com',
+    FND_FIREBASE_ENVIRONMENT: 'performance',
+    FND_FIREBASE_HOSTING_SITE: 'demo-fnd-perf',
+    FND_FIREBASE_PROJECT_ID: 'demo-fnd-perf',
+    FND_FIREBASE_STORAGE_BUCKET: 'demo-fnd-perf.appspot.com',
     FND_PERF_PROJECT_ID: 'demo-fnd-perf',
     GCLOUD_PROJECT: 'demo-fnd-perf',
     FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',

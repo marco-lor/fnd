@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const {
   PERFORMANCE_ENVIRONMENT_MODE,
+  PERFORMANCE_AUTH_DOMAIN,
   PERFORMANCE_PROJECT_ID,
+  PERFORMANCE_STORAGE_BUCKET,
   assertPerformanceProject,
   configureOwnedPerformanceEnvironment,
   frontendRoot,
@@ -131,9 +133,9 @@ const buildFirebaseExecInvocation = ({
 
 const demoFunctionsEnvironment = (projectId = PERFORMANCE_PROJECT_ID) => [
   'FATINS_FIREBASE_API_KEY=demo-api-key',
-  `FATINS_FIREBASE_AUTH_DOMAIN=${projectId}.firebaseapp.com`,
+  `FATINS_FIREBASE_AUTH_DOMAIN=${PERFORMANCE_AUTH_DOMAIN}`,
   `FATINS_FIREBASE_PROJECT_ID=${projectId}`,
-  `FATINS_FIREBASE_STORAGE_BUCKET=${projectId}.appspot.com`,
+  `FATINS_FIREBASE_STORAGE_BUCKET=${PERFORMANCE_STORAGE_BUCKET}`,
   'FATINS_FIREBASE_MESSAGING_SENDER_ID=000000000000',
   'FATINS_FIREBASE_APP_ID=1:000000000000:web:performance',
   'FATINS_FIREBASE_MEASUREMENT_ID=',

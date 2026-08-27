@@ -11,6 +11,12 @@ const optionalConfig = {
   measurementId: "FATINS_FIREBASE_MEASUREMENT_ID",
 };
 
+const explicitTarget = {
+  projectId: "FND_FIREBASE_PROJECT_ID",
+  authDomain: "FND_FIREBASE_AUTH_DOMAIN",
+  storageBucket: "FND_FIREBASE_STORAGE_BUCKET",
+};
+
 const buildFirebaseConfig = () => {
   const missing = Object.values(requiredConfig).filter((envName) => (
     !process.env[envName]
@@ -42,6 +48,15 @@ const buildFirebaseConfig = () => {
   };
 };
 
+const targetMismatches = (config) => Object.entries(explicitTarget)
+  .filter(([, environmentVariable]) => process.env[environmentVariable])
+  .filter(([key, environmentVariable]) => (
+    config[key] !== process.env[environmentVariable]
+  ))
+  .map(([key, environmentVariable]) => (
+    `${key} must match ${environmentVariable}`
+  ));
+
 module.exports = function setupProxy(app) {
   app.get("/fatins-runtime/firebase-client", (_request, response) => {
     const { config, missing } = buildFirebaseConfig();
@@ -50,6 +65,15 @@ module.exports = function setupProxy(app) {
       response.status(500).json({
         error: "Missing local Firebase runtime config.",
         missing,
+      });
+      return;
+    }
+
+    const mismatches = targetMismatches(config);
+    if (mismatches.length) {
+      response.status(500).json({
+        error: "Local Firebase runtime config does not match the explicit target.",
+        mismatches,
       });
       return;
     }

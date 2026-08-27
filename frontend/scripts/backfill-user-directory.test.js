@@ -68,23 +68,41 @@ test('verification fails closed when a directory projection is missing or stale'
 
 test('refuses production-through-emulator, nonproduction live, and non-loopback targets', () => {
   assert.throws(
-    () => assertSafeTarget({projectId: 'fatins'}, {
+    () => assertSafeTarget({
+      environmentName: 'production',
+      hostingSite: 'fatins',
+      projectId: 'fatins',
+      storageBucket: 'fatins.firebasestorage.app',
+    }, {
+      FND_GIT_BRANCH: 'main',
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
     }),
-    /requires a demo-/
+    /performance environment/i
   );
   assert.throws(
-    () => assertSafeTarget({projectId: 'fatin-test'}, {}),
-    /accepts only live project fatins/
+    () => assertSafeTarget({projectId: 'fatin-test'}, {FND_GIT_BRANCH: 'devs'}),
+    /explicit.*environment/i
   );
   assert.throws(
-    () => assertSafeTarget({projectId: 'demo-fnd-perf'}, {
+    () => assertSafeTarget({
+      environmentName: 'performance',
+      hostingSite: 'demo-fnd-perf',
+      projectId: 'demo-fnd-perf',
+      storageBucket: 'demo-fnd-perf.appspot.com',
+    }, {
+      FND_GIT_BRANCH: 'devs',
       FIRESTORE_EMULATOR_HOST: 'firestore.example:8080',
     }),
     /Non-loopback/
   );
   assert.deepEqual(
-    assertSafeTarget({projectId: 'demo-fnd-perf'}, {
+    assertSafeTarget({
+      environmentName: 'performance',
+      hostingSite: 'demo-fnd-perf',
+      projectId: 'demo-fnd-perf',
+      storageBucket: 'demo-fnd-perf.appspot.com',
+    }, {
+      FND_GIT_BRANCH: 'devs',
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
       GCLOUD_PROJECT: 'demo-fnd-perf',
     }),
@@ -97,23 +115,26 @@ test('live access is hard-locked to confirmed fatins Firebase CLI auth', () => {
     allowLiveProject: true,
     authMode: 'firebase-cli',
     confirmProject: 'fatins',
+    environmentName: 'production',
+    hostingSite: 'fatins',
     projectId: 'fatins',
+    storageBucket: 'fatins.firebasestorage.app',
   };
-  assert.deepEqual(assertSafeTarget(base, {}), {
+  assert.deepEqual(assertSafeTarget(base, {FND_GIT_BRANCH: 'main'}), {
     emulatorHost: null,
     live: true,
     projectId: 'fatins',
   });
   assert.throws(
-    () => assertSafeTarget({...base, allowLiveProject: false}, {}),
+    () => assertSafeTarget({...base, allowLiveProject: false}, {FND_GIT_BRANCH: 'main'}),
     /allow-live-project/
   );
   assert.throws(
-    () => assertSafeTarget({...base, confirmProject: 'fatin-test'}, {}),
+    () => assertSafeTarget({...base, confirmProject: 'fatin-test'}, {FND_GIT_BRANCH: 'main'}),
     /confirm-project fatins/
   );
   assert.throws(
-    () => assertSafeTarget({...base, authMode: 'admin'}, {}),
+    () => assertSafeTarget({...base, authMode: 'admin'}, {FND_GIT_BRANCH: 'main'}),
     /requires --auth firebase-cli/
   );
 });

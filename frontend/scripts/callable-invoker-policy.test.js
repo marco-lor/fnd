@@ -11,6 +11,7 @@ const {
   REQUIRED_CALLABLES,
   REQUIRED_CALLABLES_BY_REGION,
   assertApprovedPlan,
+  assertSafeEnvironment,
   assessInvokerPolicy,
   buildPolicyPlan,
   executePolicyPlan,
@@ -20,6 +21,12 @@ const {
 
 const PROJECT_ID = PRODUCTION_PROJECT_ID;
 const REGION = PRODUCTION_WRITE_REGION;
+const productionTargetArgs = () => [
+  '--environment', 'production',
+  '--project', PROJECT_ID,
+  '--site', 'fatins',
+  '--bucket', 'fatins.firebasestorage.app',
+];
 const serviceNameFor = (functionId, region = REGION) => (
   `projects/${PROJECT_ID}/locations/${region}/services/${functionId.toLowerCase()}`
 );
@@ -105,19 +112,29 @@ const allPolicies = (replacement = {}) => Object.fromEntries(
   ])
 );
 
-test('CLI is dry-run by default and is hard-locked to production', () => {
+test('CLI is dry-run by default and requires an explicit live target', () => {
   const options = parseArguments([
-    '--project', PROJECT_ID,
+    ...productionTargetArgs(),
     '--region', REGION,
   ]);
   assert.equal(options.execute, false);
   assert.equal(options.check, false);
+  const mismatched = parseArguments([
+    '--environment', 'production',
+    '--project', 'fatin-test',
+    '--site', 'fatin-test',
+    '--bucket', 'fatin-test.firebasestorage.app',
+    '--region', REGION,
+  ]);
   assert.throws(
-    () => parseArguments(['--project', 'fatin-test', '--region', REGION]),
-    /accepts only project fatins/
+    () => assertSafeEnvironment(mismatched, {FND_GIT_BRANCH: 'main'}),
+    /target mismatch|fatins|fatin-test/
   );
   assert.throws(
-    () => parseArguments(['--project', PROJECT_ID, '--region', 'asia-east1']),
+    () => parseArguments([
+      ...productionTargetArgs(),
+      '--region', 'asia-east1',
+    ]),
     /audits only regions/
   );
   assert.deepEqual(AUDIT_REGIONS, [
@@ -125,7 +142,7 @@ test('CLI is dry-run by default and is hard-locked to production', () => {
     'europe-west1',
   ]);
   assert.equal(parseArguments([
-    '--project', PROJECT_ID,
+    ...productionTargetArgs(),
     '--region', 'europe-west1',
     '--check',
   ]).check, true);
@@ -134,7 +151,7 @@ test('CLI is dry-run by default and is hard-locked to production', () => {
 test('execution requires exact project confirmation and plan fingerprint', () => {
   assert.throws(
     () => parseArguments([
-      '--project', PROJECT_ID,
+      ...productionTargetArgs(),
       '--region', REGION,
       '--execute',
       '--approve-fingerprint', 'a'.repeat(64),
@@ -143,7 +160,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
   );
   assert.throws(
     () => parseArguments([
-      '--project', PROJECT_ID,
+      ...productionTargetArgs(),
       '--region', REGION,
       '--execute',
       '--allow-live-project',
@@ -153,7 +170,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
     /exact SHA-256/
   );
   const options = parseArguments([
-    '--project', PROJECT_ID,
+    ...productionTargetArgs(),
     '--region', REGION,
     '--execute',
     '--allow-live-project',
@@ -163,7 +180,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
   assert.equal(options.execute, true);
   assert.throws(
     () => parseArguments([
-      '--project', PROJECT_ID,
+      ...productionTargetArgs(),
       '--region', 'europe-west1',
       '--execute',
       '--allow-live-project',
@@ -174,7 +191,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
   );
   assert.throws(
     () => parseArguments([
-      '--project', PROJECT_ID,
+      ...productionTargetArgs(),
       '--region', REGION,
       '--check',
       '--execute',
@@ -413,7 +430,7 @@ test('Firebase Functions postdeploy runs every strict read-only IAM check', () =
     ? firebaseConfig.functions[0]
     : firebaseConfig.functions;
   assert.deepEqual(functionsConfig.postdeploy, [
-    'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --project fatins --region europe-west8 --check',
-    'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --project fatins --region europe-west1 --check',
+    'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --environment-from-process --region europe-west8 --check',
+    'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --environment-from-process --region europe-west1 --check',
   ]);
 });

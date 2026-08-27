@@ -7,6 +7,7 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {PRODUCTION_PROJECT_ID} = require('../production-target');
+const {resolveOperatorTarget} = require('../firebase-operator-target');
 
 const REPORT_SCHEMA_VERSION = 1;
 const CONFIG_PATH = 'app_config/user_data_v2';
@@ -35,7 +36,7 @@ const printHelp = () => console.log([
   `Task 05 guarded rollout-stage operator for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  `  node scripts/task05/user-data-rollout-stage.js --project ${PRODUCTION_PROJECT_ID} --stage <stage>`,
+  `  node scripts/task05/user-data-rollout-stage.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_PROJECT_ID}.firebasestorage.app --stage <stage>`,
   '    [--auth admin|firebase-cli] [--report <path>]',
   '    [--execute --approve-fingerprint <sha256>]',
   `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
@@ -66,6 +67,9 @@ const parseArguments = (args = []) => {
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
     else if ([
       '--project',
+      '--environment',
+      '--site',
+      '--bucket',
       '--stage',
       '--auth',
       '--report',
@@ -76,6 +80,9 @@ const parseArguments = (args = []) => {
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}.`);
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--environment') options.environmentName = value;
+      if (argument === '--site') options.hostingSite = value;
+      if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--stage') options.stage = value;
       if (argument === '--auth') options.authMode = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
@@ -290,6 +297,7 @@ const createBackend = async ({projectId, authMode}) => {
 const main = async () => {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) return printHelp();
+  resolveOperatorTarget({options, allowPerformance: true});
   const target = assertSafeTarget(options);
   const backend = await createBackend(options);
   try {

@@ -2,7 +2,15 @@
 
 const childProcess = require('child_process');
 const path = require('path');
-const { assertPerformanceProject, frontendRoot, projectId } = require('./common');
+const {
+  assertPerformanceProject,
+  configureOwnedPerformanceEnvironment,
+  frontendRoot,
+  PERFORMANCE_AUTH_DOMAIN,
+  PERFORMANCE_HOSTING_SITE,
+  PERFORMANCE_STORAGE_BUCKET,
+  projectId,
+} = require('./common');
 const {
   removePerformanceFirebaseConfig,
   withEmulatorPortCleanup,
@@ -24,13 +32,24 @@ const run = (command, args, environment = {}) => {
 
 const main = async () => {
   assertPerformanceProject(projectId);
+  const performanceEnvironment = configureOwnedPerformanceEnvironment({
+    env: {...process.env},
+    mode: 'strict',
+  });
+  Object.assign(performanceEnvironment, {
+    FND_FIREBASE_AUTH_DOMAIN: PERFORMANCE_AUTH_DOMAIN,
+    FND_FIREBASE_ENVIRONMENT: 'performance',
+    FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
+    FND_FIREBASE_PROJECT_ID: projectId,
+    FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
+  });
   removePerformanceFirebaseConfig();
-  run(process.execPath, [path.join(__dirname, 'preflight.js')]);
-  run(process.execPath, [path.join(__dirname, 'migrate-firestore-imports.js'), '--check']);
-  run(process.execPath, [path.join(__dirname, 'check-shared-config-boundaries.js')]);
-  run(process.execPath, [path.join(__dirname, 'check-user-data-boundaries.js')]);
-  run(process.execPath, [path.join(__dirname, 'check-media-boundaries.js')]);
-  run(process.execPath, [path.join(__dirname, 'check-query-contracts.js')]);
+  run(process.execPath, [path.join(__dirname, 'preflight.js')], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'migrate-firestore-imports.js'), '--check'], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'check-shared-config-boundaries.js')], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'check-user-data-boundaries.js')], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'check-media-boundaries.js')], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'check-query-contracts.js')], performanceEnvironment);
   run(process.execPath, ['--test', '--test-concurrency=1',
     path.join(frontendRoot, 'scripts', 'verify-start.test.js'),
     path.join(__dirname, 'common.test.js'),
@@ -54,11 +73,17 @@ const main = async () => {
     path.join(frontendRoot, 'scripts', 'task07', 'media-derivative-backfill.test.js'),
     path.join(frontendRoot, 'performance', 'global-setup.test.js'),
     path.join(frontendRoot, 'performance', 'tests', 'browser', 'helpers.test.js'),
-  ]);
-  run(process.execPath, [path.join(__dirname, 'fixtures.js'), 'determinism']);
-  run(process.execPath, [path.join(frontendRoot, 'scripts', 'build-production.js')]);
-  run(process.execPath, [path.join(__dirname, 'verify-disabled-build.js')]);
-  run(process.execPath, [path.join(__dirname, 'build.js')]);
+  ], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'fixtures.js'), 'determinism'], performanceEnvironment);
+  run(process.execPath, [
+    path.join(frontendRoot, 'scripts', 'build-production.js'),
+    '--environment', 'performance',
+    '--project', projectId,
+    '--site', PERFORMANCE_HOSTING_SITE,
+    '--bucket', PERFORMANCE_STORAGE_BUCKET,
+  ], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'verify-disabled-build.js')], performanceEnvironment);
+  run(process.execPath, [path.join(__dirname, 'build.js')], performanceEnvironment);
   await withEmulatorPortCleanup(() => {
     run(process.execPath, [
       require.resolve('@playwright/test/cli'),
@@ -69,12 +94,12 @@ const main = async () => {
       'chromium',
       '--workers',
       '1',
-    ]);
+    ], performanceEnvironment);
   }, {
     cleanupOwnedArtifacts: removePerformanceFirebaseConfig,
     label: 'Performance CI Playwright run',
   });
-  run(process.execPath, [path.join(__dirname, 'compare.js')]);
+  run(process.execPath, [path.join(__dirname, 'compare.js')], performanceEnvironment);
 };
 
 if (require.main === module) {
