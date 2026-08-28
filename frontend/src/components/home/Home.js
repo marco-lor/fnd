@@ -11,6 +11,7 @@ import { getVarie } from '../../data/configRepository';
 import Extra from './elements/Extra';
 import { updateProgression } from '../../data/userData/userDataCommands';
 import { useProfileContent, useProgression } from '../../data/userData/userDataHooks';
+import PerformanceProfiler from '../../performance/PerformanceProfiler';
 
 function Home() {
   const { user } = useAuth();
@@ -173,30 +174,40 @@ function Home() {
               <div className="grid gap-6 lg:grid-cols-2 items-stretch">
                 <div className="relative h-full">
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-transparent to-fuchsia-500/10 pointer-events-none" />
-                  <MergedStatsTable />
+                  <PerformanceProfiler id="ParamTables">
+                    <MergedStatsTable />
+                  </PerformanceProfiler>
                 </div>
                 <div className="relative flex flex-col gap-6 h-full">
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-transparent to-blue-500/10 pointer-events-none" />
-                  <StatsBars />
+                  <PerformanceProfiler id="StatsBars">
+                    <StatsBars />
+                  </PerformanceProfiler>
                   <div className="flex-1 min-h-0">
-                    <EquippedInventory />
+                    <PerformanceProfiler id="EquippedInventory">
+                      <EquippedInventory />
+                    </PerformanceProfiler>
                   </div>
                 </div>
               </div>
             </div>
             <div className="xl:col-span-4 h-full min-h-0">
-              <Inventory />
+              <PerformanceProfiler id="Inventory">
+                <Inventory />
+              </PerformanceProfiler>
             </div>
           </div>
 
           {/* Bottom horizontal extra (Lingue, Conoscenze, Professioni) */}
           <div className="mt-2">
-            <Extra
-              variant="columns"
-              lingue={userData?.lingue}
-              conoscenze={userData?.conoscenze}
-              professioni={userData?.professioni}
-            />
+            <PerformanceProfiler id="Extra">
+              <Extra
+                variant="columns"
+                lingue={userData?.lingue}
+                conoscenze={userData?.conoscenze}
+                professioni={userData?.professioni}
+              />
+            </PerformanceProfiler>
           </div>
         </main>
       </div>

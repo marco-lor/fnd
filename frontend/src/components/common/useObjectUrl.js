@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { recordTask08Event } from '../../performance/task08';
 
 const getDefaultUrlApi = () => (
   typeof URL !== 'undefined' ? URL : null
@@ -15,6 +16,10 @@ export const createObjectUrlLease = (file, {
     throw new Error('Object URL previews are not supported in this environment.');
   }
   const url = urlApi.createObjectURL(file);
+  recordTask08Event({
+    metric: 'media-object-url-create',
+    tags: { kind: 'object-url' },
+  });
   let active = true;
   return {
     url,
@@ -22,6 +27,14 @@ export const createObjectUrlLease = (file, {
       if (!active) return;
       active = false;
       urlApi.revokeObjectURL(url);
+      recordTask08Event({
+        metric: 'media-object-url-revoke',
+        tags: { kind: 'object-url' },
+      });
+      recordTask08Event({
+        metric: 'cleanup',
+        tags: { kind: 'object-url' },
+      });
     },
   };
 };

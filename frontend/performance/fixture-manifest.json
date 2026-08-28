@@ -4,7 +4,7 @@
   "projectId": "demo-fnd-perf",
   "documentCount": 9139,
   "storageObjectCount": 136,
-  "canonicalHash": "c56b0dbae8e449e56eeaa9324e836e97575de1385e1d9f104c5515cc3e4ee194",
+  "canonicalHash": "fbabc02a3376d466cf717e3886e0d12a9e15568c17b654322cff4909dc6eaca8",
   "counts": {
     "app_config": 1,
     "users": 200,

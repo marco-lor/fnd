@@ -2,6 +2,10 @@ import {
   __resetCallableRegistryForTests,
   getCallable,
 } from '../functions/callableRegistry';
+import {
+  getTask08ResourceHoldId,
+  recordTask08Event,
+} from '../../performance/task08';
 
 const USER_DATA_CALLABLES = Object.freeze({
   spendCharacterPointV2: getCallable('spendCharacterPointV2'),
@@ -25,6 +29,7 @@ const USER_DATA_CALLABLES = Object.freeze({
 // action. Deriving this key from a payload would merge distinct, intentional
 // operations (for example, two identical long-press resource ticks).
 const retainedOperationIds = new Map();
+let task08InvocationSequence = 0;
 export const USER_DATA_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,79}$/;
 const DEFINITIVE_CALLABLE_CODES = new Set([
   'already-exists',
@@ -79,6 +84,36 @@ const requireRetryScope = (retryScope) => {
   return retryScope;
 };
 
+const task08CommandTags = ({
+  name,
+  payload,
+  operationId,
+  retryKey,
+  holdId,
+  invocationSequence,
+}) => ({
+  command: name,
+  explicitOperationId: Boolean(operationId),
+  retryKeyProvided: Boolean(retryKey),
+  ...(holdId ? { holdId, invocationSequence } : {}),
+  ...(name === 'task05UpdateResource' ? {
+    resource: payload?.resource,
+    mode: payload?.mode,
+    value: payload?.value,
+  } : {}),
+  ...(name === 'task05CharacterCreation' ? {
+    action: payload?.action,
+  } : {}),
+  ...(name === 'task05PrepareConsumable' || name === 'task05CommitConsumable' ? {
+    resource: payload?.resource ?? 'none',
+  } : {}),
+});
+
+const task08ErrorCode = (error) => {
+  const code = typeof error?.code === 'string' ? error.code : 'unknown';
+  return code.replace(/^functions\//, '').slice(0, 80) || 'unknown';
+};
+
 const releaseOtherRetainedOperations = (retryScope, activeCacheKey) => {
   if (!retryScope) return;
   retainedOperationIds.forEach((entry, cacheKey) => {
@@ -119,17 +154,46 @@ const callWithOperation = async ({
       retryScope: resolvedRetryScope,
     });
   }
+  const holdId = typeof getTask08ResourceHoldId === 'function'
+    ? getTask08ResourceHoldId()
+    : null;
+  const invocationSequence = holdId ? ++task08InvocationSequence : null;
+  const measurementTags = task08CommandTags({
+    name,
+    payload,
+    operationId,
+    retryKey,
+    holdId,
+    invocationSequence,
+  });
+  recordTask08Event({ metric: 'command-start', tags: measurementTags });
   try {
     const result = await call(name, {
       ...payload,
       operationId: requireOperationId(resolvedOperationId),
     });
     if (cacheKey) retainedOperationIds.delete(cacheKey);
+    recordTask08Event({ metric: 'command-success', tags: measurementTags });
+    if (result?.replayed === false) {
+      recordTask08Event({ metric: 'command-applied', tags: measurementTags });
+    } else if (result?.replayed !== true) {
+      // The initialize callable predates the idempotent response envelope and
+      // does not return replayed=false. Keep that success visible for
+      // diagnostics, but do not mislabel it as a physical application.
+      recordTask08Event({
+        metric: 'command-non-replayed-success',
+        tags: measurementTags,
+      });
+    }
     return result;
   } catch (error) {
     if (cacheKey && isDefinitiveUserDataCommandError(error)) {
       retainedOperationIds.delete(cacheKey);
     }
+    recordTask08Event({
+      metric: 'command-failure',
+      tags: { ...measurementTags, code: task08ErrorCode(error) },
+    });
     throw error;
   }
 };
@@ -268,6 +332,7 @@ export const consumeTurnEffects = ({ operationId, retryKey, retryScope, ...paylo
 export const __resetUserDataCommandsForTests = () => {
   if (process.env.NODE_ENV === 'test') {
     retainedOperationIds.clear();
+    task08InvocationSequence = 0;
     __resetCallableRegistryForTests();
   }
 };

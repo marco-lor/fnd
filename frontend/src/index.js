@@ -11,10 +11,16 @@ import {
   isPerformanceEnabled,
   recordPerfEvent,
 } from "./performance/runtime";
+import { installTask08LazyTestBridge } from "./performance/task08";
 import { installStaticChunkRecovery } from "./runtime/staticChunkRecovery";
 
 installStaticChunkRecovery();
 installPerformanceRuntime();
+
+const task08PerformanceMode = process.env.REACT_APP_FND_PERF === "1";
+if (task08PerformanceMode) {
+  installTask08LazyTestBridge(() => import("./data/userData/userDataCommands"));
+}
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 let bootstrapAttempt = 0;

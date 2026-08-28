@@ -26,12 +26,15 @@ const RULES_EXEC_SCRIPT = 'scripts/performance/rules-exec.js';
 const RULES_EMULATOR_LABEL = 'Rules emulator integration';
 
 const parseArguments = (argv = process.argv.slice(2)) => {
-  const allowedArguments = new Set(['--task07-only']);
+  const allowedArguments = new Set(['--task07-only', '--task08-only']);
   const unknownArgument = argv.find((argument) => !allowedArguments.has(argument));
   if (unknownArgument) {
     throw new Error(`Unknown rules emulator argument: ${unknownArgument}`);
   }
-  return {task07Only: argv.includes('--task07-only')};
+  return {
+    task07Only: argv.includes('--task07-only'),
+    task08Only: argv.includes('--task08-only'),
+  };
 };
 
 const buildFirebaseRulesInvocation = ({
@@ -56,6 +59,7 @@ const buildFirebaseRulesInvocation = ({
     'node',
     RULES_EXEC_SCRIPT,
     ...(options.task07Only ? ['--task07-only'] : []),
+    ...(options.task08Only ? ['--task08-only'] : []),
   ].join(' ');
   return {
     args: [

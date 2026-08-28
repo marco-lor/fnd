@@ -97,8 +97,17 @@ module.exports = defineConfig({
     {
       name: 'chromium',
       dependencies: ['auth-setup'],
-      testIgnore: /asset-warmup\.setup\.js|auth\.setup\.js|firestore-persistence\.experiment\.js|task07-media-(?:cross-browser\.smoke|soak\.performance)\.js/,
+      testIgnore: /asset-warmup\.setup\.js|auth\.setup\.js|firestore-persistence\.experiment\.js|task07-media-(?:cross-browser\.smoke|soak\.performance)\.js|task08-baseline\.performance\.js/,
       use: { browserName: 'chromium', launchOptions: { args: ['--js-flags=--expose-gc'] } },
+    },
+    {
+      name: 'task08-chromium',
+      dependencies: ['auth-setup'],
+      testMatch: /task08-baseline\.performance\.js/,
+      use: {
+        browserName: 'chromium',
+        launchOptions: { args: ['--js-flags=--expose-gc'] },
+      },
     },
     {
       name: 'firestore-persistence-experiment',

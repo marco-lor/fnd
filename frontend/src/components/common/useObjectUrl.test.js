@@ -1,6 +1,11 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import useObjectUrl, { createObjectUrlLease, withObjectUrl } from './useObjectUrl';
+import { recordTask08Event } from '../../performance/task08';
+
+jest.mock('../../performance/task08', () => ({
+  recordTask08Event: jest.fn(),
+}));
 
 const Preview = ({ file }) => {
   const url = useObjectUrl(file);
@@ -34,6 +39,11 @@ describe('useObjectUrl', () => {
     lease.revoke();
     expect(urlApi.revokeObjectURL).toHaveBeenCalledTimes(1);
     expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:leased');
+    expect(recordTask08Event.mock.calls.map(([event]) => event.metric)).toEqual([
+      'media-object-url-create',
+      'media-object-url-revoke',
+      'cleanup',
+    ]);
   });
 
   test('revokes replacement and unmount URLs without leaking', async () => {

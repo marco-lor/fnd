@@ -12,6 +12,7 @@ import {
 } from '../../../data/media/mediaConsumerAdapter';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import useObjectUrl from '../../common/useObjectUrl';
+import { recordTask08Event } from '../../../performance/task08';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
 import {
 	collectInventoryCatalogItemIds,
@@ -394,6 +395,25 @@ const Inventory = () => {
 	const filtered = items.filter(it =>
 		!q || it.name?.toLowerCase().includes(q.toLowerCase()) || it.type?.toLowerCase().includes(q.toLowerCase())
 	);
+	const filterMeasurement = useMemo(() => ({
+		inputCount: items.length,
+		filteredCount: filtered.length,
+		queryLength: q.trim().length,
+		query: q.trim(),
+		firstItemId: inventoryDocumentId(filtered[0], 0),
+		lastItemId: inventoryDocumentId(filtered[filtered.length - 1], filtered.length - 1),
+	}), [filtered, items.length, q]);
+	const filterMeasurementKey = JSON.stringify(filterMeasurement);
+	const committedFilterMeasurementRef = useRef(null);
+	useEffect(() => {
+		if (committedFilterMeasurementRef.current === filterMeasurementKey) return;
+		committedFilterMeasurementRef.current = filterMeasurementKey;
+		recordTask08Event({
+			metric: 'inventory-filter-result',
+			value: filterMeasurement.filteredCount,
+			tags: filterMeasurement,
+		});
+	}, [filterMeasurement, filterMeasurementKey]);
 	const varieList = filtered.filter(it => (it.type || '').toLowerCase() === 'varie');
 	const otherList = filtered.filter(it => (it.type || '').toLowerCase() !== 'varie');
 

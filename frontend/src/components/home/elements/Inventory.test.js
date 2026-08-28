@@ -20,6 +20,7 @@ import {
 } from '../../../data/media/mediaConsumerAdapter';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
 import Inventory, { buildInventoryView } from './Inventory';
+import { recordTask08Event } from '../../../performance/task08';
 
 jest.mock('../../../AuthContext', () => ({ useAuthSession: jest.fn() }));
 jest.mock('../../../data/userData/userDataHooks', () => ({
@@ -52,6 +53,9 @@ jest.mock('./lazyHomeFeatures', () => ({
   LazyItemDetailsModal: jest.fn(() => null),
 }));
 jest.mock('./ConfirmDeleteModal', () => jest.fn(() => null));
+jest.mock('../../../performance/task08', () => ({
+  recordTask08Event: jest.fn(),
+}));
 
 const readyInventory = {
   data: [{
@@ -224,6 +228,19 @@ describe('Inventory command safety', () => {
     expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument();
     expect(mutateInventory).not.toHaveBeenCalled();
     expect(tryPersistTask07VarieMedia).not.toHaveBeenCalled();
+  });
+
+  test('records an inventory filter only after commit and deduplicates an unchanged summary', async () => {
+    const { rerender } = render(<Inventory />);
+
+    await waitFor(() => expect(recordTask08Event).toHaveBeenCalledTimes(1));
+    rerender(<Inventory />);
+    expect(recordTask08Event).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
+      target: { value: 'rope' },
+    });
+    await waitFor(() => expect(recordTask08Event).toHaveBeenCalledTimes(2));
   });
 
   test('joins canonical-only Bazaar media into a purchased display entity in memory', () => {

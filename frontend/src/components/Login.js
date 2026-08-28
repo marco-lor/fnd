@@ -8,6 +8,11 @@ import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
 import LoginCreateButton from "./LoginCreateButton";
 import { FiMail, FiLock, FiEye, FiEyeOff, FiLogIn } from "react-icons/fi";
+import {
+  beginTask08Transition,
+  runTask08AuthRequest,
+} from "../performance/task08";
+import PerformanceProfiler from "../performance/PerformanceProfiler";
 
 const updateCharacterCreation = async (input) => {
   const commands = await import('../data/userData/userDataCommands');
@@ -29,6 +34,13 @@ function Login() {
   const navigate = useNavigate();
   const { user, authStatus } = useAuthSession();
   const { userData, profileStatus } = useProfileState();
+  const pendingLoginTransitionRef = useRef(null);
+
+  const finishPendingLoginTransition = (outcome) => {
+    const finish = pendingLoginTransitionRef.current;
+    pendingLoginTransitionRef.current = null;
+    finish?.(outcome);
+  };
 
   useEffect(() => {
     if (!pendingLoginUid || user?.uid !== pendingLoginUid) return;
@@ -37,6 +49,7 @@ function Login() {
       setError("Login succeeded, but the character profile could not be loaded. Please try again.");
       setIsLoggingIn(false);
       setPendingLoginUid(null);
+      finishPendingLoginTransition('failure');
       return;
     }
 
@@ -51,6 +64,7 @@ function Login() {
         setIsLoggingIn(false);
         setPendingLoginUid(null);
         missingProfileCreationUid.current = null;
+        finishPendingLoginTransition('failure');
       });
       return;
     }
@@ -60,7 +74,8 @@ function Login() {
     setIsLoggingIn(false);
     setPendingLoginUid(null);
     missingProfileCreationUid.current = null;
-    navigate(userData.flags?.characterCreationDone ? "/home" : "/character-creation");
+      finishPendingLoginTransition('success');
+      navigate(userData.flags?.characterCreationDone ? "/home" : "/character-creation");
   }, [
     authStatus,
     navigate,
@@ -82,13 +97,20 @@ function Login() {
     }
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      pendingLoginTransitionRef.current = beginTask08Transition('login-auth-gate', {
+        flow: 'sign-in',
+      });
+      const userCredential = await runTask08AuthRequest(
+        'sign-in',
+        () => signInWithEmailAndPassword(auth, email, password)
+      );
       missingProfileCreationUid.current = null;
       setPendingLoginUid(userCredential.user.uid);
     } catch (err) {
       console.error("Login error:", err);
       setError("Login failed. Check credentials and try again.");
       setIsLoggingIn(false);
+      finishPendingLoginTransition('failure');
     }
   };
 
@@ -103,19 +125,29 @@ function Login() {
     }
 
     try {
+      pendingLoginTransitionRef.current = beginTask08Transition('login-auth-gate', {
+        flow: 'create-account',
+      });
       // First check if the user already exists
-      const methods = await fetchSignInMethodsForEmail(auth, email);
+      const methods = await runTask08AuthRequest(
+        'create-account-preflight',
+        () => fetchSignInMethodsForEmail(auth, email)
+      );
       
       if (methods && methods.length > 0) {
         // User already exists
         setError("This email is already registered. Please login instead.");
+        finishPendingLoginTransition('failure');
         return;
       }
 
       setIsCreatingAccount(true);
       
       // Create the user if they don't exist
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await runTask08AuthRequest(
+        'create-account',
+        () => createUserWithEmailAndPassword(auth, email, password)
+      );
       const user = userCredential.user;
 
       await updateCharacterCreation({
@@ -127,6 +159,7 @@ function Login() {
       
       // Navigate to character creation page after a short delay
       setTimeout(() => {
+        finishPendingLoginTransition('success');
         navigate("/character-creation", { 
           state: { email: user.email } 
         });
@@ -135,11 +168,13 @@ function Login() {
     } catch (err) {
       setError(err.message);
       setIsCreatingAccount(false);
+      finishPendingLoginTransition('failure');
     }
   };
 
   return (
-  <div className="relative w-screen h-screen">
+  <PerformanceProfiler id="Login">
+    <div className="relative w-screen h-screen">
       <AuroraBackground />
 
       {/* Soft glow orbs behind the card */}
@@ -374,6 +409,7 @@ function Login() {
         </div>
       </div>
     </div>
+  </PerformanceProfiler>
   );
 }
 

@@ -14,6 +14,7 @@ import {
   getFunctions,
   httpsCallable,
 } from 'firebase/functions';
+import { recordTask08Event } from '../../performance/task08';
 
 const mockCallable = jest.fn((payload) => Promise.resolve({
   data: { success: true, replayed: false, payload },
@@ -25,6 +26,11 @@ jest.mock('firebase/functions', () => ({
   connectFunctionsEmulator: jest.fn(),
   getFunctions: jest.fn(() => ({ region: 'europe-west8' })),
   httpsCallable: jest.fn(() => mockCallable),
+}));
+
+jest.mock('../../performance/task08', () => ({
+  getTask08ResourceHoldId: jest.fn(() => null),
+  recordTask08Event: jest.fn(),
 }));
 
 describe('Task 05 user commands', () => {
@@ -99,6 +105,95 @@ describe('Task 05 user commands', () => {
       mode: 'delta',
       value: -3,
     });
+  });
+
+  test('records callable attempts and outcomes without exposing operation or user IDs', async () => {
+    await updateResource({
+      userId: 'user-1',
+      resource: 'hp',
+      mode: 'delta',
+      value: -3,
+      retryKey: 'same-logical-action',
+      operationId: 'resource-fixed',
+    });
+
+    expect(recordTask08Event).toHaveBeenNthCalledWith(1, {
+      metric: 'command-start',
+      tags: {
+        command: 'task05UpdateResource',
+        explicitOperationId: true,
+        retryKeyProvided: true,
+        resource: 'hp',
+        mode: 'delta',
+        value: -3,
+      },
+    });
+    expect(recordTask08Event).toHaveBeenNthCalledWith(2, {
+      metric: 'command-success',
+      tags: {
+        command: 'task05UpdateResource',
+        explicitOperationId: true,
+        retryKeyProvided: true,
+        resource: 'hp',
+        mode: 'delta',
+        value: -3,
+      },
+    });
+    expect(JSON.stringify(recordTask08Event.mock.calls)).not.toContain('resource-fixed');
+    expect(JSON.stringify(recordTask08Event.mock.calls)).not.toContain('user-1');
+  });
+
+  test('does not infer a physical application from a response without replay=false', async () => {
+    mockCallable.mockResolvedValueOnce({ data: { success: true } });
+
+    await purchaseItem({ itemId: 'sword-1', operationId: 'purchase-no-replay-field' });
+
+    expect(recordTask08Event.mock.calls.map(([entry]) => entry.metric)).toEqual([
+      'command-start',
+      'command-success',
+      'command-non-replayed-success',
+    ]);
+  });
+
+  test('pairs every resource hold command event with a bounded sequence and hold ID', async () => {
+    const { getTask08ResourceHoldId } = require('../../performance/task08');
+    getTask08ResourceHoldId.mockReturnValue('hold-1');
+
+    await updateResource({
+      resource: 'hp',
+      mode: 'delta',
+      value: -1,
+      operationId: 'resource-hold-fixed',
+    });
+
+    expect(recordTask08Event.mock.calls.map(([entry]) => entry)).toEqual([
+      {
+        metric: 'command-start',
+        tags: expect.objectContaining({
+          command: 'task05UpdateResource',
+          holdId: 'hold-1',
+          invocationSequence: 1,
+        }),
+      },
+      {
+        metric: 'command-success',
+        tags: expect.objectContaining({
+          command: 'task05UpdateResource',
+          holdId: 'hold-1',
+          invocationSequence: 1,
+        }),
+      },
+      {
+        metric: 'command-applied',
+        tags: expect.objectContaining({
+          command: 'task05UpdateResource',
+          holdId: 'hold-1',
+          invocationSequence: 1,
+        }),
+      },
+    ]);
+    expect(JSON.stringify(recordTask08Event.mock.calls)).not.toContain('resource-hold-fixed');
+    expect(JSON.stringify(recordTask08Event.mock.calls)).not.toContain('user-1');
   });
 
   test('forwards the atomic barrier total and turn metadata', async () => {

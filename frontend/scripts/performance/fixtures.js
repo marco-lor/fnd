@@ -222,6 +222,21 @@ const accountDefinitions = [
   })),
 ];
 
+// Task 08 uses one stable account in two independent browser contexts. The
+// consumable is an existing deterministic V2 inventory instance; its zero-roll
+// fixture keeps the two-client atomicity probe independent from randomness.
+const TASK08_FIXTURE_ACCOUNT = Object.freeze({
+  uid: 'perf-player',
+  role: 'player',
+});
+const TASK08_CONSUMABLE_INVENTORY_ID = 'legacy_0141de11bc577d0c2d9789b3_1_1';
+const TASK08_TWO_CLIENT_SESSION = Object.freeze({
+  clientA: Object.freeze({ label: 'client-a', uid: TASK08_FIXTURE_ACCOUNT.uid }),
+  clientB: Object.freeze({ label: 'client-b', uid: TASK08_FIXTURE_ACCOUNT.uid }),
+  distinctClients: true,
+  environment: 'demo-fnd-perf',
+});
+
 const buildInventory = (count) => Array.from({ length: count }, (_, index) => ({
   id: `item-${pad(index)}`,
   name: `Fixture item ${index}`,
@@ -327,6 +342,8 @@ const buildDocuments = () => {
   add('utils/varie', {
     starting_values: { hp: 10, mana: 5 },
     races_extra: { human: { extraAbilityCreation: 0, extraTokenCreation: 0 } },
+    modAnima: { Spirito: { Forza: 1 } },
+    levelUpAnimaBonus: { Spirito: { Salute: 1 } },
     dadi: [4, 6, 8, 10, 12, 20],
     dadiAnimaByLevel: [null, 'd4', 'd4', 'd6', 'd6', 'd8', 'd8', 'd10', 'd10', 'd12', 'd12'],
     cost_params_combat: {
@@ -891,6 +908,9 @@ module.exports = {
   FIXTURE_VERSION,
   PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
+  TASK08_CONSUMABLE_INVENTORY_ID,
+  TASK08_FIXTURE_ACCOUNT,
+  TASK08_TWO_CLIENT_SESSION,
   TASK06_BACKEND_CONFIG,
   TASK07_MEDIA_CONTROL,
   TASK07_STORAGE_OBJECT_COUNT,

@@ -143,6 +143,29 @@ const stateDocument = (uid, data) => ({
   ...data,
 });
 
+const captureDocuments = async (paths) => new Map(
+  await Promise.all(paths.map(async (documentPath) => {
+    const snapshot = await db.doc(documentPath).get();
+    return [documentPath, {
+      exists: snapshot.exists,
+      data: snapshot.data(),
+    }];
+  }))
+);
+
+const restoreDocuments = async (documents) => {
+  await withBackgroundTriggersDisabled(async () => {
+    for (const [documentPath, snapshot] of documents) {
+      const reference = db.doc(documentPath);
+      if (snapshot.exists) {
+        await reference.set(snapshot.data);
+      } else {
+        await reference.delete();
+      }
+    }
+  });
+};
+
 const inventoryFingerprint = (snapshot) => snapshot.docs
   .map((document) => ({
     id: document.id,
@@ -323,6 +346,172 @@ test('Task 05 callables enforce authentication, owner access, and peer denial', 
     'permission-denied'
   );
   assert.equal((await db.doc('users/perf-peer-2/state/resources').get()).get('stats.hpCurrent'), 30);
+});
+
+test('character creation race selection resets authoritative parameters and creation budgets', async () => {
+  const token = await signIn('perf-new-player');
+  const paths = [
+    'users/perf-new-player',
+    'users/perf-new-player/state/progression',
+    'utils/varie',
+  ];
+  const original = await captureDocuments(paths);
+  const operation = operationId('task08-race-reset');
+
+  try {
+    const schema = await db.doc('utils/schema_pg').get();
+    const originalVarie = original.get('utils/varie').data;
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc('utils/varie').set({
+        ...originalVarie,
+        starting_values: {
+          ...originalVarie.starting_values,
+          abilityPoints: 6,
+          tokenPoints: 3,
+        },
+        races_extra: {
+          ...originalVarie.races_extra,
+          human: {extraAbilityCreation: 2, extraTokenCreation: 1},
+        },
+      });
+      await db.doc('users/perf-new-player').set({
+        ...original.get('users/perf-new-player').data,
+        race: 'stale-race',
+        flags: {characterCreationDone: false},
+      });
+      await db.doc('users/perf-new-player/state/progression').set({
+        ...original.get('users/perf-new-player/state/progression').data,
+        stats: {
+          ...original.get('users/perf-new-player/state/progression').data.stats,
+          basePointsAvailable: 99,
+          basePointsSpent: 17,
+          combatTokensAvailable: 88,
+          combatTokensSpent: 16,
+          negativeBaseStatCount: 4,
+        },
+        Parametri: {
+          Base: {Forza: {Base: 99}},
+          Combattimento: {Salute: {Base: 99}},
+        },
+        AltriParametri: {Anima_1: 'stale-anima'},
+        flags: {characterCreationDone: false},
+      });
+    });
+
+    const result = await callFunction('task05CharacterCreation', {
+      operationId: operation,
+      action: 'selectRace',
+      race: 'human',
+    }, {token});
+    assert.deepEqual(result, {success: true, race: 'human', replayed: false});
+
+    const [root, progression] = await Promise.all([
+      db.doc('users/perf-new-player').get(),
+      db.doc('users/perf-new-player/state/progression').get(),
+    ]);
+    assert.equal(root.get('race'), 'human');
+    assert.equal(root.get('flags.characterCreationDone'), false);
+    assert.deepEqual(progression.get('Parametri.Base'), schema.get('Parametri.Base'));
+    assert.deepEqual(
+      progression.get('Parametri.Combattimento'),
+      schema.get('Parametri.Combattimento')
+    );
+    assert.equal(progression.get('stats.basePointsAvailable'), 8);
+    assert.equal(progression.get('stats.combatTokensAvailable'), 4);
+    assert.equal(progression.get('stats.basePointsSpent'), 0);
+    assert.equal(progression.get('stats.combatTokensSpent'), 0);
+    assert.equal(progression.get('stats.negativeBaseStatCount'), 0);
+    assert.equal(progression.get('AltriParametri.Anima_1'), '---');
+  } finally {
+    await restoreDocuments(original);
+  }
+});
+
+test('character point callable preserves the negative-stat and combat floor policies', async () => {
+  const token = await signIn('perf-new-player');
+  const path = 'users/perf-new-player/state/progression';
+  const original = await captureDocuments([path]);
+  const baseParameters = original.get(path).data.Parametri;
+
+  const writeProgression = async (stats, parametri = baseParameters) => {
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(path).set({
+        ...original.get(path).data,
+        stats,
+        Parametri: parametri,
+        flags: {characterCreationDone: false},
+      });
+    });
+  };
+
+  try {
+    await writeProgression({
+      ...original.get(path).data.stats,
+      basePointsAvailable: 4,
+      basePointsSpent: 0,
+      negativeBaseStatCount: 4,
+    }, {
+      ...baseParameters,
+      Base: {
+        ...baseParameters.Base,
+        Forza: {...baseParameters.Base.Forza, Base: 0},
+      },
+    });
+    await expectCallableError(
+      callFunction('spendCharacterPointV2', {
+        operationId: operationId('task08-negative-cap'),
+        statName: 'Forza',
+        statType: 'Base',
+        change: -1,
+      }, {token}),
+      'failed-precondition'
+    );
+
+    await writeProgression({
+      ...original.get(path).data.stats,
+      basePointsAvailable: 4,
+      basePointsSpent: 0,
+      negativeBaseStatCount: 1,
+    }, {
+      ...baseParameters,
+      Base: {
+        ...baseParameters.Base,
+        Forza: {...baseParameters.Base.Forza, Base: -1},
+      },
+    });
+    await expectCallableError(
+      callFunction('spendCharacterPointV2', {
+        operationId: operationId('task08-negative-floor'),
+        statName: 'Forza',
+        statType: 'Base',
+        change: -1,
+      }, {token}),
+      'failed-precondition'
+    );
+
+    await writeProgression({
+      ...original.get(path).data.stats,
+      combatTokensAvailable: 4,
+      combatTokensSpent: 0,
+    }, {
+      ...baseParameters,
+      Combattimento: {
+        ...baseParameters.Combattimento,
+        Salute: {...baseParameters.Combattimento.Salute, Base: 0},
+      },
+    });
+    await expectCallableError(
+      callFunction('spendCharacterPointV2', {
+        operationId: operationId('task08-combat-floor'),
+        statName: 'Salute',
+        statType: 'Combat',
+        change: -1,
+      }, {token}),
+      'failed-precondition'
+    );
+  } finally {
+    await restoreDocuments(original);
+  }
 });
 
 test('the admin user list paginates safe private fields without reading root aggregates', async () => {

@@ -15,6 +15,10 @@ import {
   task07ProfileRevision,
 } from './characterCreationAvatarMedia';
 import { updateCharacterCreation } from '../../data/userData/userDataCommands';
+import {
+  beginTask08Transition,
+  recordTask08Event,
+} from '../../performance/task08';
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -54,6 +58,8 @@ function CharacterCreation() {
   const avatarOperationOwnerRef = useRef(null);
   const componentMountedRef = useRef(true);
   const pendingAvatarAttemptRef = useRef(null);
+  const pendingStepTransitionsRef = useRef([]);
+  const activeRevisitWindowRef = useRef(null);
 
   useEffect(() => {
     componentMountedRef.current = true;
@@ -62,6 +68,20 @@ function CharacterCreation() {
     return () => {
       componentMountedRef.current = false;
       owner.dispose('Character Creation was unmounted.');
+      const activeRevisitWindow = activeRevisitWindowRef.current;
+      if (activeRevisitWindow) {
+        recordTask08Event({
+          metric: 'step-revisit-window-end',
+          tags: activeRevisitWindow,
+        });
+        activeRevisitWindowRef.current = null;
+      }
+      pendingStepTransitionsRef.current.forEach(({ finish }) => finish('cancelled'));
+      pendingStepTransitionsRef.current = [];
+      recordTask08Event({
+        metric: 'cleanup',
+        tags: { kind: 'character-avatar-operation' },
+      });
       if (avatarOperationOwnerRef.current === owner) {
         avatarOperationOwnerRef.current = null;
       }
@@ -88,6 +108,17 @@ function CharacterCreation() {
       checkCharacterCreationStatus();
     }
   }, [user, navigate, initializing, checkCharacterCreationStatus]);
+
+  useEffect(() => {
+    const pending = pendingStepTransitionsRef.current;
+    if (!pending.length) return;
+    const remaining = [];
+    pending.forEach(({ targetStep, finish }) => {
+      if (targetStep === currentStep) finish('success');
+      else remaining.push({ targetStep, finish });
+    });
+    pendingStepTransitionsRef.current = remaining;
+  }, [currentStep]);
 
   // Initialize state based on passed data from login or user email
   useEffect(() => {
@@ -148,6 +179,34 @@ function CharacterCreation() {
       return;
     }
 
+    const revisitWindow = activeRevisitWindowRef.current;
+    if (revisitWindow && revisitWindow.toStep === currentStep) {
+      recordTask08Event({
+        metric: 'step-revisit-window-end',
+        tags: revisitWindow,
+      });
+      activeRevisitWindowRef.current = null;
+    }
+
+    const fromStep = currentStep;
+    const toStep = currentStep + 1;
+    const finishTransition = beginTask08Transition('character-step', {
+      fromStep,
+      toStep,
+      step: toStep,
+      kind: 'forward',
+    });
+    pendingStepTransitionsRef.current.push({
+      targetStep: toStep,
+      finish: finishTransition,
+    });
+    const failTransition = () => {
+      pendingStepTransitionsRef.current = pendingStepTransitionsRef.current.filter(
+        ({ finish }) => finish !== finishTransition
+      );
+      finishTransition('failure');
+    };
+
     // Persist race selection on first step
     if (currentStep === 1) {
       try {
@@ -158,6 +217,7 @@ function CharacterCreation() {
         });
       } catch (err) {
         setError("Failed to save race selection and reset parameters: " + err.message);
+        failTransition();
         return;
       }
     }
@@ -171,6 +231,7 @@ function CharacterCreation() {
         });
       } catch (err) {
         setError("Failed to save Anima Shard selection and reset parameters: " + err.message);
+        failTransition();
         return;
       }
     }
@@ -178,12 +239,45 @@ function CharacterCreation() {
     if (currentStep < totalSteps) {
       setCurrentStep(currentStep + 1);
       setError(""); // Clear any errors when moving to next step
+    } else {
+      pendingStepTransitionsRef.current = pendingStepTransitionsRef.current.filter(
+        ({ finish }) => finish !== finishTransition
+      );
+      finishTransition('success');
     }
   };
 
   const prevStep = () => {
     if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
+      const previousWindow = activeRevisitWindowRef.current;
+      if (previousWindow) {
+        recordTask08Event({
+          metric: 'step-revisit-window-end',
+          tags: previousWindow,
+        });
+      }
+      const fromStep = currentStep;
+      const toStep = currentStep - 1;
+      const revisitWindow = { fromStep, toStep };
+      activeRevisitWindowRef.current = revisitWindow;
+      recordTask08Event({
+        metric: 'step-revisit-window-start',
+        tags: revisitWindow,
+      });
+      recordTask08Event({
+        metric: 'step-revisit',
+        tags: revisitWindow,
+      });
+      const finishTransition = beginTask08Transition('character-step', {
+        ...revisitWindow,
+        step: toStep,
+        kind: 'revisit',
+      });
+      pendingStepTransitionsRef.current.push({
+        targetStep: toStep,
+        finish: finishTransition,
+      });
+      setCurrentStep(toStep);
       setError(""); // Clear any errors when moving back
     }
   };
