@@ -13,6 +13,7 @@ const {
 const {
   assertEmulatorPortsFree,
   createFirebaseCliEnvironment,
+  environmentPath,
   waitForEmulatorPortsFree,
   withEmulatorPortCleanup,
 } = require('./emulators');
@@ -129,7 +130,7 @@ const runRulesEmulators = async ({
     ...(portableJavaHome ? {
       JAVA_HOME: portableJavaHome,
       PATH: `${path.join(portableJavaHome, 'bin')}`
-        + `${path.delimiter}${ownedEnvironment.PATH || ''}`,
+        + `${path.delimiter}${environmentPath(ownedEnvironment)}`,
     } : {}),
   });
 

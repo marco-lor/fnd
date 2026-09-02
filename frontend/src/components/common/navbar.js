@@ -26,6 +26,7 @@ import ProfileMediaDialogs from './lazyProfileMedia';
 import MediaImage, {
   hasMediaAsset,
 } from './MediaImage';
+import { usePerformanceRenderProbe } from '../../performance/PerformanceProfiler';
 
 const NAV_ITEMS = [
   {
@@ -351,6 +352,7 @@ const SidebarProfileCard = ({
 };
 
 const Navbar = () => {
+  usePerformanceRenderProbe('Navbar');
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, getCurrentProfile } = useAuthSession();

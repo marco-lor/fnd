@@ -94,6 +94,7 @@ const BROWSER_ASSET_WARMUP_ORIGIN = 'http://127.0.0.1:5000';
 const BROWSER_ASSET_WARMUP_BATCH_SIZE = 4;
 const BROWSER_ASSET_WARM_PASS_TIMEOUT_MS = 30_000;
 const BROWSER_ASSET_VALIDATION_PASS_TIMEOUT_MS = 5_000;
+const BROWSER_ASSET_VALIDATION_TRANSIENT_RETRY_LIMIT = 1;
 const BUILD_REPORT_PATH = path.join(resultsDir, 'build-report.json');
 const LIFECYCLE_STREAM_OPERATIONS = {
   'auth-transition': new Set(['Listen']),
@@ -276,13 +277,27 @@ const runBrowserStaticAssetWarmupPass = async ({
     throw new TypeError('Browser static asset warmup requires a passName and positive timeoutMs.');
   }
 
+  const isTransientValidationTimeoutAbort = (result) => (
+    passName === 'validation'
+    && result?.ok === false
+    && result?.status === null
+    && result?.timeoutTriggered === true
+    && result?.error === 'signal is aborted without reason'
+  );
   const results = [];
   for (const batch of batches) {
-    const batchResults = await page.evaluate(async ({ assets, requestPass, requestTimeoutMs }) => (
-      Promise.all(assets.map(async (asset) => {
+    const attemptsByPath = new Map(batch.map((asset) => [asset.path, []]));
+    let pendingAssets = batch;
+    for (let attempt = 1; pendingAssets.length; attempt += 1) {
+      const batchResults = await page.evaluate(async ({ assets, requestPass, requestTimeoutMs }) => (
+        Promise.all(assets.map(async (asset) => {
         const controller = new AbortController();
         const startedAt = performance.now();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        let timeoutTriggered = false;
+        const timer = setTimeout(() => {
+          timeoutTriggered = true;
+          controller.abort();
+        }, requestTimeoutMs);
         try {
           const response = await fetch(asset.path, {
             cache: 'no-store',
@@ -315,6 +330,7 @@ const runBrowserStaticAssetWarmupPass = async ({
             path: asset.path,
             sha256,
             status: response.status,
+            timeoutTriggered,
           };
         } catch (error) {
           return {
@@ -327,17 +343,49 @@ const runBrowserStaticAssetWarmupPass = async ({
             path: asset.path,
             sha256: null,
             status: null,
+            timeoutTriggered,
           };
         } finally {
           clearTimeout(timer);
         }
-      }))
-    ), {
-      assets: batch,
-      requestPass: passName,
-      requestTimeoutMs: timeoutMs,
+        }))
+      ), {
+        assets: pendingAssets,
+        requestPass: passName,
+        requestTimeoutMs: timeoutMs,
+      });
+      const attemptByPath = new Map(batchResults.map((result) => [result?.path, result]));
+      pendingAssets.forEach((asset) => {
+        const result = attemptByPath.get(asset.path) || {
+          bytes: 0,
+          contentType: '',
+          durationMs: 0,
+          error: 'browser asset request produced no matching result',
+          ok: false,
+          pass: passName,
+          path: asset.path,
+          sha256: null,
+          status: null,
+          timeoutTriggered: false,
+        };
+        attemptsByPath.get(asset.path).push({ ...result, attempt });
+      });
+      const mayRetry = attempt <= BROWSER_ASSET_VALIDATION_TRANSIENT_RETRY_LIMIT;
+      pendingAssets = mayRetry
+        ? pendingAssets.filter((asset) => isTransientValidationTimeoutAbort(
+          attemptsByPath.get(asset.path).at(-1)
+        ))
+        : [];
+    }
+    batch.forEach((asset) => {
+      const attempts = attemptsByPath.get(asset.path);
+      const finalResult = attempts.at(-1);
+      results.push({
+        ...finalResult,
+        attemptCount: attempts.length,
+        attempts,
+      });
     });
-    results.push(...batchResults);
   }
   return results;
 };
@@ -383,6 +431,7 @@ const warmBrowserAssetDelivery = async ({
     status: 'running',
     assetCount: 0,
     batchSize: BROWSER_ASSET_WARMUP_BATCH_SIZE,
+    validationTransientRetryLimit: BROWSER_ASSET_VALIDATION_TRANSIENT_RETRY_LIMIT,
     passes: [],
     failure: null,
   };
@@ -427,7 +476,14 @@ const warmBrowserAssetDelivery = async ({
         passName,
         timeoutMs,
       });
-      diagnostics.passes.push({ name: passName, timeoutMs, results });
+      diagnostics.passes.push({
+        name: passName,
+        timeoutMs,
+        transientRetryLimit: passName === 'validation'
+          ? BROWSER_ASSET_VALIDATION_TRANSIENT_RETRY_LIMIT
+          : 0,
+        results,
+      });
     }
     const failures = diagnostics.passes.flatMap((pass) => (
       pass.results.filter((result) => !result.ok)
@@ -724,6 +780,46 @@ const isExpectedTask07MediaDetachmentCancellation = ({
     parsed.origin === STORAGE_EMULATOR_ORIGIN
     && TASK07_FIXTURE_IMAGE_PATH.test(parsed.pathname)
   );
+};
+
+const isExpectedTask08CleanupImageCancellation = ({
+  lifecyclePhase,
+  resourceType,
+  failure,
+  method,
+  url,
+  priorNetworkRecords,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (
+    firebaseProjectId !== projectId
+    || lifecyclePhase !== 'route-cleanup'
+    || resourceType !== 'image'
+    || failure !== 'net::ERR_ABORTED'
+    || method !== 'GET'
+    || !Array.isArray(priorNetworkRecords)
+  ) {
+    return false;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return false;
+  }
+  if (
+    parsed.origin !== STORAGE_EMULATOR_ORIGIN
+    || !TASK07_FIXTURE_IMAGE_PATH.test(parsed.pathname)
+  ) {
+    return false;
+  }
+  return priorNetworkRecords.some((record) => (
+    record?.path === parsed.pathname
+    && record?.resourceType === 'image'
+    && record?.method === 'GET'
+    && record?.status === 200
+  ));
 };
 
 const isExpectedDemoRecaptchaCancellation = ({
@@ -1739,6 +1835,7 @@ module.exports = {
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
+  isExpectedTask08CleanupImageCancellation,
   isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,

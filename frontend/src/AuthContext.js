@@ -286,10 +286,12 @@ export const AuthProvider = ({ children }) => {
   const [authStatus, setAuthStatus] = useState("checking");
   const [authError, setAuthError] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [profileUid, setProfileUid] = useState(null);
   const [profileStatus, setProfileStatus] = useState("idle");
   const [profileError, setProfileError] = useState(null);
   const [shellState, setShellState] = useState({ profile: null, source: "none" });
   const [authAttempt, setAuthAttempt] = useState(0);
+  const [authObserverRevision, setAuthObserverRevision] = useState(0);
   const [repositoryAccessGeneration, setRepositoryAccessGeneration] = useState(0);
   const userSnapshotUnsubscribe = useRef(null);
   const currentUserRef = useRef(null);
@@ -331,6 +333,7 @@ export const AuthProvider = ({ children }) => {
   const subscribeToProfile = useCallback((currentUser, { hydrateCache = false } = {}) => {
     clearProfileListener();
     setUserData(null);
+    setProfileUid(null);
     setProfileError(null);
 
     let cachedProfile = null;
@@ -356,6 +359,7 @@ export const AuthProvider = ({ children }) => {
           if (!profileData) {
             setRepositoryAccessScope(currentUser.uid, "profile-missing");
             setUserData(null);
+            setProfileUid(null);
             setShellProfile(null, "none");
             setProfileStatus("missing");
             setProfileError(null);
@@ -372,6 +376,7 @@ export const AuthProvider = ({ children }) => {
           const shellChanged = !sameShellProfile(shellProfileRef.current, nextShellProfile);
 
           setUserData(nextUserData);
+          setProfileUid(currentUser.uid);
           setShellProfile(nextShellProfile, "fresh");
           setProfileStatus("fresh");
           setProfileError(null);
@@ -382,6 +387,7 @@ export const AuthProvider = ({ children }) => {
           setRepositoryAccessScope(currentUser.uid, "profile-error");
           console.error("Error fetching user data:", error);
           setUserData(null);
+          setProfileUid(null);
           setProfileStatus("error");
           setProfileError(error || new Error("Unable to load the authenticated profile."));
           if (shellProfileRef.current) setShellProfile(shellProfileRef.current, "cached");
@@ -413,6 +419,7 @@ export const AuthProvider = ({ children }) => {
       unsubscribeAuth = withAsyncResourceOwner("shell", () => onAuthStateChanged(
         auth,
         (currentUser) => withAsyncResourceOwner("shell", () => {
+          setAuthObserverRevision((revision) => revision + 1);
           clearProfileListener();
           setRepositoryAccessScope(currentUser?.uid || null, "auth-transition");
           currentUserRef.current = currentUser;
@@ -422,6 +429,7 @@ export const AuthProvider = ({ children }) => {
           if (!currentUser) {
             setAuthStatus("anonymous");
             setUserData(null);
+            setProfileUid(null);
             setProfileStatus("idle");
             setProfileError(null);
             setShellProfile(null, "none");
@@ -434,6 +442,7 @@ export const AuthProvider = ({ children }) => {
           releaseInitialAuthOwnership();
         }),
         (error) => withAsyncResourceOwner("shell", () => {
+          setAuthObserverRevision((revision) => revision + 1);
           clearProfileListener();
           setRepositoryAccessScope(null, "auth-error");
           currentUserRef.current = null;
@@ -441,6 +450,7 @@ export const AuthProvider = ({ children }) => {
           setAuthStatus("error");
           setAuthError(error || new Error("Unable to determine authentication state."));
           setUserData(null);
+          setProfileUid(null);
           setProfileStatus("idle");
           setProfileError(null);
           setShellProfile(null, "none");
@@ -498,6 +508,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     retryAuth,
     getCurrentProfile,
+    authObserverRevision,
     repositoryAccessGeneration,
   }), [
     user,
@@ -507,16 +518,18 @@ export const AuthProvider = ({ children }) => {
     logout,
     retryAuth,
     getCurrentProfile,
+    authObserverRevision,
     repositoryAccessGeneration,
   ]);
 
   const profileValue = useMemo(() => ({
     userData,
+    profileUid,
     profileStatus,
     profileFresh,
     profileError,
     retryProfile,
-  }), [userData, profileStatus, profileFresh, profileError, retryProfile]);
+  }), [userData, profileUid, profileStatus, profileFresh, profileError, retryProfile]);
 
   const shellValue = useMemo(() => ({
     shellProfile: shellState.profile,

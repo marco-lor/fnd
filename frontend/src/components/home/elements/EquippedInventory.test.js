@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useAuthSession } from '../../../AuthContext';
 import {
   useEquipment,
@@ -10,6 +10,8 @@ import {
 import { setEquipment } from '../../../data/userData/userDataCommands';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
 import MediaImage from '../../common/MediaImage';
+import { LazyConfirmUseConsumableModal } from './lazyHomeFeatures';
+import { ConsumableActionLayer, useConsumableAction } from './useConsumable';
 import EquippedInventory from './EquippedInventory';
 
 jest.mock('../../../AuthContext', () => ({ useAuthSession: jest.fn() }));
@@ -37,7 +39,10 @@ jest.mock('./lazyHomeFeatures', () => ({
   LazyConfirmUseConsumableModal: jest.fn(() => null),
   LazyItemDetailsModal: jest.fn(() => null),
 }));
-jest.mock('./useConsumable', () => jest.fn(() => Promise.resolve()));
+jest.mock('./useConsumable', () => ({
+  ConsumableActionLayer: jest.fn(() => null),
+  useConsumableAction: jest.fn(),
+}));
 
 const uid = 'user-1';
 const equipmentData = {
@@ -53,10 +58,21 @@ const setCommonDomainState = () => {
   useResources.mockReturnValue({ data: { stats: { manaCurrent: 5 } }, status: 'fresh', uid });
 };
 
+const consumableController = {
+  begin: jest.fn(() => true),
+  cancel: jest.fn(),
+  completeAnimation: jest.fn(),
+  dismissError: jest.fn(),
+  isBusy: false,
+  retry: jest.fn(),
+  view: { phase: 'idle', action: null, error: null },
+};
+
 describe('EquippedInventory V2 readiness', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    useAuthSession.mockReturnValue({ user: { uid } });
+    useAuthSession.mockReturnValue({ user: { uid }, repositoryAccessGeneration: 7 });
+    useConsumableAction.mockReturnValue(consumableController);
     useCatalogItemsById.mockReturnValue({ itemsById: {}, status: 'fresh', error: null });
     setCommonDomainState();
   });
@@ -116,5 +132,47 @@ describe('EquippedInventory V2 readiness', () => {
     expect(MediaImage.mock.calls.some(([props]) => (
       props.media?.media?.assetId === catalogMedia.assetId
     ))).toBe(true);
+  });
+
+  test('owns consumable confirmation in the Home provider tree and forwards the repository generation', async () => {
+    const potion = {
+      id: 'potion-1',
+      item_type: 'consumabile',
+      General: { Nome: 'Pozione' },
+      Specific: { Dado: 0 },
+      qty: 1,
+      _task05: { inventoryId: 'inventory-potion-1', revision: 3 },
+    };
+    useInventory.mockReturnValue({ data: [potion], status: 'fresh', uid });
+    useEquipment.mockReturnValue({
+      data: { equipped: { cintura: { id: 'belt', Specific: { slotCintura: 99 } } } },
+      status: 'fresh',
+      uid,
+    });
+
+    render(<EquippedInventory />);
+
+    expect(useConsumableAction).toHaveBeenCalledWith(expect.objectContaining({
+      inventory: expect.arrayContaining([expect.objectContaining({
+        _task05: expect.objectContaining({ inventoryId: 'inventory-potion-1' }),
+      })]),
+      mutationsReady: true,
+      repositoryAccessGeneration: 7,
+      user: { uid },
+    }));
+    expect(ConsumableActionLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ controller: consumableController }),
+      expect.anything()
+    );
+
+    fireEvent.click(screen.getByTitle('Usa consumabile'));
+    await waitFor(() => expect(LazyConfirmUseConsumableModal).toHaveBeenCalled());
+    const confirmationProps = LazyConfirmUseConsumableModal.mock.calls.at(-1)[0];
+    await confirmationProps.onConfirm('hp');
+
+    expect(consumableController.begin).toHaveBeenCalledTimes(1);
+    expect(consumableController.begin).toHaveBeenCalledWith({ item: expect.objectContaining({
+      _task05: expect.objectContaining({ inventoryId: 'inventory-potion-1' }),
+    }), mode: 'hp' });
   });
 });

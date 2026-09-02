@@ -347,6 +347,46 @@ test('rules emulator owner injects the demo Functions environment and propagates
   assert.equal(calls.at(-1)[1].includes(9499), true);
 });
 
+test('rules emulator child keeps inherited node PATH behind portable Java with one Windows PATH key', async () => {
+  const captured = [];
+  await runRulesEmulators({
+    argv: ['--task08-only'],
+    assertEmulatorPortsFreeImpl: async () => {},
+    env: {
+      Path: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+      KEEP_ME: 'inherited-value',
+    },
+    firebaseCli: 'firebase-cli.js',
+    fsImpl: {
+      existsSync: () => true,
+      mkdirSync: () => {},
+    },
+    resolvePortableJavaHomeImpl: () => 'C:\\portable-java',
+    spawnSyncImpl: (_command, _args, options) => {
+      captured.push(options.env);
+      return {status: 0};
+    },
+    waitForEmulatorPortsFreeImpl: async () => {},
+    withDemoFunctionsEnvironmentImpl: async (operation) => operation(),
+    withEmulatorPortCleanupImpl: async (operation, options) => {
+      try {
+        return await operation();
+      } finally {
+        await options.waitForPorts();
+      }
+    },
+  });
+
+  assert.equal(captured.length, 1);
+  const pathEntries = Object.entries(captured[0])
+    .filter(([key]) => key.toLowerCase() === 'path');
+  assert.deepEqual(pathEntries, [[
+    'PATH',
+    'C:\\portable-java\\bin;C:\\Windows\\System32;C:\\Program Files\\nodejs',
+  ]]);
+  assert.equal(captured[0].KEEP_ME, 'inherited-value');
+});
+
 test('Task 07 soak requires three to five cycles', () => {
   assert.equal(resolveTask07SoakCycles(), 3);
   assert.equal(resolveTask07SoakCycles('3'), 3);

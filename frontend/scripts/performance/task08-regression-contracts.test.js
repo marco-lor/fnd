@@ -45,3 +45,44 @@ test('inventory history retains acquisition and current snapshots across unit pr
     assert.equal(document.data.acquisitionHash, document.data.currentHash);
   }
 });
+
+test('Home inventory settles the expanded media window before filtering it away', () => {
+  const source = fs.readFileSync(
+    path.join(frontendRoot, 'performance/tests/browser/task08-baseline.performance.js'),
+    'utf8'
+  );
+  const expandedWindow = source.indexOf(
+    'toBe(HOME_INVENTORY_INITIAL_WINDOW * 2);'
+  );
+  const mediaSettlement = source.indexOf(
+    "'home inventory expanded window before filter'",
+    expandedWindow
+  );
+  const filterInput = source.indexOf(
+    "await search.fill('Fixture item 315');",
+    expandedWindow
+  );
+  const restoredExpandedWindow = source.indexOf(
+    'toBe(HOME_INVENTORY_INITIAL_WINDOW * 2);',
+    expandedWindow + 1
+  );
+  const restoredMediaSettlement = source.indexOf(
+    "'home restored inventory window before consumable'",
+    restoredExpandedWindow
+  );
+  const consumableStart = source.indexOf(
+    'await useFixtureConsumable(session.page);',
+    restoredExpandedWindow
+  );
+
+  assert.ok(expandedWindow >= 0, 'Home scenario must expand the inventory window');
+  assert.ok(
+    mediaSettlement > expandedWindow && mediaSettlement < filterInput,
+    'Home scenario must settle newly-mounted finite media before the filter unmounts it'
+  );
+  assert.ok(
+    restoredMediaSettlement > restoredExpandedWindow
+      && restoredMediaSettlement < consumableStart,
+    'Home scenario must settle the restored media window before consumption resets it'
+  );
+});

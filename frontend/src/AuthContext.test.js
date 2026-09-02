@@ -47,7 +47,9 @@ const StateProbe = () => {
   return (
     <div>
       <span data-testid="auth-status">{session.authStatus}</span>
+      <span data-testid="auth-revision">{session.authObserverRevision}</span>
       <span data-testid="profile-status">{profile.profileStatus}</span>
+      <span data-testid="profile-uid">{profile.profileUid || "none"}</span>
       <span data-testid="profile-role">{profile.userData?.role || "none"}</span>
       <span data-testid="shell-role">{shell.shellProfile?.role || "none"}</span>
       <span data-testid="shell-source">{shell.shellSource}</span>
@@ -106,6 +108,7 @@ describe("AuthProvider", () => {
     }));
 
     await waitFor(() => expect(screen.getByTestId("profile-status")).toHaveTextContent("fresh"));
+    expect(screen.getByTestId("profile-uid")).toHaveTextContent(user.uid);
     expect(screen.getByTestId("profile-role")).toHaveTextContent("player");
     expect(screen.getByTestId("shell-source")).toHaveTextContent("fresh");
     expect(JSON.parse(window.localStorage.getItem(getShellCacheKey(user.uid)))).toEqual(expect.objectContaining({
@@ -142,6 +145,21 @@ describe("AuthProvider", () => {
     expect(mockSetRepositoryActor).toHaveBeenLastCalledWith(user.uid);
   });
 
+  test("increments the auth observer revision for sessions and observer errors", () => {
+    render(<AuthProvider><StateProbe /></AuthProvider>);
+    expect(screen.getByTestId("auth-revision")).toHaveTextContent("0");
+
+    act(() => mockAuthNext(user));
+    expect(screen.getByTestId("auth-revision")).toHaveTextContent("1");
+
+    act(() => mockAuthNext(null));
+    expect(screen.getByTestId("auth-revision")).toHaveTextContent("2");
+
+    act(() => mockAuthError(new Error("observer unavailable")));
+    expect(screen.getByTestId("auth-revision")).toHaveTextContent("3");
+    expect(screen.getByTestId("auth-status")).toHaveTextContent("error");
+  });
+
   test("clears cached authorization when the live profile is missing", () => {
     writeShellCache(projectShellProfile(user.uid, { role: "dm" }));
     render(<AuthProvider><StateProbe /></AuthProvider>);
@@ -149,6 +167,7 @@ describe("AuthProvider", () => {
     act(() => mockProfileNext(null));
 
     expect(screen.getByTestId("profile-status")).toHaveTextContent("missing");
+    expect(screen.getByTestId("profile-uid")).toHaveTextContent("none");
     expect(screen.getByTestId("shell-role")).toHaveTextContent("none");
     expect(readShellCache(user.uid)).toBeNull();
     expect(mockSetRepositoryActor).toHaveBeenLastCalledWith(user.uid);

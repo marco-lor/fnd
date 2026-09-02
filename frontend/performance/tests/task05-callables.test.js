@@ -334,6 +334,9 @@ test('Task 05 callables enforce authentication, owner access, and peer denial', 
   }, { token: playerToken });
   assert.equal(result.success, true);
   assert.equal(result.newValue, 12);
+  assert.equal(result.previousValue, 10);
+  assert.equal(result.appliedDelta, 2);
+  assert.equal(result.newRevision, 2);
 
   await expectCallableError(
     callFunction('task05UpdateResource', {
@@ -346,6 +349,107 @@ test('Task 05 callables enforce authentication, owner access, and peer denial', 
     'permission-denied'
   );
   assert.equal((await db.doc('users/perf-peer-2/state/resources').get()).get('stats.hpCurrent'), 30);
+});
+
+test('barrier deltas clamp legacy state, serialize concurrently, and leave other resources untouched', async () => {
+  const token = await signIn('perf-new-player');
+  const path = 'users/perf-new-player/state/resources';
+  const original = await captureDocuments([path]);
+  try {
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(path).set(stateDocument('perf-new-player', {
+        revision: 11,
+        stats: {
+          hpCurrent: 10,
+          hpTotal: 20,
+          manaCurrent: 5,
+          manaTotal: 10,
+          essenzaCurrent: 3,
+          essenzaTotal: 4,
+          barriera: '4',
+        },
+        active_turn_effect: {barriera: {remainingTurns: 2, totalTurns: 3}},
+      }));
+    });
+
+    const overflow = await callFunction('task05UpdateResource', {
+      operationId: operationId('barrier-legacy-overflow'), resource: 'barriera', mode: 'delta', value: 10,
+    }, {token});
+    assert.deepEqual(
+      {previousValue: overflow.previousValue, newValue: overflow.newValue, appliedDelta: overflow.appliedDelta, newRevision: overflow.newRevision},
+      {previousValue: 4, newValue: 4, appliedDelta: 0, newRevision: 12}
+    );
+    const underflow = await callFunction('task05UpdateResource', {
+      operationId: operationId('barrier-legacy-underflow'), resource: 'barriera', mode: 'delta', value: -10,
+    }, {token});
+    assert.deepEqual(
+      {previousValue: underflow.previousValue, newValue: underflow.newValue, appliedDelta: underflow.appliedDelta, newRevision: underflow.newRevision},
+      {previousValue: 4, newValue: 0, appliedDelta: -4, newRevision: 13}
+    );
+
+    const barrierSet = await callFunction('task05UpdateResource', {
+      operationId: operationId('barrier-set-total-and-turns'),
+      resource: 'barriera',
+      mode: 'set',
+      value: 6,
+      totalValue: 9,
+      remainingTurns: 3,
+      totalTurns: 4,
+    }, {token});
+    assert.deepEqual(
+      {
+        previousValue: barrierSet.previousValue,
+        newValue: barrierSet.newValue,
+        appliedDelta: barrierSet.appliedDelta,
+        newRevision: barrierSet.newRevision,
+        newTotalValue: barrierSet.newTotalValue,
+      },
+      {previousValue: 0, newValue: 6, appliedDelta: 6, newRevision: 14, newTotalValue: 9}
+    );
+    const storedSet = await db.doc(path).get();
+    assert.equal(storedSet.get('stats.barrieraCurrent'), 6);
+    assert.equal(storedSet.get('stats.barrieraTotal'), 9);
+    assert.deepEqual(storedSet.get('active_turn_effect.barriera'), {remainingTurns: 3, totalTurns: 4});
+
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(path).update({stats: {...(await db.doc(path).get()).get('stats'), barrieraCurrent: 5, barrieraTotal: 0}});
+    });
+    const zeroTotal = await callFunction('task05UpdateResource', {
+      operationId: operationId('barrier-zero-total'), resource: 'barriera', mode: 'delta', value: 1,
+    }, {token});
+    assert.deepEqual(
+      {previousValue: zeroTotal.previousValue, newValue: zeroTotal.newValue, appliedDelta: zeroTotal.appliedDelta},
+      {previousValue: 5, newValue: 0, appliedDelta: -5}
+    );
+
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(path).update({stats: {...(await db.doc(path).get()).get('stats'), barrieraCurrent: 1, barrieraTotal: 5}});
+    });
+    const revisionBeforeConcurrent = (await db.doc(path).get()).get('revision');
+    const concurrent = await Promise.all([
+      callFunction('task05UpdateResource', {operationId: operationId('barrier-concurrent-a'), resource: 'barriera', mode: 'delta', value: 1}, {token}),
+      callFunction('task05UpdateResource', {operationId: operationId('barrier-concurrent-b'), resource: 'barriera', mode: 'delta', value: 1}, {token}),
+    ]);
+    assert.deepEqual(
+      concurrent
+        .map(({previousValue, newValue, appliedDelta, newRevision}) => ({previousValue, newValue, appliedDelta, newRevision}))
+        .sort((first, second) => first.previousValue - second.previousValue),
+      [
+        {previousValue: 1, newValue: 2, appliedDelta: 1, newRevision: revisionBeforeConcurrent + 1},
+        {previousValue: 2, newValue: 3, appliedDelta: 1, newRevision: revisionBeforeConcurrent + 2},
+      ]
+    );
+    const stored = await db.doc(path).get();
+    assert.equal(stored.get('stats.barrieraCurrent'), 3);
+    assert.equal(stored.get('revision'), revisionBeforeConcurrent + 2);
+    assert.equal(stored.get('stats.hpCurrent'), 10);
+    assert.equal(stored.get('stats.manaCurrent'), 5);
+    assert.equal(stored.get('stats.essenzaCurrent'), 3);
+    assert.deepEqual(stored.get('active_turn_effect.barriera'), {remainingTurns: 3, totalTurns: 4});
+    assert.equal(stored.get('lastResourceOperationId'), undefined);
+  } finally {
+    await restoreDocuments(original);
+  }
 });
 
 test('character creation race selection resets authoritative parameters and creation budgets', async () => {
@@ -422,6 +526,88 @@ test('character creation race selection resets authoritative parameters and crea
     assert.equal(progression.get('stats.combatTokensSpent'), 0);
     assert.equal(progression.get('stats.negativeBaseStatCount'), 0);
     assert.equal(progression.get('AltriParametri.Anima_1'), '---');
+  } finally {
+    await restoreDocuments(original);
+  }
+});
+
+test('character creation initialization returns a replay envelope for duplicate retries', async () => {
+  const token = await signIn('perf-new-player');
+  const operation = operationId(`task08-init-envelope-${Date.now().toString(36)}`);
+
+  const first = await callFunction('task05CharacterCreation', {
+    operationId: operation,
+    action: 'initialize',
+  }, {token});
+  const replay = await callFunction('task05CharacterCreation', {
+    operationId: operation,
+    action: 'initialize',
+  }, {token});
+
+  assert.equal(first.success, true);
+  assert.equal(first.replayed, false);
+  assert.equal(replay.success, true);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.created, first.created);
+  assert.equal(replay.initializedDomains, first.initializedDomains);
+});
+
+test('all valid Character Creation actions return truthful replay envelopes', async () => {
+  const token = await signIn('perf-new-player');
+  const paths = [
+    'users/perf-new-player',
+    'users/perf-new-player/state/progression',
+    'users/perf-new-player/state/settings',
+  ];
+  const original = await captureDocuments(paths);
+  const actions = [
+    {action: 'initialize'},
+    {action: 'selectRace', race: 'human'},
+    {action: 'selectAnima', anima: 'fire'},
+    {action: 'complete', characterId: 'Envelope Character', profile: {}},
+  ];
+
+  try {
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(paths[0]).set({
+        ...original.get(paths[0]).data,
+        flags: {
+          ...original.get(paths[0]).data.flags,
+          characterCreationDone: false,
+        },
+      });
+      await db.doc(paths[1]).set({
+        ...original.get(paths[1]).data,
+        flags: {
+          ...original.get(paths[1]).data.flags,
+          characterCreationDone: false,
+        },
+      });
+    });
+
+    const firstResults = [];
+    for (const [index, action] of actions.entries()) {
+      firstResults.push(await callFunction('task05CharacterCreation', {
+        ...action,
+        operationId: operationId(`task08-envelope-first-${index}`),
+      }, {token}));
+    }
+    assert.deepEqual(firstResults.map((result) => ({
+      success: result.success,
+      replayed: result.replayed,
+    })), actions.map(() => ({success: true, replayed: false})));
+
+    const replayResults = [];
+    for (const [index, action] of actions.entries()) {
+      replayResults.push(await callFunction('task05CharacterCreation', {
+        ...action,
+        operationId: operationId(`task08-envelope-first-${index}`),
+      }, {token}));
+    }
+    assert.deepEqual(replayResults.map((result) => ({
+      success: result.success,
+      replayed: result.replayed,
+    })), actions.map(() => ({success: true, replayed: true})));
   } finally {
     await restoreDocuments(original);
   }
@@ -831,6 +1017,172 @@ test('consumable prepare/commit is replay-safe, single-use, and expiry-aware', a
     (await db.doc('users/perf-peer-5/inventory/task05-consumable').get()).get('quantity'),
     1
   );
+});
+
+test('consumable commit uses current resources and atomically handles depletion, no-regeneration, and stale inventory', async () => {
+  const uid = 'perf-peer-5';
+  const token = await signIn(uid);
+  const resourcesPath = `users/${uid}/state/resources`;
+  const progressionPath = `users/${uid}/state/progression`;
+  const equipmentPath = `users/${uid}/state/equipment`;
+  const beltPath = `users/${uid}/inventory/task08-step7-belt`;
+  const healingPath = `users/${uid}/inventory/task08-step7-healing`;
+  const neutralPath = `users/${uid}/inventory/task08-step7-neutral`;
+  const stalePath = `users/${uid}/inventory/task08-step7-stale`;
+  const originals = await captureDocuments([
+    resourcesPath,
+    progressionPath,
+    equipmentPath,
+    beltPath,
+    healingPath,
+    neutralPath,
+    stalePath,
+  ]);
+  const inventoryDocument = (id, snapshot, quantity = 1) => ({
+    schemaVersion: 2,
+    revision: 1,
+    kind: String(snapshot.item_type || ''),
+    quantity,
+    currentRevision: 1,
+    currentSnapshot: { id, ...snapshot },
+    testMarker: 'task08-step7-consumable',
+    updatedAt: FIXED_TIME,
+  });
+
+  try {
+    await withBackgroundTriggersDisabled(async () => {
+      await writeDocuments([
+        {
+          path: resourcesPath,
+          data: stateDocument(uid, {
+            stats: { hpCurrent: 3, hpTotal: 20, manaCurrent: 4, manaTotal: 12 },
+          }),
+        },
+        {
+          path: progressionPath,
+          data: stateDocument(uid, { stats: { level: 5 }, Parametri: {} }),
+        },
+        {
+          path: beltPath,
+          data: inventoryDocument('task08-step7-belt', {
+            item_type: 'equipaggiamento',
+            General: { Nome: 'Task 08 Step 7 belt', Slot: 'Cintura' },
+            Specific: { slotCintura: 1 },
+            Parametri: {},
+          }),
+        },
+        {
+          path: healingPath,
+          data: inventoryDocument('task08-step7-healing', {
+            item_type: 'consumabile',
+            General: { Nome: 'Task 08 Step 7 healing draught' },
+            Specific: { 'Bonus Creazione': 0 },
+            Parametri: { Special: { 'Rigenera Dado Anima HP': { 1: 1, 4: 1, 7: 1, 10: 1 } } },
+          }),
+        },
+        {
+          path: neutralPath,
+          data: inventoryDocument('task08-step7-neutral', {
+            item_type: 'consumabile',
+            General: { Nome: 'Task 08 Step 7 neutral draught' },
+            Specific: {},
+            Parametri: {},
+          }),
+        },
+        {
+          path: stalePath,
+          data: inventoryDocument('task08-step7-stale', {
+            item_type: 'consumabile',
+            General: { Nome: 'Task 08 Step 7 stale draught' },
+            Specific: { 'Bonus Creazione': 0 },
+            Parametri: { Special: { 'Rigenera Dado Anima HP': { 1: 1, 4: 1, 7: 1, 10: 1 } } },
+          }, 2),
+        },
+        {
+          path: equipmentPath,
+          data: stateDocument(uid, {
+            slots: { cintura: 'task08-step7-belt', beltC1: 'task08-step7-healing' },
+            beltCapacity: 1,
+          }),
+        },
+      ]);
+    });
+
+    const healingPreparation = await callFunction('task05PrepareConsumable', {
+      operationId: operationId('step7-healing-prepare'),
+      inventoryId: 'task08-step7-healing',
+      resource: 'hp',
+    }, {token});
+    assert.equal(healingPreparation.rolls.length, 1);
+
+    const concurrentUpdate = await callFunction('task05UpdateResource', {
+      operationId: operationId('step7-concurrent-resource'),
+      resource: 'hp',
+      mode: 'set',
+      value: 11,
+    }, {token});
+    assert.equal(concurrentUpdate.newValue, 11);
+
+    const healingCommit = await callFunction('task05CommitConsumable', {
+      operationId: operationId('step7-healing-commit'),
+      preparationId: healingPreparation.preparationId,
+    }, {token});
+    const expectedHp = Math.min(20, 11 + healingPreparation.gain);
+    assert.equal(healingCommit.resourceValue, expectedHp);
+    const [healingAfter, equipmentAfter, resourcesAfter] = await Promise.all([
+      db.doc(healingPath).get(),
+      db.doc(equipmentPath).get(),
+      db.doc(resourcesPath).get(),
+    ]);
+    assert.equal(healingAfter.exists, false);
+    assert.equal(equipmentAfter.get('slots.beltC1'), null);
+    assert.equal(equipmentAfter.get('slots.cintura'), 'task08-step7-belt');
+    assert.equal(resourcesAfter.get('stats.hpCurrent'), expectedHp);
+
+    const beforeNeutral = resourcesAfter.get('stats');
+    const neutralPreparation = await callFunction('task05PrepareConsumable', {
+      operationId: operationId('step7-neutral-prepare'),
+      inventoryId: 'task08-step7-neutral',
+      resource: null,
+    }, {token});
+    assert.deepEqual(neutralPreparation.rolls, []);
+    const neutralCommit = await callFunction('task05CommitConsumable', {
+      operationId: operationId('step7-neutral-commit'),
+      preparationId: neutralPreparation.preparationId,
+    }, {token});
+    assert.equal(neutralCommit.resource, null);
+    assert.equal(neutralCommit.resourceValue, null);
+    assert.equal((await db.doc(neutralPath).get()).exists, false);
+    assert.deepEqual((await db.doc(resourcesPath).get()).get('stats'), beforeNeutral);
+
+    const stalePreparation = await callFunction('task05PrepareConsumable', {
+      operationId: operationId('step7-stale-prepare'),
+      inventoryId: 'task08-step7-stale',
+      resource: 'hp',
+    }, {token});
+    await withBackgroundTriggersDisabled(async () => {
+      await db.doc(stalePath).update({
+        currentHash: 'changed-after-prepare',
+        revision: 2,
+      });
+    });
+    const beforeRejectedCommit = await Promise.all([
+      db.doc(stalePath).get(),
+      db.doc(resourcesPath).get(),
+    ]);
+    await expectCallableError(callFunction('task05CommitConsumable', {
+      operationId: operationId('step7-stale-commit'),
+      preparationId: stalePreparation.preparationId,
+    }, {token}), 'failed-precondition');
+    const afterRejectedCommit = await Promise.all([
+      db.doc(stalePath).get(),
+      db.doc(resourcesPath).get(),
+    ]);
+    assert.equal(afterRejectedCommit[0].get('quantity'), beforeRejectedCommit[0].get('quantity'));
+    assert.deepEqual(afterRejectedCommit[1].get('stats'), beforeRejectedCommit[1].get('stats'));
+  } finally {
+    await restoreDocuments(originals);
+  }
 });
 
 test('the Grigliata character-resource callable is owner-scoped and server-authoritative', async () => {

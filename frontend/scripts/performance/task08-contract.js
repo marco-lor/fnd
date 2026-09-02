@@ -28,6 +28,12 @@ const TASK08_BASELINE_METRICS = Object.freeze({
     'login.firestore.configReads',
     'login.navigationLatencyMs',
     'login.renderCount',
+    'login.renderIsolation.decorativeBackgroundCount',
+    'login.renderIsolation.decorativeOrbsCount',
+    'login.renderIsolation.cardBorderCount',
+    'login.renderIsolation.headerCount',
+    'login.renderIsolation.submitButtonCount',
+    'login.renderIsolation.createButtonCount',
   ]),
   characterCreation: Object.freeze([
     'characterCreation.firestore.codexReads',
@@ -52,6 +58,12 @@ const TASK08_BASELINE_METRICS = Object.freeze({
     'home.render.EquippedInventory',
     'home.render.Extra',
     'home.render.ParamTables',
+    'home.renderIsolation.resourceUpdate.Navbar',
+    'home.renderIsolation.resourceUpdate.StatsBars',
+    'home.renderIsolation.resourceUpdate.Inventory',
+    'home.renderIsolation.resourceUpdate.EquippedInventory',
+    'home.renderIsolation.resourceUpdate.Extra',
+    'home.renderIsolation.resourceUpdate.ParamTables',
     'home.command.resourceMutationCount',
     'home.command.requestedMutationDelta',
     'home.command.resourceMutationDelta',
@@ -59,9 +71,22 @@ const TASK08_BASELINE_METRICS = Object.freeze({
     'home.inventory.initialItemCount',
     'home.inventory.filterResultItemCount',
     'home.inventory.filteredItemCount',
+    'home.inventory.initialMountedItemCount',
+    'home.inventory.resetMountedItemCount',
+    'home.inventory.expandedMountedItemCount',
+    'home.inventory.initialWindowLimit',
     'home.inventory.mediaRequestCount',
     'home.consumable.prepareCount',
     'home.consumable.commitCount',
+    'home.consumable.actionStartCount',
+    'home.consumable.animationCompleteCount',
+    'home.consumable.commitDispatchedCount',
+    'home.consumable.terminalCount',
+    'home.consumable.appliedCount',
+    'home.consumable.replayedCount',
+    'home.consumable.definitiveFailureCount',
+    'home.consumable.ambiguousCount',
+    'home.consumable.cancelledCount',
     'home.consumable.atomicOutcome',
   ]),
   twoClient: Object.freeze([
@@ -137,7 +162,7 @@ const TASK08_REGRESSION_CONTRACTS = Object.freeze({
   multiClientVisibility: Object.freeze({
     source: 'performance/tests/browser/task08-baseline.performance.js',
     tests: ['performance/tests/browser/task08-baseline.performance.js'],
-    markers: ['clientA', 'clientB', '43/50'],
+    markers: ['clientA', 'clientB', 'two-client-ui-hold-1'],
   }),
   directNavigation: Object.freeze({
     source: 'src/App.js',
@@ -202,6 +227,13 @@ const task08HoldEventMatches = (event, holdId) => (
   && event.tags?.command === 'task05UpdateResource'
 );
 
+const task08TerminalMatches = (event, holdId) => (
+  event?.category === 'task08'
+  && event.metric === 'resource-gesture-terminal'
+  && event.tags?.holdId != null
+  && String(event.tags.holdId) === String(holdId)
+);
+
 const task08InvocationSequence = (event) => (
   event?.tags?.invocationSequence == null
     ? null
@@ -244,6 +276,27 @@ const summarizeTask08ResourceHold = ({
     startEventIndex,
     endEventIndex,
   });
+  const terminals = allEvents
+    .map((event, index) => ({event, index}))
+    .filter(({event, index}) => (
+      index >= Math.max(0, Number(startEventIndex) || 0)
+      && index < Math.max(0, Number(endEventIndex) || allEvents.length)
+      && task08TerminalMatches(event, holdId)
+    ))
+    .map(({event}) => event);
+  if (terminals.length !== 1) {
+    throw new Error(`Task 08 resource hold must have exactly one terminal event; found ${terminals.length}.`);
+  }
+  if (starts.length !== 1) {
+    throw new Error(`Task 08 resource hold must have exactly one physical command; found ${starts.length}.`);
+  }
+  const terminal = terminals[0];
+  const effectiveDelta = numericTag(terminal, 'effectiveDelta');
+  if (effectiveDelta === null || terminal.tags?.resource !== starts[0]?.event?.tags?.resource
+    || effectiveDelta !== starts[0]?.requestedDelta
+    || String(terminal.tags?.localSequence ?? '') !== String(starts[0]?.event?.tags?.localSequence ?? '')) {
+    throw new Error('Task 08 resource hold terminal does not match its physical command.');
+  }
   const missingSequences = starts
     .filter(({ sequence }) => sequence == null)
     .map(() => 'unknown');
@@ -293,6 +346,12 @@ const summarizeTask08ResourceHold = ({
   const failureSequences = sequences.filter((sequence) => (
     (terminalBySequence.get(sequence) || [])[0]?.metric === 'command-failure'
   ));
+  const duplicateApplications = sequences.filter((sequence) => (
+    (appliedBySequence.get(sequence) || []).length > 1
+  ));
+  if (duplicateApplications.length) {
+    throw new Error(`Task 08 resource hold invocation ${duplicateApplications.join(', ')} has multiple application events.`);
+  }
   const appliedSequences = sequences.filter((sequence) => (
     (appliedBySequence.get(sequence) || []).length === 1
   ));
@@ -300,14 +359,19 @@ const summarizeTask08ResourceHold = ({
     (total, { requestedDelta }) => total + (requestedDelta || 0),
     0
   );
-  const appliedDelta = starts.reduce((total, start) => (
-    appliedSequences.includes(start.sequence)
-      ? total + (start.requestedDelta || 0)
-      : total
-  ), 0);
+  const appliedDelta = appliedSequences.reduce((total, sequence) => {
+    const applied = appliedBySequence.get(sequence)?.[0];
+    const value = numericTag(applied, 'appliedDelta');
+    if (value === null) {
+      throw new Error(`Task 08 resource hold invocation ${sequence} lacks callable appliedDelta evidence.`);
+    }
+    return total + value;
+  }, 0);
 
   return {
     holdId,
+    terminalCount: terminals.length,
+    effectiveDelta,
     starts,
     commandCount: starts.length,
     startSequences: sequences,
@@ -502,7 +566,12 @@ const loginNavigationLatencies = (events) => {
 
 const renderCount = (events, component) => count(
   taskEvents(events),
-  (event) => event.metric === 'render' && event.tags?.component === component
+  (event) => (
+    event.metric === 'render'
+    && event.tags?.component === component
+    && event.tags?.committed === true
+    && event.tags?.authoritative === true
+  )
 );
 
 const deriveTask08Metrics = ({
@@ -542,6 +611,12 @@ const deriveTask08Metrics = ({
       ? Math.max(...navigationLatencies)
       : null);
     set('login.renderCount', renderCount(events, 'Login'));
+    set('login.renderIsolation.decorativeBackgroundCount', renderCount(events, 'LoginDecorativeBackground'));
+    set('login.renderIsolation.decorativeOrbsCount', renderCount(events, 'LoginDecorativeOrbs'));
+    set('login.renderIsolation.cardBorderCount', renderCount(events, 'LoginCardBorder'));
+    set('login.renderIsolation.headerCount', renderCount(events, 'LoginHeader'));
+    set('login.renderIsolation.submitButtonCount', renderCount(events, 'LoginSubmitButton'));
+    set('login.renderIsolation.createButtonCount', renderCount(events, 'LoginCreateButton'));
   }
 
   if (scenarioId === 'task08-character-creation') {
@@ -611,6 +686,12 @@ const deriveTask08Metrics = ({
     ));
     ['Navbar', 'StatsBars', 'Inventory', 'EquippedInventory', 'Extra', 'ParamTables']
       .forEach((component) => set(`home.render.${component}`, renderCount(events, component)));
+    const resourceRenderCounts = observations.resourceRenderCounts || {};
+    ['Navbar', 'StatsBars', 'Inventory', 'EquippedInventory', 'Extra', 'ParamTables']
+      .forEach((component) => set(
+        `home.renderIsolation.resourceUpdate.${component}`,
+        Number(resourceRenderCounts[component] || 0)
+      ));
     const resourceStarts = countCommandStarts(events, 'task05UpdateResource');
     set('home.command.resourceMutationCount', resourceStarts);
     set('home.command.resourceAppliedCount', count(
@@ -651,6 +732,18 @@ const deriveTask08Metrics = ({
     set('home.inventory.filteredItemCount', filterEvent
       ? (numericTag(filterEvent, 'filteredCount') ?? (Number(filterEvent.value) || 0))
       : Number(observations.inventoryFilteredItemCount || 0));
+    set('home.inventory.initialMountedItemCount', Number(
+      observations.inventoryInitialMountedItemCount || 0
+    ));
+    set('home.inventory.resetMountedItemCount', Number(
+      observations.inventoryResetMountedItemCount || 0
+    ));
+    set('home.inventory.expandedMountedItemCount', Number(
+      observations.inventoryExpandedMountedItemCount || 0
+    ));
+    set('home.inventory.initialWindowLimit', Number(
+      observations.inventoryInitialWindowLimit || 0
+    ));
     const inventoryMediaObservation = Object.prototype.hasOwnProperty.call(
       observations,
       'inventoryMediaRequestCount'
@@ -663,6 +756,24 @@ const deriveTask08Metrics = ({
       : null);
     set('home.consumable.prepareCount', countCommandStarts(events, 'task05PrepareConsumable'));
     set('home.consumable.commitCount', countCommandStarts(events, 'task05CommitConsumable'));
+    const consumableTerminals = task.filter((event) => event.metric === 'consumable-action-terminal');
+    set('home.consumable.actionStartCount', count(task, (event) => (
+      event.metric === 'consumable-action-start'
+    )));
+    set('home.consumable.animationCompleteCount', count(task, (event) => (
+      event.metric === 'consumable-animation-complete'
+    )));
+    set('home.consumable.commitDispatchedCount', count(task, (event) => (
+      event.metric === 'consumable-commit-dispatched'
+    )));
+    set('home.consumable.terminalCount', consumableTerminals.length);
+    ['applied', 'replayed', 'definitive-failure', 'ambiguous'].forEach((outcome) => set(
+      `home.consumable.${outcome === 'definitive-failure' ? 'definitiveFailure' : outcome}Count`,
+      consumableTerminals.filter((event) => event.tags?.outcome === outcome).length
+    ));
+    set('home.consumable.cancelledCount', count(task, (event) => (
+      event.metric === 'consumable-action-cancelled'
+    )));
     set('home.consumable.atomicOutcome', observations.consumableAtomicOutcome ?? 'not-observed');
   }
 

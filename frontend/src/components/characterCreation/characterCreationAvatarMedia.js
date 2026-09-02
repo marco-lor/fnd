@@ -40,7 +40,7 @@ export const runCharacterCreationAvatarV1Write = async ({
     expectedRevision,
     previousAssetId,
     signal,
-    invoke: async ({ operationId, signal: operationSignal }) => {
+    invoke: async ({ operationId, resumed, signal: operationSignal }) => {
       const outcome = await runConsumerUpload({
         file,
         ownerUid,
@@ -51,6 +51,7 @@ export const runCharacterCreationAvatarV1Write = async ({
         expectedRevision,
         prepareEntity,
         rollbackPreparedEntity,
+        resume: resumed,
         signal: operationSignal,
       });
       if (ATTENTION_STATUSES.has(outcome?.status)) return outcome;

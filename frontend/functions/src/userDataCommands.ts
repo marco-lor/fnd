@@ -440,22 +440,20 @@ export const task05CharacterCreation = onCall(
     }
 
     if (action === "initialize") {
-      const actorUid = requireActor(request);
-      if (!validateOperationId(request.data?.operationId)) {
-        fail("invalid-argument", "A valid operationId is required.");
-      }
-      assertPayloadSize(request.data);
-      const db = admin.firestore();
-      const userRef = db.doc(`users/${actorUid}`);
-      const schemaRef = db.doc("utils/schema_pg");
-      const stateRefs = {
-        progression: db.doc(`users/${actorUid}/state/progression`),
-        resources: db.doc(`users/${actorUid}/state/resources`),
-        settings: db.doc(`users/${actorUid}/state/settings`),
-        equipment: db.doc(`users/${actorUid}/state/equipment`),
-        profileContent: db.doc(`users/${actorUid}/state/profileContent`),
-      };
-      return db.runTransaction(async (transaction) => {
+      return runIdempotent(
+        request,
+        "character-creation-initialize",
+        "actor-only",
+        async ({db, transaction, actorUid}) => {
+          const userRef = db.doc(`users/${actorUid}`);
+          const schemaRef = db.doc("utils/schema_pg");
+          const stateRefs = {
+            progression: db.doc(`users/${actorUid}/state/progression`),
+            resources: db.doc(`users/${actorUid}/state/resources`),
+            settings: db.doc(`users/${actorUid}/state/settings`),
+            equipment: db.doc(`users/${actorUid}/state/equipment`),
+            profileContent: db.doc(`users/${actorUid}/state/profileContent`),
+          };
         const [
           schema,
           user,
@@ -528,7 +526,8 @@ export const task05CharacterCreation = onCall(
             .filter(([snapshot]) => !snapshot.exists)
             .length,
         };
-      });
+        }
+      );
     }
 
     return runIdempotent(
@@ -1130,9 +1129,21 @@ export const task05UpdateResource = onCall(
       );
       const resources = await context.transaction.get(resourcesRef);
       const fields = resolveResourceFields(resource);
-      const current = asRecord(resources.get("stats"))[fields.current];
-      const next = applyResourceMutation(current, mode, request.data?.value);
-      if (next === null) fail("invalid-argument", "Resource value must be finite.");
+      const resourceStats = asRecord(resources.get("stats"));
+      const current = resource === "barriera"
+        ? (resourceStats[fields.current] ?? resourceStats.barriera)
+        : resourceStats[fields.current];
+      const requestedNext = applyResourceMutation(current, mode, request.data?.value);
+      if (requestedNext === null) fail("invalid-argument", "Resource value must be finite.");
+      let next = requestedNext ?? 0;
+      // Gesture deltas must never revive, exceed, or underflow a barrier when
+      // another client changes the authoritative value during a hold.
+      if (resource === "barriera" && mode === "delta") {
+        const total = Math.max(0, asFiniteNumber(
+          resourceStats[fields.total] ?? resourceStats.barriera
+        ));
+        next = Math.max(0, Math.min(total, next));
+      }
       const totalValue = request.data?.totalValue === undefined
         ? null
         : normalizeResourceTotalValue(request.data.totalValue);
@@ -1171,6 +1182,8 @@ export const task05UpdateResource = onCall(
         resource,
         previousValue: asFiniteNumber(current),
         newValue: next,
+        appliedDelta: next - asFiniteNumber(current),
+        newRevision: Math.max(0, Math.trunc(asFiniteNumber(resources.get("revision")))) + 1,
         ...(totalValue === null ? {} : {newTotalValue: totalValue}),
       };
       }

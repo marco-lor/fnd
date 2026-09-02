@@ -5,6 +5,8 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 const {
+  FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+  FIREBASE_EMULATOR_SHUTDOWN_REQUEST_TYPE,
   EMULATOR_HARNESS_PORTS,
   EMULATOR_PORT_RELEASE_TIMEOUT_MS,
   FIREBASE_HOSTING_UPSTREAM_PORT,
@@ -14,16 +16,28 @@ const {
   assertEmulatorPortsFree,
   createFirebaseEmulatorArguments,
   createFirebaseCliEnvironment,
+  createOwnedFirebaseEmulatorSpawnOptions,
   previousLogPaths,
   readBoundedTail,
   removePerformanceFirebaseConfig,
   requestOwnedPosixProcessGroupTermination,
+  requestOwnedWindowsGracefulShutdown,
+  shutdownOwnedWindowsEmulator,
   requestOwnedWindowsProcessTreeTermination,
   waitForEmulatorPortsFree,
   waitForOwnedChildExit,
   withEmulatorPortCleanup,
   writePerformanceFirebaseConfig,
 } = require('./emulators');
+
+const createIpcChild = () => {
+  const child = new EventEmitter();
+  child.pid = 4321;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.connected = true;
+  return child;
+};
 
 test('Firebase CLI child is forced offline without mutating or dropping inherited environment', () => {
   const inheritedEnvironment = {
@@ -156,7 +170,7 @@ test('Windows emulator cleanup targets only the captured child tree and preserve
   assert.deepEqual(invocation, {
     command: 'taskkill.exe',
     args: ['/PID', '4321', '/T', '/F'],
-    options: { encoding: 'utf8', windowsHide: true },
+    options: { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
   });
   assert.deepEqual(result, { status: 128, stdout: '', stderr: 'process already exited' });
   assert.throws(
@@ -194,6 +208,508 @@ test('owned emulator cleanup waits for the captured child exit event', async () 
     child.emit('exit', 0, null);
   });
   await exited;
+});
+
+test('Firebase CLI child normalizes Windows PATH casing so portable Java does not hide node', () => {
+  const environment = createFirebaseCliEnvironment(
+    {
+      PATH: 'C:\\stale-java-8',
+      Path: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+      KEEP_ME: 'inherited-value',
+    },
+    {
+      PATH: 'C:\\Program Files\\JetBrains\\PyCharm\\jbr\\bin;C:\\Windows\\System32;C:\\Program Files\\nodejs',
+    }
+  );
+
+  const pathEntries = Object.entries(environment)
+    .filter(([key]) => key.toLowerCase() === 'path');
+  assert.deepEqual(pathEntries, [[
+    'PATH',
+    'C:\\Program Files\\JetBrains\\PyCharm\\jbr\\bin;C:\\Windows\\System32;C:\\Program Files\\nodejs',
+  ]]);
+  assert.equal(environment.KEEP_ME, 'inherited-value');
+});
+
+test('Windows graceful cleanup requires an accepted owned IPC shutdown acknowledgement', async () => {
+  const child = new EventEmitter();
+  child.pid = 4321;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.connected = true;
+  const messages = [];
+  child.send = (message, callback) => {
+    messages.push(message);
+    setImmediate(() => {
+      child.emit('message', {
+        type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+        requestId: message.requestId,
+        accepted: true,
+        handler: 'firebase-cli-sigint',
+      });
+      callback?.();
+    });
+    return true;
+  };
+
+  const acknowledgement = await requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  assert.deepEqual(messages.map(({ type, requestId }) => ({ type, requestId: typeof requestId })), [{
+    type: FIREBASE_EMULATOR_SHUTDOWN_REQUEST_TYPE,
+    requestId: 'string',
+  }]);
+  assert.deepEqual(acknowledgement, {
+    accepted: true,
+    handler: 'firebase-cli-sigint',
+    pid: 4321,
+  });
+  await assert.rejects(
+    requestOwnedWindowsGracefulShutdown({ pid: 0 }, { timeoutMs: 1 }),
+    /cannot receive an owned IPC shutdown request/
+  );
+});
+
+test('Windows taskkill fallback is bounded and retains timeout diagnostics for the captured child tree', () => {
+  let invocation;
+  const result = requestOwnedWindowsProcessTreeTermination({ pid: 4321 }, {
+    timeoutMs: 25,
+    spawnSyncImpl: (command, args, options) => {
+      invocation = { command, args, options };
+      const error = new Error('spawnSync taskkill.exe ETIMEDOUT');
+      error.code = 'ETIMEDOUT';
+      return {
+        status: null,
+        signal: 'SIGTERM',
+        stdout: 'partial stdout',
+        stderr: 'partial stderr',
+        error,
+      };
+    },
+  });
+
+  assert.deepEqual(invocation, {
+    command: 'taskkill.exe',
+    args: ['/PID', '4321', '/T', '/F'],
+    options: { encoding: 'utf8', windowsHide: true, timeout: 25 },
+  });
+  assert.deepEqual(result, {
+    status: null,
+    signal: 'SIGTERM',
+    stdout: 'partial stdout',
+    stderr: 'partial stderr',
+    timedOut: true,
+    error: 'spawnSync taskkill.exe ETIMEDOUT',
+  });
+});
+
+test('Windows supervisor uses an isolated console group so a parent Ctrl+C leaves IPC as its only shutdown path', () => {
+  const options = createOwnedFirebaseEmulatorSpawnOptions({
+    cwd: 'C:\\workspace\\frontend',
+    env: { KEEP_ME: 'value' },
+    stdio: ['ignore', 1, 2, 'ipc'],
+    platform: 'win32',
+  });
+
+  assert.deepEqual(options, {
+    cwd: 'C:\\workspace\\frontend',
+    env: { KEEP_ME: 'value' },
+    stdio: ['ignore', 1, 2, 'ipc'],
+    shell: false,
+    detached: true,
+    windowsHide: true,
+  });
+});
+
+test('Windows IPC backpressure keeps the acknowledged graceful shutdown ahead of exact-tree fallback', async () => {
+  const child = createIpcChild();
+  let fallbackCalls = 0;
+  child.send = (message, callback) => {
+    setImmediate(() => {
+      callback?.(null);
+      child.emit('message', {
+        type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+        requestId: message.requestId,
+        accepted: true,
+        handler: 'firebase-cli-sigint',
+      });
+    });
+    return false;
+  };
+
+  const result = await shutdownOwnedWindowsEmulator({
+    child,
+    requestTreeTermination: () => { fallbackCalls += 1; },
+    waitForChildExit: async () => { child.exitCode = 0; },
+    waitForPorts: async () => {},
+  });
+
+  assert.equal(fallbackCalls, 0);
+  assert.deepEqual(result.graceful, {
+    accepted: true,
+    handler: 'firebase-cli-sigint',
+    pid: 4321,
+  });
+});
+
+test('Windows graceful IPC shutdown fails closed on send callback error and removes lifecycle listeners', async () => {
+  const child = createIpcChild();
+  let sendCallback;
+  child.send = (_message, callback) => {
+    sendCallback = callback;
+    return true;
+  };
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  sendCallback(new Error('IPC channel closed'));
+
+  await assert.rejects(
+    pending,
+    /graceful shutdown request could not be delivered: IPC channel closed/
+  );
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows graceful IPC shutdown fails closed when its IPC channel disconnects before acknowledgement', async () => {
+  const child = createIpcChild();
+  child.send = () => true;
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  child.connected = false;
+  child.emit('disconnect');
+
+  await assert.rejects(pending, /IPC channel disconnected before graceful shutdown acknowledgement/);
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows graceful IPC shutdown ignores mismatched acknowledgements and accepts only its matching valid acknowledgement', async () => {
+  const child = createIpcChild();
+  child.send = (message, callback) => {
+    setImmediate(() => {
+      child.emit('message', {
+        type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+        requestId: 'another-request',
+        accepted: false,
+        reason: 'not-this-request',
+      });
+      child.emit('message', {
+        type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+        requestId: message.requestId,
+        accepted: true,
+        handler: 'firebase-cli-sigint',
+      });
+      callback?.(null);
+    });
+    return true;
+  };
+
+  await assert.doesNotReject(requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 }));
+});
+
+test('Windows graceful IPC shutdown rejects a matching supervisor rejection without accepting a later acknowledgement', async () => {
+  const child = createIpcChild();
+  let request;
+  child.send = (message) => {
+    request = message;
+    return true;
+  };
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  child.emit('message', {
+    type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+    requestId: request.requestId,
+    accepted: false,
+    reason: 'firebase-cli-sigint-handler-missing',
+  });
+
+  await assert.rejects(pending, /firebase-cli-sigint-handler-missing/);
+  assert.doesNotThrow(() => child.emit('message', {
+    type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+    requestId: request.requestId,
+    accepted: true,
+    handler: 'firebase-cli-sigint',
+  }));
+});
+
+test('Windows graceful IPC shutdown fails closed when the owned child emits an IPC error before acknowledgement', async () => {
+  const child = createIpcChild();
+  child.send = () => true;
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  child.emit('error', new Error('write EPIPE'));
+
+  await assert.rejects(pending, /IPC channel errored before graceful shutdown acknowledgement: write EPIPE/);
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows graceful IPC shutdown rejects matching malformed acknowledgement and ignores late events after settlement', async () => {
+  const child = createIpcChild();
+  let request;
+  let sendCallback;
+  child.send = (message, callback) => {
+    request = message;
+    sendCallback = callback;
+    return true;
+  };
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  child.emit('message', {
+    type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+    requestId: request.requestId,
+    accepted: true,
+    handler: 'wrong-handler',
+  });
+  await assert.rejects(pending, /graceful shutdown was rejected/);
+  assert.doesNotThrow(() => {
+    sendCallback?.(null);
+    child.emit('message', {
+      type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+      requestId: request.requestId,
+      accepted: true,
+      handler: 'firebase-cli-sigint',
+    });
+  });
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows graceful IPC shutdown fails when its wrapper exits before a valid acknowledgement', async () => {
+  const child = createIpcChild();
+  child.send = () => true;
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 100 });
+  child.exitCode = 1;
+  child.emit('exit', 1, null);
+
+  await assert.rejects(pending, /exited before graceful shutdown acknowledgement/);
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows graceful IPC shutdown times out without acknowledgement and ignores late callback or acknowledgement', async () => {
+  const child = createIpcChild();
+  let request;
+  let sendCallback;
+  child.send = (message, callback) => {
+    request = message;
+    sendCallback = callback;
+    return true;
+  };
+
+  const pending = requestOwnedWindowsGracefulShutdown(child, { timeoutMs: 10 });
+  const keepAlive = setTimeout(() => {}, 20);
+  try {
+    await assert.rejects(pending, /acknowledgement did not arrive within 10 ms/);
+  } finally {
+    clearTimeout(keepAlive);
+  }
+  assert.doesNotThrow(() => {
+    sendCallback?.(null);
+    child.emit('message', {
+      type: FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+      requestId: request.requestId,
+      accepted: true,
+      handler: 'firebase-cli-sigint',
+    });
+  });
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows owned shutdown records acknowledgement, child exit, and stable ports before success', async () => {
+  const child = new EventEmitter();
+  child.pid = 4321;
+  child.exitCode = null;
+  child.signalCode = null;
+  const calls = [];
+  const result = await shutdownOwnedWindowsEmulator({
+    child,
+    requestGracefulShutdown: async (capturedChild) => {
+      calls.push(['graceful', capturedChild.pid]);
+      capturedChild.exitCode = 0;
+      capturedChild.emit('exit', 0, null);
+      return { accepted: true, handler: 'firebase-cli-sigint', pid: capturedChild.pid };
+    },
+    requestTreeTermination: () => {
+      calls.push(['taskkill']);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    waitForChildExit: async () => calls.push(['exit']),
+    waitForPorts: async () => calls.push(['ports']),
+  });
+
+  assert.deepEqual(calls, [['graceful', 4321], ['exit'], ['ports']]);
+  assert.equal(result.fallback, null);
+  assert.deepEqual(result.graceful, { accepted: true, handler: 'firebase-cli-sigint', pid: 4321 });
+  assert.deepEqual(result.exit, { exited: true, pid: 4321 });
+  assert.deepEqual(result.ports, { stable: true });
+});
+
+test('Windows shutdown settles an early direct child SIGINT plus matching IPC acknowledgement through one exact-tree fallback', async () => {
+  const child = createIpcChild();
+  child.directSigintReceived = true;
+  const calls = [];
+  let exitWaits = 0;
+
+  const result = await shutdownOwnedWindowsEmulator({
+    child,
+    requestGracefulShutdown: async (capturedChild) => {
+      calls.push(['ipc', capturedChild.pid, capturedChild.directSigintReceived]);
+      return { accepted: true, handler: 'firebase-cli-sigint', pid: capturedChild.pid };
+    },
+    requestTreeTermination: (capturedChild) => {
+      calls.push(['taskkill', capturedChild.pid]);
+      return { status: 0, stdout: 'SUCCESS', stderr: '' };
+    },
+    waitForChildExit: async (capturedChild) => {
+      exitWaits += 1;
+      if (exitWaits === 1) {
+        throw new Error('Owned Firebase emulator process did not exit within 10000 ms.');
+      }
+      capturedChild.exitCode = 0;
+      capturedChild.emit('exit', 0, null);
+    },
+    waitForPorts: async () => calls.push(['ports-free']),
+  });
+
+  assert.deepEqual(calls, [
+    ['ipc', 4321, true],
+    ['taskkill', 4321],
+    ['ports-free'],
+  ]);
+  assert.equal(exitWaits, 2);
+  assert.deepEqual(result.fallback, { status: 0, stdout: 'SUCCESS', stderr: '' });
+  assert.deepEqual(result.exit, { exited: true, pid: 4321 });
+  assert.deepEqual(result.ports, { stable: true });
+});
+
+test('Windows shutdown reports a timed-out exact-tree fallback once and leaves no graceful IPC listeners', async () => {
+  const child = createIpcChild();
+  let fallbackCalls = 0;
+
+  await assert.rejects(
+    shutdownOwnedWindowsEmulator({
+      child,
+      requestGracefulShutdown: async () => ({
+        accepted: true,
+        handler: 'firebase-cli-sigint',
+        pid: child.pid,
+      }),
+      requestTreeTermination: () => {
+        fallbackCalls += 1;
+        return {
+          status: null,
+          stdout: 'partial stdout',
+          stderr: 'partial stderr',
+          signal: 'SIGTERM',
+          timedOut: true,
+          error: 'spawnSync taskkill.exe ETIMEDOUT',
+        };
+      },
+      waitForChildExit: async () => {
+        throw new Error('Owned Firebase emulator process did not exit within 10000 ms.');
+      },
+      waitForPorts: async () => {},
+    }),
+    (error) => {
+      assert.ok(error instanceof global.AggregateError);
+      assert.match(error.errors.map((entry) => entry.message).join('\n'), /taskkill fallback failed with status null/);
+      assert.match(error.errors.map((entry) => entry.message).join('\n'), /timed out/);
+      assert.match(error.errors.map((entry) => entry.message).join('\n'), /ETIMEDOUT/);
+      assert.deepEqual(error.shutdownDiagnostics.fallback, {
+        status: null,
+        stdout: 'partial stdout',
+        stderr: 'partial stderr',
+        signal: 'SIGTERM',
+        timedOut: true,
+        error: 'spawnSync taskkill.exe ETIMEDOUT',
+      });
+      return true;
+    }
+  );
+  assert.equal(fallbackCalls, 1);
+  assert.equal(child.listenerCount('message'), 0);
+  assert.equal(child.listenerCount('exit'), 0);
+  assert.equal(child.listenerCount('error'), 0);
+  assert.equal(child.listenerCount('disconnect'), 0);
+});
+
+test('Windows owned shutdown never accepts a wrapper exit while its owned descendant ports remain occupied', async () => {
+  const child = new EventEmitter();
+  child.pid = 4321;
+  child.exitCode = null;
+  child.signalCode = null;
+  await assert.rejects(
+    shutdownOwnedWindowsEmulator({
+      child,
+      requestGracefulShutdown: async () => ({
+        accepted: true,
+        handler: 'firebase-cli-sigint',
+        pid: 4321,
+      }),
+      waitForChildExit: async () => {
+        child.exitCode = 0;
+        child.emit('exit', 0, null);
+      },
+      waitForPorts: async () => {
+        throw new Error('owned descendant ports 8080 and 9150 remain occupied');
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof global.AggregateError);
+      assert.match(error.message, /shutdown failed/);
+      assert.deepEqual(error.shutdownDiagnostics, {
+        acknowledgement: { accepted: true, handler: 'firebase-cli-sigint', pid: 4321 },
+        exit: { exited: true, pid: 4321 },
+        fallback: null,
+        ports: { stable: false },
+      });
+      return true;
+    }
+  );
+});
+
+test('Windows owned shutdown fails closed when the exact-child taskkill fallback is denied and cleanup is not stable', async () => {
+  const child = { pid: 4321, exitCode: null, signalCode: null };
+  const calls = [];
+  await assert.rejects(
+    shutdownOwnedWindowsEmulator({
+      child,
+      requestGracefulShutdown: () => {
+        throw new Error('graceful signal was not delivered');
+      },
+      requestTreeTermination: (capturedChild) => {
+        calls.push(capturedChild.pid);
+        return { status: 5, stdout: '', stderr: 'Access is denied.' };
+      },
+      waitForChildExit: async () => {
+        throw new Error('Owned Firebase emulator process did not exit within 10000 ms.');
+      },
+      waitForPorts: async () => {
+        throw new Error('Performance emulator harness ports did not become stably free.');
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof global.AggregateError);
+      assert.match(error.message, /Owned Firebase emulator shutdown failed/);
+      assert.match(error.errors.map((entry) => entry.message).join('\n'), /Access is denied/);
+      return true;
+    }
+  );
+  assert.deepEqual(calls, [4321]);
 });
 
 test('emulator port preflight reports occupied ports without terminating anything', async () => {

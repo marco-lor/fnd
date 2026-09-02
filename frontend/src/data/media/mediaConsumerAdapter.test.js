@@ -332,6 +332,32 @@ describe('Task 07 media consumer adapter', () => {
     expect(readReceipts(storage)).toEqual([]);
   });
 
+  test('marks a retained media receipt as resumed for completion-only orchestration', async () => {
+    const storage = createMemoryStorage();
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: jest.fn().mockResolvedValue({
+        handled: true,
+        status: 'attached-result-unknown',
+        assetId,
+      }),
+    }));
+
+    const resumedInvoke = jest.fn().mockResolvedValue({
+      handled: true,
+      status: 'complete',
+      replay: true,
+    });
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: resumedInvoke,
+    }));
+
+    expect(resumedInvoke).toHaveBeenCalledWith(expect.objectContaining({
+      resumed: true,
+    }));
+  });
+
   test('resumes original CAS inputs when entity state advanced after an ambiguous attach', async () => {
     const storage = createMemoryStorage();
     const firstInvoke = jest.fn().mockResolvedValue({

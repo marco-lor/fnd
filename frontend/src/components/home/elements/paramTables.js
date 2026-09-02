@@ -11,14 +11,17 @@ import {
 } from '../../../data/userData/userDataHooks';
 import { FaDiceD20 } from 'react-icons/fa';
 import DiceRoller from '../../common/DiceRoller';
-import { getParamDisplayName, SPECIAL_PARAM_SCHEMA_IDS } from '../../common/paramMetadata';
-import { getSchema, getVarie } from '../../../data/configRepository';
+import { getParamDisplayName } from '../../common/paramMetadata';
 import {
   TASK06_LOCAL_CANDIDATE,
 } from '../../../data/functions/backendOperationClient';
 import {
   runWithDurableOperationIntent,
 } from '../../../data/functions/backendOperationIntentStore';
+import { useHomeReadSelector } from '../homeReadStore';
+import { usePerformanceRenderProbe } from '../../../performance/PerformanceProfiler';
+
+const selectHomeConfig = (state) => state.config;
 
 const displayName = (k) => getParamDisplayName(k);
 
@@ -33,6 +36,7 @@ const StatButton = ({ onClick, disabled, children, className = "" }) => (
 );
 
 export function MergedStatsTable() {
+  usePerformanceRenderProbe('ParamTables');
   const { user } = useAuth();
   const {
     data: progression,
@@ -48,12 +52,13 @@ export function MergedStatsTable() {
     && progressionUid === user?.uid;
   const settingsReady = userSettings !== null
     && settingsUid === user?.uid;
-  const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
+  const homeConfig = useHomeReadSelector(selectHomeConfig);
+  const dadiAnimaByLevel = homeConfig.dadiAnimaByLevel;
   const [roller, setRoller] = useState({ visible: false, faces: 0, count: 1, modifier: 0, description: '' });
   const [baseStats, setBaseStats] = useState(null);
   const [combStats, setCombStats] = useState(null);
   const [specialStats, setSpecialStats] = useState(null);
-  const [specialSchemaKeys, setSpecialSchemaKeys] = useState([]);
+  const specialSchemaKeys = homeConfig.specialSchemaKeys;
   const [cooldown, setCooldown] = useState(false);
   const [basePointsAvailable, setBasePointsAvailable] = useState(0);
   const [basePointsSpent, setBasePointsSpent] = useState(0);
@@ -61,7 +66,7 @@ export function MergedStatsTable() {
   const [combatTokensSpent, setCombatTokensSpent] = useState(0);
   const [lockBase, setLockBase] = useState(false);
   const [lockCombat, setLockCombat] = useState(false);
-  const [combatCosts, setCombatCosts] = useState(null);
+  const combatCosts = homeConfig.status === 'loading' ? null : homeConfig.combatCosts;
   const [errorMsg, setErrorMsg] = useState("");
   // UI: collapse/expand Parametri Speciali table
   // Initialize closed by default
@@ -195,44 +200,6 @@ export function MergedStatsTable() {
     setLockBase(Boolean(settings?.lock_param_base));
     setLockCombat(Boolean(settings?.lock_param_combat));
   }, [settingsReady, userSettings]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const varie = await getVarie();
-        if (varie) setDadiAnimaByLevel(varie.dadiAnimaByLevel || []);
-      } catch {}
-    })();
-  }, []);
-
-  // Load Special parameter keys from all item schemas so we can always show full list
-  useEffect(() => {
-    (async () => {
-      try {
-        const schemas = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map(id => getSchema(id)));
-        const allKeys = new Set();
-        schemas.forEach(schema => {
-          const keys = Object.keys(schema?.Parametri?.Special || {});
-          keys.forEach(k => allKeys.add(k));
-        });
-        setSpecialSchemaKeys(Array.from(allKeys).sort());
-      } catch (e) {
-        console.warn('Unable to load Special schema keys:', e?.message || e);
-        setSpecialSchemaKeys([]);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const varie = await getVarie();
-        setCombatCosts(varie ? varie.cost_params_combat : {});
-      } catch {
-        setCombatCosts({});
-      }
-    })();
-  }, []);
 
   const triggerCooldown = () => {
     setCooldown(true);

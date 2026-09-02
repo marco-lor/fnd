@@ -21,6 +21,7 @@ const {
   isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedDemoRecaptchaCancellation,
   isExpectedDemoRecaptchaReportOnlyWarning,
+  isExpectedTask08CleanupImageCancellation,
   isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
@@ -571,6 +572,132 @@ test('browser static asset warmup keeps batch order and explicit pass deadlines'
   ]);
 });
 
+test('browser validation retries only its own transient timeout-aborts and records both attempts', async () => {
+  const asset = {
+    path: '/static/js/retry.js',
+    category: 'javascript',
+    sha256: 'a'.repeat(64),
+  };
+  const calls = [];
+  const results = await runBrowserStaticAssetWarmupPass({
+    batches: [[asset]],
+    page: {
+      evaluate: async (_callback, payload) => {
+        calls.push(payload);
+        if (calls.length === 1) {
+          return [{
+            bytes: 0,
+            contentType: '',
+            durationMs: 5_000,
+            error: 'signal is aborted without reason',
+            ok: false,
+            pass: payload.requestPass,
+            path: asset.path,
+            sha256: null,
+            status: null,
+            timeoutTriggered: true,
+          }];
+        }
+        return [{
+          bytes: 9,
+          contentType: 'application/javascript; charset=utf-8',
+          durationMs: 1,
+          error: null,
+          ok: true,
+          pass: payload.requestPass,
+          path: asset.path,
+          sha256: asset.sha256,
+          status: 200,
+          timeoutTriggered: false,
+        }];
+      },
+    },
+    passName: 'validation',
+    timeoutMs: 5_000,
+  });
+
+  assert.deepEqual(calls.map((payload) => payload.assets.map(({ path: assetPath }) => assetPath)), [
+    [asset.path],
+    [asset.path],
+  ]);
+  assert.equal(results[0].ok, true);
+  assert.equal(results[0].attemptCount, 2);
+  assert.deepEqual(results[0].attempts.map(({ attempt, ok, timeoutTriggered }) => ({
+    attempt,
+    ok,
+    timeoutTriggered,
+  })), [
+    { attempt: 1, ok: false, timeoutTriggered: true },
+    { attempt: 2, ok: true, timeoutTriggered: false },
+  ]);
+});
+
+test('browser validation fails closed for persistent timeout and integrity failures', async () => {
+  const timeoutAsset = {
+    path: '/static/js/persistent-timeout.js',
+    category: 'javascript',
+    sha256: 'b'.repeat(64),
+  };
+  let timeoutCalls = 0;
+  const timedOut = await runBrowserStaticAssetWarmupPass({
+    batches: [[timeoutAsset]],
+    page: {
+      evaluate: async (_callback, payload) => {
+        timeoutCalls += 1;
+        return [{
+          bytes: 0,
+          contentType: '',
+          durationMs: 5_000,
+          error: 'signal is aborted without reason',
+          ok: false,
+          pass: payload.requestPass,
+          path: timeoutAsset.path,
+          sha256: null,
+          status: null,
+          timeoutTriggered: true,
+        }];
+      },
+    },
+    passName: 'validation',
+    timeoutMs: 5_000,
+  });
+  assert.equal(timeoutCalls, 2);
+  assert.equal(timedOut[0].ok, false);
+  assert.equal(timedOut[0].attemptCount, 2);
+
+  const integrityAsset = {
+    path: '/static/js/incorrect-hash.js',
+    category: 'javascript',
+    sha256: 'c'.repeat(64),
+  };
+  let integrityCalls = 0;
+  const integrityFailed = await runBrowserStaticAssetWarmupPass({
+    batches: [[integrityAsset]],
+    page: {
+      evaluate: async (_callback, payload) => {
+        integrityCalls += 1;
+        return [{
+          bytes: 9,
+          contentType: 'application/javascript; charset=utf-8',
+          durationMs: 1,
+          error: 'SHA-256 mismatch',
+          ok: false,
+          pass: payload.requestPass,
+          path: integrityAsset.path,
+          sha256: 'd'.repeat(64),
+          status: 200,
+          timeoutTriggered: false,
+        }];
+      },
+    },
+    passName: 'validation',
+    timeoutMs: 5_000,
+  });
+  assert.equal(integrityCalls, 1);
+  assert.equal(integrityFailed[0].ok, false);
+  assert.equal(integrityFailed[0].attemptCount, 1);
+});
+
 test('browser delivery warmup is disposable, exact-origin, and records both passes', async () => {
   const sha256 = 'a'.repeat(64);
   const writes = [];
@@ -1020,6 +1147,33 @@ test('only intentional Task 07 fixture-image detach aborts are explained', () =>
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('127.0.0.1:9199', 'storage.googleapis.com') }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('image-013.png', 'other.png') }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
+});
+
+test('explains only cleanup-navigation aborts for an already-settled local fixture image', () => {
+  const path = '/v0/b/demo-fnd-perf.appspot.com/o/performance%2Fimage-107.png';
+  const exact = {
+    lifecyclePhase: 'route-cleanup',
+    resourceType: 'image',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    url: `http://127.0.0.1:9199${path}?alt=media&token=performance-token`,
+    priorNetworkRecords: [{ path, resourceType: 'image', method: 'GET', status: 200 }],
+  };
+  const classify = (candidate) => isExpectedTask08CleanupImageCancellation?.(candidate);
+
+  assert.equal(classify(exact), true);
+  assert.equal(classify({ ...exact, lifecyclePhase: 'route-active' }), false);
+  assert.equal(classify({ ...exact, resourceType: 'fetch' }), false);
+  assert.equal(classify({ ...exact, failure: 'net::ERR_FAILED' }), false);
+  assert.equal(classify({ ...exact, method: 'POST' }), false);
+  assert.equal(classify({ ...exact, url: exact.url.replace('127.0.0.1:9199', 'storage.googleapis.com') }), false);
+  assert.equal(classify({ ...exact, url: exact.url.replace('image-107.png', 'other.png') }), false);
+  assert.equal(classify({ ...exact, priorNetworkRecords: [] }), false);
+  assert.equal(classify({
+    ...exact,
+    priorNetworkRecords: [{ path, resourceType: 'image', method: 'GET', status: 404 }],
+  }), false);
+  assert.equal(classify({ ...exact, firebaseProjectId: 'fatin-test' }), false);
 });
 
 test('only loopback demo reCAPTCHA cleanup noise is explained', () => {

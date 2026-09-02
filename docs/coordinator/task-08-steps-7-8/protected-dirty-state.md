@@ -1,0 +1,158 @@
+# Protected dirty state at Steps 7–8 intake
+
+Captured before this coordinator directory was created. The later fingerprint algorithm excludes only `docs/coordinator/task-08-steps-7-8/`; every path below remains protected unless an active accepted step intentionally edits it.
+
+## Identity and aggregate hashes
+- Path: `C:\Users\Marco\OneDrive\git_projects\fnd-devs`
+- HEAD: `9c7fcc7c5799a458768512b7cbab49e4d9b301a9`
+- Branch: `devs`; upstream divergence: `+1 -0`
+- Porcelain-v2 hash: `93bdde32c4bbd6388e8a732948b801cc7bc116dc3b9a421e25049e9932115ecb`
+- Staged binary-diff hash: `01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b` (empty)
+- Unstaged binary-diff hash: `e37fec10f6696eea6efcb1b58cd1d5af38bd94fefd809f8b83e53c55db2b959f`
+- Sorted untracked manifest hash: `efd827bfca99f7ab817934f1824aeef8fd988e82742449d7ae26f56d99d56287`
+- Composite code fingerprint: `eb5efd35f8ad58c51f8bb1f8b462ad67c9e9be8a053349b0e496fb3645b88784`
+- Counts: 47 tracked modified files, 77 untracked files, zero staged files.
+
+## Tracked modified paths
+```text
+docs/performance-improvement-plan/task-08/README.md
+frontend/functions/src/userDataCommands.ts
+frontend/package.json
+frontend/performance/tests/browser/helpers.js
+frontend/performance/tests/browser/helpers.test.js
+frontend/performance/tests/browser/task08-baseline.performance.js
+frontend/performance/tests/task05-callables.test.js
+frontend/scripts/performance/emulators.js
+frontend/scripts/performance/emulators.test.js
+frontend/scripts/performance/rules-emulators.js
+frontend/scripts/performance/task07-harness.test.js
+frontend/scripts/performance/task08-contract.js
+frontend/scripts/performance/task08-contract.test.js
+frontend/src/AuthContext.js
+frontend/src/AuthContext.test.js
+frontend/src/components/Login.js
+frontend/src/components/Login.test.js
+frontend/src/components/LoginCreateButton.js
+frontend/src/components/characterCreation/CharacterCreation.js
+frontend/src/components/characterCreation/characterCreationAvatarMedia.js
+frontend/src/components/characterCreation/elements/AnimaShardSelection.js
+frontend/src/components/characterCreation/elements/CharacterDetails.js
+frontend/src/components/characterCreation/elements/PointsDistribution.js
+frontend/src/components/characterCreation/elements/RaceSelection.js
+frontend/src/components/common/Layout.js
+frontend/src/components/common/navbar.js
+frontend/src/components/common/useObjectUrl.js
+frontend/src/components/home/Home.js
+frontend/src/components/home/elements/EquippedInventory.js
+frontend/src/components/home/elements/Extra.js
+frontend/src/components/home/elements/Inventory.js
+frontend/src/components/home/elements/Inventory.test.js
+frontend/src/components/home/elements/StatsBars.js
+frontend/src/components/home/elements/StatsBars.test.js
+frontend/src/components/home/elements/paramTables.js
+frontend/src/data/codexRepository.js
+frontend/src/data/media/mediaConsumerAdapter.test.js
+frontend/src/data/media/mediaOperationReceiptStore.js
+frontend/src/data/media/mediaPipeline.js
+frontend/src/data/media/mediaPipeline.test.js
+frontend/src/data/useCatalogItemsById.js
+frontend/src/data/userData/userDataCommands.js
+frontend/src/data/userData/userDataCommands.test.js
+frontend/src/data/userData/userDataHooks.js
+frontend/src/performance/PerformanceProfiler.js
+frontend/src/performance/PerformanceProfiler.test.js
+frontend/src/performance/task08.js
+```
+
+## Untracked paths and content hashes
+```text
+docs/coordinator/task-08-character-creation-step-3/control.md=f445ecdf659b181cc777d7c17cbf047cb981b8fcdf6cf5502cfe62e27c962e5a
+docs/coordinator/task-08-character-creation-step-3/evidence/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-character-creation-step-3/evidence/step-03-browser-review-attempt-01.md=77c86a40705eeafbcfc835198f78e764237a09c05e53d9a9e575eed90296b246
+docs/coordinator/task-08-character-creation-step-3/evidence/step-03-browser-review-attempt-02.md=7ad1eac6bdcc5250618101d9ebca46e37867f65307c4525d88a5e59967f2cb7c
+docs/coordinator/task-08-character-creation-step-3/evidence/step-03-browser-review-attempt-03.md=06b658f4a86d5e73f37fd4c94cf343257e39531d0845996bc43dd3b44a461a82
+docs/coordinator/task-08-character-creation-step-3/evidence/step-03-browser-review-attempt-04.md=329060fd1645f10bcc1326743409b428f7b5bc36eed0e7c834c0267e50bd0f2c
+docs/coordinator/task-08-character-creation-step-3/plan.md=3c12a356845c5529c1fe1c8998e2b5913c3b9f37041cee9d6398ffa1c563e633
+docs/coordinator/task-08-character-creation-step-3/reports/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-character-creation-step-3/reports/step-03-attempt-01.md=155967cdf05c68a273bd852a8c86deaf75af34e99a29ae3eab98787fc2fee8d4
+docs/coordinator/task-08-character-creation-step-3/reports/step-03-attempt-02.md=2ead029b3fed3165f1111cddfbf632e95ff2e8ae2a139ef0bf2a127e9be57e76
+docs/coordinator/task-08-character-creation-step-3/reports/step-03-attempt-03.md=be2fc74f140b36d969dce0d9f7a3aebc2ad1a764b6bb95f8a477eb3aaccdf02f
+docs/coordinator/task-08-character-creation-step-3/reports/step-03-attempt-04.md=bfbfe5122bdf119287275e3457f733f8bd6a714b49ca9829eab28de73562ceeb
+docs/coordinator/task-08-character-creation-step-4/control.md=c230d7d20e271132a5ff5ffb71ef5f1bf8261839f2ec412075fe96f863292d1d
+docs/coordinator/task-08-character-creation-step-4/evidence/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-character-creation-step-4/evidence/step-04-browser-review-attempt-02.md=51174c777c97ecb0a7124c6954b58463b9dfda3747ebd008798954669a9bc54f
+docs/coordinator/task-08-character-creation-step-4/plan.md=b447c152fef5e24710a9e9c6700633dd1b12558819ca6c601d73601caaf6fd80
+docs/coordinator/task-08-character-creation-step-4/reports/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-character-creation-step-4/reports/step-04-attempt-01.md=01660c9d773630921cc6d2cbd5324fb33333a78cc69bf7d63b97e84af8139f42
+docs/coordinator/task-08-character-creation-step-4/reports/step-04-attempt-02.md=036045272bbfd298ad556cf3ceac0a0c1c184d4ed3bc2ee7a2ff0fabe00e4141
+docs/coordinator/task-08-home-read-render-step-5/control.md=30839d5a5a1fd6f07a92b3ecc57bd8af2f08aec60b8c508c48f1fce6095cea36
+docs/coordinator/task-08-home-read-render-step-5/evidence/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-home-read-render-step-5/evidence/step-05-browser-review-attempt-02.md=89ed7cef9735f2bdd3cd160db463e90fe5a14314d90147fc8be08660b89f5cc4
+docs/coordinator/task-08-home-read-render-step-5/plan.md=63f8d288293c6ad3a1b90d5402f94e5384aa4e3a4c42c071f4151273731a3156
+docs/coordinator/task-08-home-read-render-step-5/reports/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-home-read-render-step-5/reports/step-05-attempt-01.md=e99b333dd0d12b59cd49d1712862a30c0d49a2431e993c5711887a2a835d5179
+docs/coordinator/task-08-home-read-render-step-5/reports/step-05-attempt-02.md=6d6d5ebd83f074ce3f03b1ef2d447e045ec9a7852c22268b3a6a4d151fe0de9a
+docs/coordinator/task-08-resource-gesture-step-6/control.md=55cd5101e178c0cf8c8697721b39bfe105b7fbf7f7d7a834227ad7110e5ec7e2
+docs/coordinator/task-08-resource-gesture-step-6/evidence/step-06-browser-review-attempt-12.md=08571e5716783dee1e1ecdc700641f7037a26bea902a96256bd785e8acecb256
+docs/coordinator/task-08-resource-gesture-step-6/evidence/step-06-source-review-attempt-13.md=5a047d95628654a62520a1e8cb2de8f6e853a715af1577cbd27e897f524ad39d
+docs/coordinator/task-08-resource-gesture-step-6/evidence/step-06-source-review-attempt-14.md=e02b0e723c19fdd824204c923ba2373673c5c03f5f1e2c95ef01ff2dcf78118d
+docs/coordinator/task-08-resource-gesture-step-6/evidence/step-06-source-review-attempt-15.md=a107b75bf0c317eb981af7b7292e9281986500ef950accd20206dfb5dcbbbb9a
+docs/coordinator/task-08-resource-gesture-step-6/plan.md=beb7e3afe44837072c765f0dcd2ed5be01e07606a87664028d0d8207928ec422
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-01.md=e70d308da7b4ba4d5ce619e6023d6e0e2752051d38f3e55fcebd7832a94080cd
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-02.md=96dab94f9a60c61c188b3efb99d3d03b6cc405f47f6c09ec6c1b88c44aaff4d1
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-03.md=5a292a59d4af745b768479a4da3de001953bdd5310e994e99a68c69ccd115ca3
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-05.md=e7d705d6c9d726cc5c5cf052bd888fb9652871d739335fbd710a66a040e77fc1
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-06.md=c46fcf2e996732a914c584e4fd319214a6f853941c2deada6238ad6c4957e2e8
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-07.md=d73439f25eafdd928cae299fbc409165b5fe46caee923af370b987cf470b3a55
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-08.md=35f5dae8660ad4e62c25a1d6c66c2b10370cfe1aa712f0d6ea7a86565609aa6d
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-09.md=085acf62faebfae0bb85f095de9de95b47158c6c480caf46b7d5e3bab469a127
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-10.md=753a31ccc936ba9493be4ac94997dcc9b9939912a2d30d6dbbcf7334e145ef01
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-12.md=6ec5bac48be6b125c3022ffe0788b254f614263e15b2a3d3da8909da1744ee02
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-13.md=1fe699fd05e4e5d125d96a7a7a5b0e297125c7a0594eb70a358dd1c1768d3fc7
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-14.md=93592e059c93c102270ef0c7b192ea675223bbc3867b03a7317a71891404d8e8
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-15.md=fdb9a8511a557c8f908ea25ce5d4599dd076ceaf3b0549e3801d8aecaa819c56
+docs/coordinator/task-08-resource-gesture-step-6/reports/step-06-attempt-16.md=773743c2ffc843cad101b303375a1c2c26c3c7794d2ab9226d519fc9fca755e4
+docs/coordinator/task-08-step-6-terminal-review/control.md=b218e28a4f2661f5b7376e01bbcc647113be54f4dbb80d686f7748b37ede2be7
+docs/coordinator/task-08-step-6-terminal-review/plan.md=2f3505009ac3bd1973e2fcdc2b7ce22d3e9f1a7504a74ca6b9146198f1db0ed9
+docs/coordinator/task-08-step-6-terminal-review/protected-dirty-state.md=1142d577cbbcde70c6305b257a99a486bf31fc599c82543202909e37eb44c620
+docs/coordinator/task-08-step-6-terminal-review/reports/.gitkeep=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+docs/coordinator/task-08-step-6-terminal-review/reports/fix-attempt-01.md=070a8b827c210220a64c29040e7a9146b7fe23b6a7eba4407f51a0e85663afa3
+docs/coordinator/task-08-step-6-terminal-review/reports/review-attempt-01.md=2cf6f8504cf0f83bb617fcd2f87589a462e0108c80dc69e0bdfdb73600181278
+docs/coordinator/task-08-step-6-terminal-review/reports/review-attempt-02.md=6c093f5f6f32c01f24efe539ec456407fd9ee6172ead0c26e1485a663e0af057
+frontend/scripts/performance/firebase-emulator-supervisor-liveness-probe-fixture.js=ad5565e3b480f8df6c798331b288cc212b70d1d2036344c4c98cc41d12d2a6ad
+frontend/scripts/performance/firebase-emulator-supervisor-probe-fixture.js=edb36bcf2a4e02ee446a13ecffd5f36da27d36671f694599cd82d35bbbb05d62
+frontend/scripts/performance/firebase-emulator-supervisor.js=63ee0c8998270134750bd2af8a3423980c22a24238ced740d5a89f13e0ff60ac
+frontend/scripts/performance/firebase-emulator-supervisor.test.js=d530ae279fc0f1bc40949d8dde47792e2331bc54cda7535f4779303e71d1952b
+frontend/src/components/LoginCharacterCreation.integration.test.js=51934f8e1012b2b04115a58f5ef86c599a35f46a300f29accdd80e960d64c9fc
+frontend/src/components/LoginCreateButton.test.js=4f7ad2367443c5276511b61537527aef411e13f1d89a8f232ace83676d125117
+frontend/src/components/LoginSubmitButton.js=3bc0d99aebf69d191f40e28133b66276cc6af0c0ebe980dc28f177f21859c681
+frontend/src/components/LoginSubmitButton.test.js=662016028c412a5763df8c92b9156d98b23c5c7625052c783ee8eb7d2c4f6604
+frontend/src/components/LoginVisuals.js=35b9e0a5a19dabaef98fefc1c6125a3cf6018db296703922a256362cb6df2790
+frontend/src/components/characterCreation/CharacterCreation.media.step3.test.js=5597fa1aec9849dace80daee0ca05545772d7fdb0ae170d087a2adf5fc6bb83e
+frontend/src/components/characterCreation/CharacterCreation.step3.test.js=c18fe160aaecb6ff9606d86607f252d60a198204a9f4ea9b7102290e49796262
+frontend/src/components/characterCreation/CharacterCreation.test.js=ad1e4c051bbf40e2284b20f1c7c8d6e3e2bea820c7ac6e715413c38a3b5aba1c
+frontend/src/components/characterCreation/characterCreationData.js=2810d08656be5e49e9708e5d07d7d27411162fc0c4eedc2736dc87ea71253797
+frontend/src/components/characterCreation/characterCreationData.test.js=71dfbf433ca29776d6cb7b745dadf6619ff0be0a613cdf13d9b9bf446d97c4ee
+frontend/src/components/characterCreation/elements/AnimaShardSelection.step3.test.js=64a6bccfddf00d06c86719d220ac2e44baaa11305b7db7d89b6023cb248f2e73
+frontend/src/components/characterCreation/elements/CharacterDetails.step3.test.js=fab3e0dea89e91685762a4ed887ca2ae92c5b46d4981098cb52b7ba276c9bc08
+frontend/src/components/characterCreation/elements/PointsDistribution.step3.test.js=72b5a728d48bed960619ce8c5906a294e9b29255cd8e63cac8b40124a590844e
+frontend/src/components/characterCreation/elements/RaceSelection.step3.test.js=80057e107476d637a817d7199c198be5e666eea1c9cea120766606eeea794801
+frontend/src/components/home/HomeReadPlane.js=93b3ddb2f970870650e9f7f6ce3bdbe7227a0ebbf69f2e78f7498f6333ac3cf5
+frontend/src/components/home/homeInventoryProjection.js=f1b7236d50fda90feb472d1b29af40efae2535ff963e2aa14534e25cd5b5bccc
+frontend/src/components/home/homeInventoryProjection.test.js=cb49c1ea8b703537dc2feca559fe7ff183fcb0533565e0599679769d1827c870
+frontend/src/components/home/homeReadStore.js=59361ecd7b369ada906fa13c49c7fdfd76abd8425b1f337ba56e641f26d16c37
+frontend/src/components/home/homeReadStore.test.js=7b0abd60e9cf0bc83d1587bebdd043124d03eae10e6ca11a6eee260a3b83e45d
+frontend/src/data/media/mediaOperationOwner.step3.test.js=a109874474fc2f9840dba452b875030b4dda29d10854cba1e46225ab5b95de27
+```
+
+## Fingerprint algorithm
+Normalize command text to LF, SHA-256 the filtered porcelain-v2 output, staged binary diff, unstaged binary diff, and sorted `path=contentSha256` untracked manifest, then SHA-256:
+```text
+HEAD=<sha>
+BRANCH=<branch>
+STATUS=<statusSha>
+STAGED=<stagedSha>
+UNSTAGED=<unstagedSha>
+UNTRACKED=<untrackedSha>
+```
+

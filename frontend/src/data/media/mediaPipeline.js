@@ -321,6 +321,9 @@ const validatePipelineInput = (input) => {
   if (input.rollbackPreparedEntity != null && typeof input.rollbackPreparedEntity !== 'function') {
     throw new TypeError('Task 07 rollbackPreparedEntity must be a function.');
   }
+  if (input.resume != null && typeof input.resume !== 'boolean') {
+    throw new TypeError('Task 07 media resume state must be boolean.');
+  }
 };
 
 export const runTask07MediaPipeline = async (input, {
@@ -342,10 +345,11 @@ export const runTask07MediaPipeline = async (input, {
     expectedRevision,
     prepareEntity,
     rollbackPreparedEntity,
+    resume = false,
     signal,
     onProgress,
   } = input;
-  let stage = prepareEntity ? 'prepare-target' : 'prepare';
+  let stage = prepareEntity && !resume ? 'prepare-target' : 'prepare';
   let assetId = null;
   let attached = false;
   let attachAttempted = false;
@@ -354,7 +358,7 @@ export const runTask07MediaPipeline = async (input, {
   let targetRollback = null;
 
   try {
-    if (prepareEntity) {
+    if (prepareEntity && !resume) {
       throwIfTask07Aborted(signal);
       onProgress?.({ stage });
       await prepareEntity();

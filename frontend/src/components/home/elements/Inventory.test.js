@@ -68,6 +68,17 @@ const readyInventory = {
   status: 'fresh',
 };
 
+const inventoryFixture = (size) => Array.from({ length: size }, (_, index) => ({
+	id: `fixture-${index}`,
+	name: `Fixture item ${index}`,
+	type: 'weapon',
+	_instance: { instanceId: `fixture-instance-${index}` },
+}));
+
+const mountedInventoryRows = (container) => (
+	container.querySelectorAll('[data-home-inventory-row="true"]').length
+);
+
 const openVarieDraft = () => {
   fireEvent.click(screen.getByTitle('Aggiungi oggetto Varie'));
   fireEvent.change(screen.getByPlaceholderText('Es. Corda di canapa'), {
@@ -95,10 +106,7 @@ describe('Inventory command safety', () => {
     });
     useInventory.mockReturnValue(readyInventory);
     useEquipment.mockReturnValue({ data: { slots: {} }, status: 'fresh' });
-    useResources.mockReturnValue({
-      data: { stats: { gold: 100 } },
-      status: 'fresh',
-    });
+		useResources.mockReturnValue({ data: 100, status: 'fresh' });
     createUserOperationId.mockImplementation((prefix) => `${prefix}-fixed`);
     isDefinitiveUserDataCommandError.mockImplementation((error) => (
       error?.code === 'functions/invalid-argument'
@@ -243,7 +251,7 @@ describe('Inventory command safety', () => {
     await waitFor(() => expect(recordTask08Event).toHaveBeenCalledTimes(2));
   });
 
-  test('joins canonical-only Bazaar media into a purchased display entity in memory', () => {
+	test('joins canonical-only Bazaar media into a purchased display entity in memory', () => {
     const catalogMedia = { assetId: `m_${'a'.repeat(40)}` };
     const purchased = {
       id: 'sword-1',
@@ -260,6 +268,87 @@ describe('Inventory command safety', () => {
     });
 
     expect(view.items[0].doc.media).toBe(catalogMedia);
-    expect(view.items[0].doc.task07MediaRevision).toBe(4);
-    expect(purchased).not.toHaveProperty('media');
-  });});
+		expect(view.items[0].doc.task07MediaRevision).toBe(4);
+		expect(purchased).not.toHaveProperty('media');
+	});
+
+	test('resets an expanded 500-item window after a deep filter round trip', async () => {
+		useInventory.mockReturnValue({ data: inventoryFixture(500), status: 'fresh' });
+		const { container } = render(<Inventory />);
+
+		expect(mountedInventoryRows(container)).toBe(60);
+		fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
+		expect(mountedInventoryRows(container)).toBe(120);
+
+		fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
+			target: { value: 'Fixture item 315' },
+		});
+		await waitFor(() => expect(mountedInventoryRows(container)).toBe(1));
+
+		fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
+			target: { value: '' },
+		});
+		await waitFor(() => expect(mountedInventoryRows(container)).toBe(60));
+	});
+
+	test('does not resurrect a fully expanded window after returning to an old query', async () => {
+		useInventory.mockReturnValue({ data: inventoryFixture(120), status: 'fresh' });
+		const { container } = render(<Inventory />);
+
+		while (screen.queryByRole('button', { name: /^Load more inventory items/ })) {
+			fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
+		}
+		expect(mountedInventoryRows(container)).toBe(120);
+
+		fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
+			target: { value: 'Fixture item 115' },
+		});
+		await waitFor(() => expect(mountedInventoryRows(container)).toBe(1));
+		fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
+			target: { value: '' },
+		});
+		await waitFor(() => expect(mountedInventoryRows(container)).toBe(60));
+	});
+
+	test('clamps expansion when same-query data shrinks and requires expansion after growth', () => {
+		useInventory.mockReturnValue({ data: inventoryFixture(500), status: 'fresh' });
+		const { container, rerender } = render(<Inventory />);
+		fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
+		fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
+		expect(mountedInventoryRows(container)).toBe(180);
+
+		useInventory.mockReturnValue({ data: inventoryFixture(40), status: 'fresh' });
+		rerender(<Inventory />);
+		expect(mountedInventoryRows(container)).toBe(40);
+
+		useInventory.mockReturnValue({ data: inventoryFixture(500), status: 'fresh' });
+		rerender(<Inventory />);
+		expect(mountedInventoryRows(container)).toBe(60);
+		expect(screen.getByRole('button', { name: /^Load more inventory items/ })).toBeInTheDocument();
+	});
+
+	test('expands the initial window from 60 to 120 only on explicit action', () => {
+		useInventory.mockReturnValue({ data: inventoryFixture(500), status: 'fresh' });
+		const { container } = render(<Inventory />);
+
+		expect(mountedInventoryRows(container)).toBe(60);
+		fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
+		expect(mountedInventoryRows(container)).toBe(120);
+	});
+
+	test('renders selector-shaped numeric-string gold and keeps adjustment commands ready', async () => {
+		useResources.mockReturnValue({ data: '100', status: 'fresh' });
+		render(<Inventory />);
+
+		expect(screen.getByText('100')).toBeInTheDocument();
+		expect(screen.getByTitle('Aggiungi oro')).not.toBeDisabled();
+		fireEvent.click(screen.getByTitle('Aggiungi oro'));
+		fireEvent.change(screen.getByPlaceholderText('Es. 10'), { target: { value: '5' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Conferma' }));
+
+		await waitFor(() => expect(adjustGold).toHaveBeenCalledWith(expect.objectContaining({
+			userId: 'user-1',
+			delta: 5,
+		})));
+	});
+});

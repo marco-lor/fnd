@@ -52,17 +52,18 @@ export const withObjectUrl = async (file, operation, options) => {
 };
 
 const useObjectUrl = (file) => {
-  const [objectUrl, setObjectUrl] = useState('');
+  const [objectUrlState, setObjectUrlState] = useState({ file: null, url: '' });
 
   useEffect(() => {
-    setObjectUrl('');
     if (!file) return undefined;
     const lease = createObjectUrlLease(file);
-    setObjectUrl(lease.url);
+    setObjectUrlState({ file, url: lease.url });
     return lease.revoke;
   }, [file]);
 
-  return objectUrl;
+  // Effects run after render. Hide a previous file's URL during that small
+  // handoff window so a stale preview cannot flash after replacement/clear.
+  return objectUrlState.file === file ? objectUrlState.url : '';
 };
 
 export default useObjectUrl;

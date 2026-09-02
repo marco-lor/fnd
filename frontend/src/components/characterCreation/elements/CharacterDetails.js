@@ -1,5 +1,11 @@
 import React from "react";
 
+const isRecord = (value) => (
+  value !== null
+  && typeof value === "object"
+  && !Array.isArray(value)
+);
+
 function CharacterDetails({ 
   characterName, 
   setCharacterName, 
@@ -8,7 +14,8 @@ function CharacterDetails({
   handleImageChange, 
   selectedRace, 
   selectedAnima,
-  error
+  error,
+  disabled = false,
 }) {
   return (
     <div>
@@ -23,7 +30,8 @@ function CharacterDetails({
           placeholder="Enter your character name"
           className="w-full p-3 rounded-[5px] text-base bg-[rgba(30,30,30,0.9)] text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
           value={characterName}
-          onChange={(e) => setCharacterName(e.target.value)}
+          onChange={setCharacterName}
+          disabled={disabled}
           required
         />
       </div>
@@ -59,6 +67,7 @@ function CharacterDetails({
               type="file"
               accept="image/png, image/jpeg, image/webp, image/gif"
               onChange={handleImageChange}
+              disabled={disabled}
               className="block w-full text-white text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer file:cursor-pointer file:transition-colors file:duration-200"
             />
             <p className="mt-2 text-xs text-gray-400 text-left">
@@ -82,13 +91,13 @@ function CharacterDetails({
             <>
               <div className="col-span-1 sm:col-span-2 mt-1">
                 <span className="text-gray-300">Initial Bonuses: </span>
-                {Object.entries(selectedAnima.bonuses).map(([param, value]) => (
+                {Object.entries(isRecord(selectedAnima.bonuses) ? selectedAnima.bonuses : {}).map(([param, value]) => (
                   <span key={param} className="inline-block bg-blue-900/50 px-2 py-0.5 rounded mr-2 mb-1">
                     <span className="text-yellow-300">{param}</span> +{value}
                   </span>
                 ))}
               </div>
-              {selectedAnima.levelUpBonus && Object.keys(selectedAnima.levelUpBonus).length > 0 && (
+              {isRecord(selectedAnima.levelUpBonus) && Object.keys(selectedAnima.levelUpBonus).length > 0 && (
                 <div className="col-span-1 sm:col-span-2 mt-1">
                   <span className="text-gray-300">Level Up Bonuses (per level): </span>
                   {Object.entries(selectedAnima.levelUpBonus).map(([param, value]) => (

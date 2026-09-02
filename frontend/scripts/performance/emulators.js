@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 const childProcess = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { createDeterministicBuildServer } = require('./deterministic-static-server');
+const {
+  FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+  FIREBASE_EMULATOR_SHUTDOWN_REQUEST_TYPE,
+} = require('./firebase-emulator-supervisor');
 const {
   assertPerformanceProject,
   configureOwnedPerformanceEnvironment,
@@ -40,21 +45,33 @@ const PREVIOUS_LOG_TAIL_BYTES = 64 * 1024;
 const EMULATOR_PORT_RELEASE_TIMEOUT_MS = 60 * 1000;
 const EMULATOR_PORT_RELEASE_INTERVAL_MS = 250;
 const EMULATOR_PORT_RELEASE_STABLE_SAMPLES = 2;
+const EMULATOR_GRACEFUL_SHUTDOWN_ACK_TIMEOUT_MS = 10 * 1000;
+const EMULATOR_TASKKILL_TIMEOUT_MS = 10 * 1000;
 const FIREBASE_CLI_OFFLINE_ENV_KEY = 'npm_config_offline';
+
+const environmentPath = (environment = process.env) => (
+  Object.entries(environment).find(([key]) => key.toLowerCase() === 'path')?.[1] || ''
+);
 
 const createFirebaseCliEnvironment = (
   inheritedEnvironment = process.env,
   overrides = {}
 ) => {
   const environment = {};
-  for (const [key, value] of Object.entries({
-    ...inheritedEnvironment,
-    ...overrides,
-  })) {
+  const applyEntries = (entries) => entries.forEach(([key, value]) => {
     if (key.toLowerCase() !== FIREBASE_CLI_OFFLINE_ENV_KEY) {
+      if (key.toLowerCase() === 'path') {
+        for (const existingKey of Object.keys(environment)) {
+          if (existingKey.toLowerCase() === 'path') delete environment[existingKey];
+        }
+        environment.PATH = value;
+        return;
+      }
       environment[key] = value;
     }
-  }
+  });
+  applyEntries(Object.entries(inheritedEnvironment));
+  applyEntries(Object.entries(overrides));
   return {
     ...environment,
     // The demo harness must not let firebase-tools synchronously query npm
@@ -342,22 +359,30 @@ const archiveAndDeletePreviousLogs = ({
 
 const requestOwnedWindowsProcessTreeTermination = (child, {
   spawnSyncImpl = childProcess.spawnSync,
+  timeoutMs = EMULATOR_TASKKILL_TIMEOUT_MS,
 } = {}) => {
   if (!Number.isInteger(child?.pid) || child.pid <= 0) {
     throw new Error('Owned Firebase emulator child PID is unavailable.');
   }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Owned Firebase emulator taskkill timeout must be positive.');
+  }
   const result = spawnSyncImpl('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
     encoding: 'utf8',
     windowsHide: true,
+    timeout: timeoutMs,
   });
-  if (result.error) {
-    throw new Error(`Failed to request owned Firebase emulator process-tree termination: ${result.error.message}`);
-  }
-  return {
+  const termination = {
     status: result.status,
     stdout: String(result.stdout || '').trim(),
     stderr: String(result.stderr || '').trim(),
   };
+  if (result.signal) termination.signal = result.signal;
+  if (result.error) {
+    termination.timedOut = result.error.code === 'ETIMEDOUT';
+    termination.error = result.error.message;
+  }
+  return termination;
 };
 
 const requestOwnedPosixProcessGroupTermination = (child, signal = 'SIGTERM', {
@@ -374,6 +399,86 @@ const hasOwnedChildExited = (child) => (
   child.exitCode !== null || child.signalCode !== null
 );
 
+const requestOwnedWindowsGracefulShutdown = (child, {
+  timeoutMs = EMULATOR_GRACEFUL_SHUTDOWN_ACK_TIMEOUT_MS,
+  requestId = crypto.randomUUID(),
+} = {}) => {
+  if (
+    !Number.isInteger(child?.pid)
+    || child.pid <= 0
+    || typeof child.send !== 'function'
+    || child.connected === false
+  ) {
+    return Promise.reject(new Error(
+      'Owned Firebase emulator child cannot receive an owned IPC shutdown request.'
+    ));
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new TypeError('Owned Firebase emulator shutdown acknowledgement timeout must be positive.'));
+  }
+  if (hasOwnedChildExited(child)) {
+    return Promise.reject(new Error('Owned Firebase emulator child exited before graceful shutdown was requested.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, acknowledgement) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('message', onMessage);
+      child.removeListener('exit', onExit);
+      child.removeListener('error', onError);
+      child.removeListener('disconnect', onDisconnect);
+      if (error) reject(error);
+      else resolve(acknowledgement);
+    };
+    const onMessage = (message) => {
+      if (message?.type !== FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE || message.requestId !== requestId) {
+        return;
+      }
+      if (message.accepted !== true || message.handler !== 'firebase-cli-sigint') {
+        finish(new Error(
+          `Owned Firebase emulator graceful shutdown was rejected: ${message.reason || 'invalid acknowledgement'}.`
+        ));
+        return;
+      }
+      finish(null, { accepted: true, handler: message.handler, pid: child.pid });
+    };
+    const onExit = () => finish(new Error(
+      'Owned Firebase emulator child exited before graceful shutdown acknowledgement.'
+    ));
+    const onError = (error) => finish(new Error(
+      `Owned Firebase emulator IPC channel errored before graceful shutdown acknowledgement: ${
+        error instanceof Error ? error.message : String(error)
+      }.`
+    ));
+    const onDisconnect = () => finish(new Error(
+      'Owned Firebase emulator IPC channel disconnected before graceful shutdown acknowledgement.'
+    ));
+    const timer = setTimeout(() => finish(new Error(
+      `Owned Firebase emulator graceful shutdown acknowledgement did not arrive within ${timeoutMs} ms.`
+    )), timeoutMs);
+    timer.unref?.();
+    child.on('message', onMessage);
+    child.once('exit', onExit);
+    child.once('error', onError);
+    child.once('disconnect', onDisconnect);
+    try {
+      child.send({
+        type: FIREBASE_EMULATOR_SHUTDOWN_REQUEST_TYPE,
+        requestId,
+      }, (error) => {
+        if (error) finish(new Error(
+          `Owned Firebase emulator graceful shutdown request could not be delivered: ${error.message}.`
+        ));
+      });
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+};
+
 const waitForOwnedChildExit = (child, timeoutMs = 10_000) => {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -389,6 +494,115 @@ const waitForOwnedChildExit = (child, timeoutMs = 10_000) => {
     child.once('exit', onExit);
   });
 };
+
+const shutdownOwnedWindowsEmulator = async ({
+  child,
+  requestGracefulShutdown = requestOwnedWindowsGracefulShutdown,
+  requestTreeTermination = requestOwnedWindowsProcessTreeTermination,
+  waitForChildExit = waitForOwnedChildExit,
+  waitForPorts = waitForEmulatorPortsFree,
+} = {}) => {
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+    throw new Error('Owned Firebase emulator child PID is unavailable.');
+  }
+  const errors = [];
+  let graceful = null;
+  let fallback = null;
+  let exit = null;
+  let ports = null;
+  const diagnostics = {
+    acknowledgement: null,
+    exit: null,
+    fallback: null,
+    ports: null,
+  };
+  let acknowledgementError = null;
+  try {
+    graceful = await requestGracefulShutdown(child);
+    diagnostics.acknowledgement = graceful;
+  } catch (error) {
+    acknowledgementError = error instanceof Error ? error : new Error(String(error));
+    errors.push(acknowledgementError);
+  }
+
+  const requestFallback = async (priorExitError = null) => {
+    if (hasOwnedChildExited(child)) return;
+    try {
+      fallback = requestTreeTermination(child);
+      diagnostics.fallback = fallback;
+      if (fallback.status !== 0) {
+        const timeoutDetail = fallback.timedOut ? ' timed out.' : '';
+        const errorDetail = fallback.error ? ` ${fallback.error}` : '';
+        errors.push(new Error(
+          `Owned Firebase emulator taskkill fallback failed with status ${fallback.status}: `
+          + `${fallback.stderr || fallback.stdout || 'no diagnostic output'}.${timeoutDetail}${errorDetail}`
+        ));
+      }
+    } catch (fallbackError) {
+      errors.push(fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError)));
+    }
+    try {
+      await waitForChildExit(child);
+      exit = { exited: true, pid: child.pid };
+      diagnostics.exit = exit;
+    } catch (fallbackExitError) {
+      errors.push(new global.AggregateError(
+        [priorExitError, fallbackExitError].filter(Boolean),
+        'Owned Firebase emulator process did not exit after exact-tree shutdown request.'
+      ));
+    }
+  };
+
+  if (acknowledgementError) {
+    await requestFallback();
+  } else {
+    try {
+      await waitForChildExit(child);
+      exit = { exited: true, pid: child.pid };
+      diagnostics.exit = exit;
+    } catch (gracefulExitError) {
+      await requestFallback(gracefulExitError);
+    }
+  }
+
+  try {
+    await waitForPorts();
+    ports = { stable: true };
+    diagnostics.ports = ports;
+  } catch (portsError) {
+    ports = { stable: false };
+    diagnostics.ports = ports;
+    errors.push(portsError instanceof Error ? portsError : new Error(String(portsError)));
+  }
+  if (errors.length) {
+    const shutdownError = new global.AggregateError(errors, 'Owned Firebase emulator shutdown failed.');
+    shutdownError.shutdownDiagnostics = diagnostics;
+    throw shutdownError;
+  }
+  return { graceful, exit, fallback, ports };
+};
+
+const createOwnedFirebaseEmulatorSupervisorArguments = ({ firebaseCli, configPath } = {}) => {
+  const firebaseArguments = createFirebaseEmulatorArguments({ firebaseCli, configPath });
+  return [
+    path.join(__dirname, 'firebase-emulator-supervisor.js'),
+    ...firebaseArguments,
+  ];
+};
+
+const createOwnedFirebaseEmulatorSpawnOptions = ({
+  cwd,
+  env,
+  stdio,
+  platform = process.platform,
+} = {}) => ({
+  cwd,
+  env,
+  stdio,
+  shell: false,
+  detached: true,
+  ...(platform === 'win32' ? { windowsHide: true } : {}),
+});
 
 const run = async () => {
   assertPerformanceProject(projectId);
@@ -453,16 +667,16 @@ const run = async () => {
 
   const child = childProcess.spawn(
     process.execPath,
-    createFirebaseEmulatorArguments({
+    createOwnedFirebaseEmulatorSupervisorArguments({
       firebaseCli,
       configPath: performanceFirebaseConfigPath,
     }),
-    {
+    createOwnedFirebaseEmulatorSpawnOptions({
       cwd: frontendRoot,
       env: createFirebaseCliEnvironment(ownedEnvironment, {
         ...(portableJavaHome ? {
           JAVA_HOME: portableJavaHome,
-          PATH: `${path.join(portableJavaHome, 'bin')}${path.delimiter}${process.env.PATH || ''}`,
+          PATH: `${path.join(portableJavaHome, 'bin')}${path.delimiter}${environmentPath(process.env)}`,
         } : {}),
         XDG_CONFIG_HOME: configRoot,
         FATINS_FIREBASE_API_KEY: 'demo-api-key',
@@ -482,10 +696,8 @@ const run = async () => {
         REACT_APP_FND_FIREBASE_HOSTING_SITE: PERFORMANCE_HOSTING_SITE,
         REACT_APP_FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
       }),
-      stdio: ['ignore', emulatorLog, emulatorLog],
-      shell: false,
-      detached: process.platform !== 'win32',
-    }
+      stdio: ['ignore', emulatorLog, emulatorLog, 'ipc'],
+    })
   );
 
   let shuttingDown = false;
@@ -506,10 +718,9 @@ const run = async () => {
       } catch (error) {
         errors.push(error);
       }
-      let windowsTermination = null;
       if (process.platform === 'win32') {
         try {
-          windowsTermination = requestOwnedWindowsProcessTreeTermination(child);
+          await shutdownOwnedWindowsEmulator({ child });
         } catch (error) {
           errors.push(error);
         }
@@ -521,7 +732,7 @@ const run = async () => {
         }
       }
 
-      try {
+      if (process.platform !== 'win32') try {
         await waitForOwnedChildExit(child);
       } catch (gracefulExitError) {
         if (process.platform === 'win32' || hasOwnedChildExited(child)) {
@@ -543,13 +754,10 @@ const run = async () => {
         }
       }
 
-      try {
+      if (process.platform !== 'win32') try {
         await waitForEmulatorPortsFree();
       } catch (error) {
-        const terminationDetail = windowsTermination && windowsTermination.status !== 0
-          ? ` taskkill status=${windowsTermination.status}, stderr=${windowsTermination.stderr || 'none'}.`
-          : '';
-        errors.push(new Error(`${error.message}${terminationDetail}`, { cause: error }));
+        errors.push(error);
       }
 
       fs.rmSync(playwrightMarker, { force: true });
@@ -619,7 +827,10 @@ module.exports = {
   EMULATOR_PORT_RELEASE_INTERVAL_MS,
   EMULATOR_PORT_RELEASE_STABLE_SAMPLES,
   EMULATOR_PORT_RELEASE_TIMEOUT_MS,
+  EMULATOR_TASKKILL_TIMEOUT_MS,
   EMULATOR_HARNESS_PORTS,
+  FIREBASE_EMULATOR_SHUTDOWN_ACK_TYPE,
+  FIREBASE_EMULATOR_SHUTDOWN_REQUEST_TYPE,
   FIREBASE_HOSTING_UPSTREAM_PORT,
   PERFORMANCE_FIREBASE_CONFIG_FILENAME,
   PERFORMANCE_STATIC_SERVER_PORT,
@@ -627,15 +838,20 @@ module.exports = {
   archiveAndDeletePreviousLogs,
   assertEmulatorPortsFree,
   canBindPort,
+  createOwnedFirebaseEmulatorSupervisorArguments,
+  environmentPath,
   createFirebaseEmulatorArguments,
   createFirebaseCliEnvironment,
+  createOwnedFirebaseEmulatorSpawnOptions,
   firebaseDebugLogPaths,
   previousLogPaths,
   readBoundedTail,
   removePerformanceFirebaseConfig,
   requestOwnedPosixProcessGroupTermination,
+  requestOwnedWindowsGracefulShutdown,
   requestOwnedWindowsProcessTreeTermination,
   run,
+  shutdownOwnedWindowsEmulator,
   waitForEmulatorPortsFree,
   waitForOwnedChildExit,
   withEmulatorPortCleanup,
