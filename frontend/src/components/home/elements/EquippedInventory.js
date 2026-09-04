@@ -402,6 +402,9 @@ const EquippedInventory = () => {
     if (!label) return <div />;
   const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
+    const itemName = typeof item === 'string'
+      ? item
+      : (itemDoc?.General?.Nome || itemDoc?.displayName || itemDoc?.name || itemDoc?.id || label);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
     const blocked = (isDisabledByTwoH(slotKey) && !item) || !equipmentMutationsReady;
     return (
@@ -415,7 +418,7 @@ const EquippedInventory = () => {
             if (blocked) return;
             item ? handleUnequip(slotKey) : openEquipModal(slotKey)
           }}
-          title={blocked ? 'Bloccato: arma a due mani equipaggiata nell\'altra mano' : (item ? `Click to unequip ${item.name || item}` : `Equip ${label}`)}
+          title={blocked ? 'Bloccato: arma a due mani equipaggiata nell\'altra mano' : (item ? `Click to unequip ${itemName}` : `Equip ${label}`)}
         >
           {item ? (
             <div className="h-10 w-10 mb-1 rounded-lg overflow-hidden border border-indigo-400/40 bg-slate-900/40 shadow-inner">
@@ -424,7 +427,7 @@ const EquippedInventory = () => {
                 mediaPurpose="item"
                 src={imgUrl || ''}
                 variant="thumbnail"
-                alt={typeof item === 'string' ? item : (item.name || item?.General?.Nome || item.id)}
+                alt={itemName}
                 width={40}
                 height={40}
                 sizes="40px"
@@ -446,7 +449,7 @@ const EquippedInventory = () => {
           )}
       {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (item) : (item.name || item?.General?.Nome || item.id))}</span>
+        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{itemName}</span>
             </div>
           )}
           {item && itemDoc && (

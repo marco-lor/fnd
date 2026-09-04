@@ -111,6 +111,29 @@ describe('StatsBars auth-scoped overlays', () => {
   });
 });
 
+describe('StatsBars layout containment', () => {
+  beforeEach(() => {
+    useAuthSession.mockReturnValue({
+      user: { uid: 'user-1' },
+      repositoryAccessGeneration: 0,
+    });
+    useResources.mockReturnValue(readyResources);
+  });
+
+  test('keeps interactive resource controls outside decorative overflow clipping', () => {
+    const { container } = render(<StatsBars />);
+    const hpDecrement = screen.getByTitle('-1 HP');
+    const clippingAncestors = [];
+
+    for (let element = hpDecrement.parentElement; element && element !== container; element = element.parentElement) {
+      if (element.classList.contains('overflow-hidden')) clippingAncestors.push(element);
+    }
+
+    expect(clippingAncestors).toHaveLength(0);
+    expect(container.querySelector('[aria-hidden="true"].overflow-hidden')).toBeInTheDocument();
+  });
+});
+
 describe('StatsBars resource gestures', () => {
   beforeEach(() => {
     let operationSequence = 0;

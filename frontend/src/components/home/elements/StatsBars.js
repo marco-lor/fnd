@@ -680,10 +680,12 @@ const StatsBars = () => {
   const barrierDecDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata' : '');
 
   return (
-    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
+    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg">
       {/* Decorative glows to match EquippedInventory */}
-      <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
-      <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+        <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
+        <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+      </div>
 
       {/* Custom Input Modal (full-screen overlay retained via portal to avoid clipping) */}
       {showCustomInput && customActionScopeKey === actionScopeKey && createPortal(

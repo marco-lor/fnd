@@ -134,6 +134,28 @@ describe('EquippedInventory V2 readiness', () => {
     ))).toBe(true);
   });
 
+  test('names a canonical equipped object in its unequip affordance', () => {
+    const belt = {
+      id: 'belt-1',
+      item_type: 'armatura',
+      General: { Nome: 'Cintura Base', Slot: 'Cintura' },
+      Specific: { slotCintura: 0 },
+      _instance: { instanceId: 'inventory-belt-1' },
+      _task05: { inventoryId: 'inventory-belt-1', catalogItemId: 'belt-1' },
+    };
+    useInventory.mockReturnValue({ data: [belt], status: 'fresh', uid });
+    useEquipment.mockReturnValue({
+      data: { slots: { cintura: 'inventory-belt-1' } },
+      status: 'fresh',
+      uid,
+    });
+
+    render(<EquippedInventory />);
+
+    expect(screen.getByTitle('Click to unequip Cintura Base')).toBeInTheDocument();
+    expect(screen.queryByTitle(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
   test('owns consumable confirmation in the Home provider tree and forwards the repository generation', async () => {
     const potion = {
       id: 'potion-1',
