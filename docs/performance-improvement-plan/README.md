@@ -1,25 +1,23 @@
 # FND performance improvement plan
 
-This directory is a read-only architecture and implementation plan created on 2026-07-17. No production code was changed as part of the audit.
+This architecture and implementation plan originated in the 2026-07-17 read-only audit. Tasks 09-22 were revised on 2026-09-05 against current source; this revision changes documentation only. The audit and Tasks 01-08 remain historical records.
 
-The tasks are intentionally ordered and must be implemented one at a time. Each task should land as a separately measurable change. Do not start a later task until the preceding task's acceptance gates pass, unless the later file explicitly marks work as independent.
+Task 09 is the normal next step. Accept one implementation unit at a time, but follow explicit dependencies rather than a blanket total order. A task number is a roadmap position, not a requirement to postpone unrelated correctness work.
 
-## Current sequence status
+## Current planning status and dependencies
 
-The reviewed Task 07 source closure is Fatins-test commit `296eeca`. This
-production adaptation follows this plan and the Task 07 specification: it adds
-CI evidence capture without changing deployment behavior or Firebase planes.
+Tasks 09-22 distinguish delivered source foundations from remaining work. Source presence does not establish staging acceptance, production deployment or a fresh performance baseline. Verify actual release evidence before implementation. The earlier Task 07 source-closure note is superseded here as a sequencing guide, without changing historical evidence.
 
-This reference to the isolated test-project source closure is not production
-closure, validation, deployment, or baseline-acceptance evidence. Production
-Task 07 progression still requires its own reviewed results under this plan.
+Independent candidates include 15A map delivery, 15B NPC deduplication, 18A video lifecycle and 20A fog concurrency assessment. Keep Task 09 next unless the user selects another unit. The implementation still proceeds one accepted unit at a time.
+
+The explicit dependency graph is: 09 <- 04/05/07; 10 <- 04/07 (09 only for summary consumers); 11 <- 04-07; 12 <- 04/06; 13 <- 04-07; 14 <- 03/04/05; 15 <- 04/07; 16 <- 04-07; 17 store changes <- 16 (local input independent); 18A <- 07; 18B <- 21B ownership decision; 18C <- 18B; 19 <- 04/07 (18 only for consumed outputs); 20 <- 04/05; 21 <- 04-07; final 22B <- all accepted units. Agree contracts between 19 and 20 without making either whole task depend on the other. 21B does not depend on 18, so the forward reference creates no cycle.
 
 ## Documents
 
 - [`00-performance-audit.md`](./00-performance-audit.md) contains the repository-wide analysis, evidence, priorities, route coverage, and baseline.
 - [`tasks/`](./tasks/) contains the sequential implementation tasks.
 
-## Required sequence
+## Roadmap order
 
 | Order | Task | Primary outcome | Risk |
 |---:|---|---|---|
@@ -32,11 +30,11 @@ Task 07 progression still requires its own reviewed results under this plan.
 | 07 | [Media and global shell runtime](./tasks/07-media-and-global-shell-runtime.md) | Thumbnails, bounded caches/preload, efficient visual/audio shell | Medium |
 | 08 | [Login, character creation, and Home](./tasks/08-login-character-creation-and-home.md) | Remove duplicate reads and high-frequency stat writes | Medium |
 | 09 | [Bazaar catalog data path](./tasks/09-bazaar-catalog-data-path.md) | Bounded summaries, pagination, authoritative purchasing | High |
-| 10 | [Bazaar editor consolidation](./tasks/10-bazaar-editor-consolidation.md) | On-demand, shared, low-read editors | Medium-High |
+| 10 | [Bazaar editor consolidation](./tasks/10-bazaar-editor-consolidation.md) | Preserve lazy editors; reduce measured data/form work | Medium-High |
 | 11 | [DM Dashboard and Admin](./tasks/11-dm-dashboard-and-admin.md) | Summary/detail loading, projected directories, scalable bulk actions | High |
 | 12 | [Codex data-model migration](./tasks/12-codex-data-model-migration.md) | Replace the single unbounded Codex document | High |
 | 13 | [Tecniche/Spell and Foes Hub](./tasks/13-tecniche-spell-and-foes-hub.md) | Shared user/config flow, bounded lists, safer media/actions | Medium |
-| 14 | [Combat Tool scaling](./tasks/14-combat-tool-scaling.md) | Bounded encounters and listener count that grows by chunks | High |
+| 14 | [Combat Tool removal](./tasks/14-combat-tool-removal.md) | Retire exclusive page/wiring while preserving shared turns | High |
 | 15 | [Echi di Viaggio](./tasks/15-echi-di-viaggio.md) | Compress maps, deduplicate NPC data, bound marker/list rendering | Medium |
 | 16 | [Grigliata realtime data plane](./tasks/16-grigliata-realtime-data-plane.md) | Tab-scoped listeners and incremental stable stores | High |
 | 17 | [Grigliata board render and input](./tasks/17-grigliata-board-render-and-input.md) | Contained Konva renders and frame-coalesced input | High |
@@ -56,6 +54,11 @@ Task 07 progression still requires its own reviewed results under this plan.
 6. Do not claim a gain from file splitting or `React.memo` alone. The acceptance metric must show reduced bytes, reads, writes, commits, draw calls, latency, or memory.
 7. Record unexpected regressions and stop the sequence rather than compensating for them in a later task.
 
+8. For every unit, record source/build identity, fixture, machine/browser, cold/warm mode, current values, numeric targets and repeatability. Existing `.github/workflows/performance.yml` and `frontend/performance/budgets.json` are the starting gates. A missing budget is a decision to resolve before implementation, never a claimed pass.
+9. Each release owns correctness tests, migration compatibility, rollback/restore strategy, and observation criteria before changing a reader or writer. Task 22 consolidates evidence; it does not supply delayed safeguards.
+10. Keep local checks, staging Browser/manual acceptance and authorized production release separate. Production is `main` -> `fatins`; permanent `devs`/`fnd-devs` -> `fatin-test` staging; `demo-fnd-perf` is isolated and non-deployable. Use guarded repository release commands and explicit project routing. This revision authorizes no deployment, commit, push or data deletion.
+11. Choose the smallest implementation that meets a measured user need. Workers, generic schema frameworks, dual writing, operation logs and percentage canaries require justification and actual capability. Preserve all results through paging/search; no hidden collection truncation.
+
 ## Standard fixture sizes
 
 The baseline task may refine these values, but later tasks should keep a stable named fixture:
@@ -63,11 +66,11 @@ The baseline task may refine these values, but later tasks should keep a stable 
 - 200 users with realistic profiles, stats, inventory, spells, and techniques.
 - 1,000 Bazaar items and 500 inventory entries.
 - 500 foes, 500 NPCs, and 2,000 Echi markers.
-- 100 encounters, including one 40-participant encounter and 1,000 log entries.
+- Historical encounter fixture retained for retirement/data-preservation checks only; retained Grigliata initiative/turn/effect journeys replace Combat scaling scenarios.
 - Codex with 20 categories and 5,000 items.
 - Grigliata with 200 placements, 100 x 100 grid, 200 walls, 20 light/darkness sources, 512-1,024 fog tiles, five peers, and 500 library assets.
 
-## Baseline verification observed during this audit
+## Historical baseline observed during the July 2026 audit
 
 - Existing production main JavaScript: 2,652,877 bytes raw, 700,738 bytes gzip, 529,252 bytes Brotli.
 - Existing route-independent async JavaScript: one 7,341-byte chunk.
@@ -76,4 +79,4 @@ The baseline task may refine these values, but later tasks should keep a stable 
 - Production-build verification passed.
 - Functions TypeScript `--noEmit` passed; Functions lint completed with 20 warnings because compiled `lib` output is included in lint scope.
 
-These are directional measurements from the current checkout. Task 01 must regenerate and persist the authoritative baseline.
+These are historical July observations, not current checkout or deployed results. Regenerate compatible evidence through the existing Task 01 harness before claiming gains. The map file sizes were rechecked on 2026-09-05; transfer and visual targets still need measurement.

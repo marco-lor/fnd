@@ -1,6 +1,6 @@
 # Task 18 - Grigliata video and visibility
 
-Depends on Task 17.
+Video lifecycle work depends on Task 07 media contracts, not completion of Task 17. Visibility work requires the lighting ownership decision in Task 21B and agreed input revisions; integrate Task 16/17 changes only where consumed.
 
 ## Outcome
 
@@ -8,7 +8,7 @@ Drive video redraws only when a decoded frame is available and compute one reusa
 
 ## Evidence
 
-- The video loop in `GrigliataBoard.js:2954-2997` can request continuous animation frames and draw the full stage plus individual layers.
+- The video loop in `GrigliataBoard.js` can request continuous animation frames and draw the full stage plus individual layers.
 - Visibility filtering is duplicated between page, board, and lighting consumers.
 - The current geometry can approach `sources x (rays + segments) x segments`; the ray set includes about 256 directions before additional endpoints.
 - Wall/source preprocessing and visibility results are rebuilt on updates that do not always change visibility inputs.
@@ -48,3 +48,11 @@ Drive video redraws only when a decoded frame is available and compute one reusa
 - There is one authoritative visibility implementation consumed by all board/page/lighting paths.
 - An unrelated update performs zero visibility recomputations; a single-source update recomputes only the documented affected set.
 - Worst-case visibility calculation and frame behavior meet the Task 01 budget with golden geometry and privacy tests passing.
+
+## Release units and measurement contract
+
+18A: video lifecycle and layer redraws independently. 18B: canonical geometry/privacy contracts after 21B ownership decision. 18C: measured geometry acceleration after 18B; worker optional.
+
+200 walls / 20 light-dark sources and a named video asset; count callbacks/draws paused, hidden, seeking and playing. Zero idle loops and no full-stage video redraw. Geometry golden fixtures and role transitions must show no hidden-content leak; unrelated updates cause zero geometry recomputation.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.
