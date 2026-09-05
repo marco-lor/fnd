@@ -75,6 +75,10 @@ export const createSelectedSnapshotReader = (store, selector, isEqual = Object.i
 };
 
 const HomeReadStoreContext = createContext(null);
+const NO_HOME_STORE = Object.freeze({
+  getSnapshot: () => null,
+  subscribe: () => () => {},
+});
 
 export const HomeReadStoreProvider = ({ store, children }) => (
   <HomeReadStoreContext.Provider value={store}>
@@ -90,20 +94,20 @@ export const useOptionalHomeReadSelector = (
   isEqual = Object.is
 ) => {
   const store = useOptionalHomeReadStore();
-  const fallbackStore = useMemo(() => ({
-    getSnapshot: () => fallbackValue,
-    subscribe: () => () => {},
-  }), [fallbackValue]);
-  const activeStore = store || fallbackStore;
+  // Local React state is not an external store. A new fallback store per
+  // render makes multiple domain hooks repeatedly schedule consistency checks
+  // against each other's previous snapshots, starving route transitions.
+  const activeStore = store || NO_HOME_STORE;
   const readSelection = useMemo(
     () => createSelectedSnapshotReader(
       activeStore,
-      store ? selector : (value) => value,
+      store ? selector : () => null,
       isEqual
     ),
     [activeStore, isEqual, selector, store]
   );
-  return useSyncExternalStore(activeStore.subscribe, readSelection, readSelection);
+  const selection = useSyncExternalStore(activeStore.subscribe, readSelection, readSelection);
+  return store ? selection : fallbackValue;
 };
 
 export const useHomeReadSelector = (selector, isEqual = Object.is) => {

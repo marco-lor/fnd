@@ -5,9 +5,26 @@ import {
   createSelectedSnapshotReader,
   HomeReadStoreProvider,
   useHomeReadSelector,
+  useOptionalHomeReadSelector,
 } from './homeReadStore';
 
 describe('Home shared read store', () => {
+  test('multiple local fallback selectors settle and still reflect parent updates outside Home', () => {
+    let renders = 0;
+    const Probe = ({value}) => {
+      renders += 1;
+      if (renders > 20) throw new Error('Local fallback selectors entered a render loop');
+      const first = useOptionalHomeReadSelector((state) => state.resources, {value});
+      const second = useOptionalHomeReadSelector((state) => state.progression, {value: value + 1});
+      return <span>{first.value}:{second.value}</span>;
+    };
+    const view = render(<Probe value={1} />);
+    expect(view.getByText('1:2')).toBeInTheDocument();
+    view.rerender(<Probe value={3} />);
+    expect(view.getByText('3:4')).toBeInTheDocument();
+    expect(renders).toBeLessThan(5);
+  });
+
   test('fences stale scope publications and preserves unrelated selector identity', () => {
     const store = createHomeReadStore('player-a:4');
     const readInventory = createSelectedSnapshotReader(

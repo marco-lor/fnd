@@ -8,6 +8,14 @@ jest.mock("../../../data/configRepository", () => ({
 }));
 
 describe("AnimaShardSelection shared-data boundary", () => {
+  test("renders a transport error and leaves retry available", () => {
+    const retry = jest.fn();
+    render(<AnimaShardSelection varieStatus="error" varieError={new Error('Varie unavailable')}
+      onRetry={retry} onAnimaSelect={() => {}} />);
+    expect(screen.getAllByText('Varie unavailable')).toHaveLength(2);
+    screen.getByRole('button', { name: 'Retry' }).click();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     getVarie.mockReset();
     getVarie.mockReturnValue(new Promise(() => {}));

@@ -18,6 +18,8 @@ const SAFE_METADATA_KEYS = new Set([
 ]);
 
 let events = [];
+let changedDocumentDeliveries = new Map();
+let droppedEventCount = 0;
 let metadata = {};
 let activeListeners = new Map();
 let routeState = null;
@@ -254,7 +256,16 @@ export const recordPerfEvent = ({
   unit = 'count',
   tags = {},
 }) => {
-  if (!PERFORMANCE_ENABLED || events.length >= MAX_EVENTS) return;
+  if (!PERFORMANCE_ENABLED) return;
+  if (category === 'firestore' && metric === 'changed-documents-delivered') {
+    const target = redactString(tags.target || 'unknown');
+    changedDocumentDeliveries.set(target,
+      (changedDocumentDeliveries.get(target) || 0) + (Number(value) || 0));
+  }
+  if (events.length >= MAX_EVENTS) {
+    droppedEventCount += 1;
+    return;
+  }
   events.push({
     schemaVersion: EVENT_SCHEMA_VERSION,
     runId: redactString(metadata.runId || 'unassigned'),
@@ -415,6 +426,8 @@ const runtimeSnapshot = () => ({
   schemaVersion: EVENT_SCHEMA_VERSION,
   metadata: { ...metadata },
   events: events.map((event) => ({ ...event, tags: { ...event.tags } })),
+  changedDocumentDeliveries: Object.fromEntries(changedDocumentDeliveries),
+  droppedEventCount,
   activeListeners: Object.fromEntries(activeListeners),
   activeResources: Object.fromEntries(
     Array.from(activeAsyncResources.values()).reduce((counts, resource) => {
@@ -656,6 +669,8 @@ export const installPerformanceRuntime = () => {
   window.__FND_PERF__ = {
     reset(nextMetadata = {}) {
       events = [];
+      changedDocumentDeliveries = new Map();
+      droppedEventCount = 0;
       metadata = Object.fromEntries(
         Object.entries(nextMetadata)
           .filter(([key]) => SAFE_METADATA_KEYS.has(key))
@@ -680,6 +695,8 @@ export const teardownPerformanceRuntimeForTests = () => {
   longTaskObserver?.disconnect();
   longTaskObserver = null;
   events = [];
+  changedDocumentDeliveries = new Map();
+  droppedEventCount = 0;
   metadata = {};
   activeListeners = new Map();
   activeAsyncResources = new Map();

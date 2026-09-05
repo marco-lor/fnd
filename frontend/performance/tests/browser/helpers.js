@@ -1754,7 +1754,7 @@ const collectChangedDocumentDeliveryTelemetryInPage = (targetMetricKey) => {
   const snapshot = window.__FND_PERF__.snapshot();
   const events = Array.isArray(snapshot.events) ? snapshot.events : [];
   return {
-    changedDocumentsDelivered: events
+    changedDocumentsDelivered: snapshot.changedDocumentDeliveries?.[targetMetricKey] ?? events
       .filter((event) => (
         event.category === 'firestore'
         && event.metric === 'changed-documents-delivered'

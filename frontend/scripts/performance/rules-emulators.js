@@ -101,6 +101,7 @@ const runRulesEmulators = async ({
   fsImpl = fs,
   projectId = PERFORMANCE_PROJECT_ID,
   resolvePortableJavaHomeImpl = resolvePortableJavaHome,
+  platform = process.platform,
   spawnSyncImpl = childProcess.spawnSync,
   waitForEmulatorPortsFreeImpl = waitForEmulatorPortsFree,
   withDemoFunctionsEnvironmentImpl = withDemoFunctionsEnvironment,
@@ -125,12 +126,13 @@ const runRulesEmulators = async ({
   );
   fsImpl.mkdirSync(configRoot, {recursive: true});
   const portableJavaHome = resolvePortableJavaHomeImpl();
+  const environmentPaths = platform === 'win32' ? path.win32 : path.posix;
   const childEnvironment = createFirebaseCliEnvironmentImpl(ownedEnvironment, {
     XDG_CONFIG_HOME: configRoot,
     ...(portableJavaHome ? {
       JAVA_HOME: portableJavaHome,
-      PATH: `${path.join(portableJavaHome, 'bin')}`
-        + `${path.delimiter}${environmentPath(ownedEnvironment)}`,
+      PATH: `${environmentPaths.join(portableJavaHome, 'bin')}`
+        + `${environmentPaths.delimiter}${environmentPath(ownedEnvironment)}`,
     } : {}),
   });
 

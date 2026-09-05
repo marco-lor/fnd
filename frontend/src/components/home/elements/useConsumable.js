@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import DiceRoller from '../../common/DiceRoller';
 import {
   commitConsumable,
@@ -334,7 +335,7 @@ const PendingLayer = ({ children, cancellable, onCancel }) => (
   </div>
 );
 
-export const ConsumableActionLayer = ({ controller }) => {
+const ConsumableActionContent = ({ controller }) => {
   const { view } = controller;
   const action = view?.action;
   if (view?.phase === 'rolling' && action?.preparation) {
@@ -396,3 +397,8 @@ export const ConsumableActionLayer = ({ controller }) => {
 };
 
 export default useConsumableAction;
+
+export const ConsumableActionLayer = ({ controller }) => createPortal(
+  <ConsumableActionContent controller={controller} />,
+  document.body
+);

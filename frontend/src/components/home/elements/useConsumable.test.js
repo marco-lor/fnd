@@ -112,7 +112,7 @@ describe('Home consumable action ownership', () => {
     }));
   });
 
-  test('renders authoritative prepared rolls declaratively inside the existing Home tree', async () => {
+  test('portals authoritative prepared rolls outside the clipped Home DOM and cleans up on unmount', async () => {
     jest.useFakeTimers();
     prepareConsumable.mockResolvedValue({
       preparationId: 'preparation-1',
@@ -127,8 +127,8 @@ describe('Home consumable action ownership', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Begin consumption' }));
     await flush();
 
-    expect(view.container).toContainElement(screen.getByText('Dice:'));
-    expect(document.body.children).toHaveLength(1);
+    expect(view.container).not.toContainElement(screen.getByText('Dice:'));
+    expect(document.body).toContainElement(screen.getByText('Dice:'));
     expect(commitConsumable).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -144,6 +144,8 @@ describe('Home consumable action ownership', () => {
       preparationId: 'preparation-1',
       resource: 'hp',
     }));
+    view.unmount();
+    expect(screen.queryByText('Dice:')).not.toBeInTheDocument();
   });
 
   test('deduplicates rapid confirmation into one preparation and one commit', async () => {

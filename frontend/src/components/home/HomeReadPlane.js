@@ -17,10 +17,6 @@ import { createHomeReadStore, HomeReadStoreProvider } from './homeReadStore';
 
 const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_OBJECT = Object.freeze({});
-const HOME_CONFIG_DOCUMENT_IDS = Object.freeze([
-  'varie',
-  ...SPECIAL_PARAM_SCHEMA_IDS,
-]);
 
 const createConfigSlice = ({
   combatCosts = EMPTY_OBJECT,
@@ -63,41 +59,46 @@ export const createHomeConfigOwner = ({
     publish(attempt, createConfigSlice({ status: 'loading', retry }));
 
     const releaseConfigResourceOwner = beginAsyncResourceOwner('home');
-    let request;
-    try {
-      if (invalidateFirst) {
-        HOME_CONFIG_DOCUMENT_IDS.forEach((documentId) => invalidate(documentId));
-      }
-      request = Promise.all([
-        loadVarie(),
-        Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => loadSchema(id))),
-      ]);
-    } catch (error) {
-      request = Promise.reject(error);
-    }
-
-    const currentAttempt = request
-      .then(([varie, schemas]) => {
-        const specialSchemaKeys = Array.from(new Set(schemas.flatMap((schema) => (
-          Object.keys(schema?.Parametri?.Special || {})
-        )))).sort();
-        publish(attempt, createConfigSlice({
+    const read = (loader) => {
+      try { return Promise.resolve(loader()); } catch (error) { return Promise.reject(error); }
+    };
+    let config = createConfigSlice({ status: 'loading', retry });
+    const patchConfig = (patch) => {
+      config = createConfigSlice({ ...config, ...patch });
+      publish(attempt, config);
+    };
+    const schemaRequest = Promise.allSettled(SPECIAL_PARAM_SCHEMA_IDS.map((id) => read(() => {
+      if (invalidateFirst) invalidate(id);
+      return loadSchema(id);
+    }))).then((results) => {
+      const schemas = results.filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value);
+      patchConfig({ specialSchemaKeys: Object.freeze(Array.from(new Set(
+        schemas.flatMap((schema) => Object.keys(schema?.Parametri?.Special || {}))
+      )).sort()) });
+    });
+    // Optional display schemas settle separately: neither rejection nor a
+    // stalled read can disable actions backed by the usable Varie document.
+    const currentAttempt = read(() => {
+      if (invalidateFirst) invalidate('varie');
+      return loadVarie();
+    })
+      .then((varie) => {
+        patchConfig({
           dadiAnimaByLevel: Object.freeze([...(varie?.dadiAnimaByLevel || [])]),
           combatCosts: Object.freeze({ ...(varie?.cost_params_combat || {}) }),
-          specialSchemaKeys: Object.freeze(specialSchemaKeys),
           status: 'fresh',
-          retry,
-        }));
+        });
         return true;
       })
       .catch((error) => {
-        publish(attempt, createConfigSlice({ status: 'error', error, retry }));
+        patchConfig({ status: 'error', error });
         return false;
       })
       .finally(() => {
-        releaseConfigResourceOwner();
         if (inFlight === currentAttempt) inFlight = null;
       });
+    void Promise.allSettled([currentAttempt, schemaRequest]).then(releaseConfigResourceOwner);
     inFlight = currentAttempt;
     return currentAttempt;
   };

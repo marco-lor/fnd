@@ -52,13 +52,16 @@ const StatsBars = () => {
   const resourceRevision = Number.isFinite(Number(userData?.revision))
     ? Number(userData.revision)
     : 0;
-  const optimisticResourceValue = useCallback((resource, authoritativeValue) => {
-    const gestures = Object.values(pendingGestures)
-      .filter((gesture) => gesture.resource === resource && gesture.scopeKey === actionScopeKey);
+  const resourceRevisionRef = useRef(resourceRevision);
+  resourceRevisionRef.current = resourceRevision;
+  const optimisticResourceValue = useCallback((resource, authoritativeValue, excludeId) => {
+    const gestures = Object.values(gestureMetadataRef.current)
+      .filter((gesture) => gesture.resource === resource
+        && gesture.scopeKey === actionScopeRef.current && gesture.id !== excludeId);
     const acknowledgedGesture = gestures
       .filter((gesture) => gesture.phase === 'awaiting-source-ack'
         && Number.isFinite(gesture.newRevision)
-        && gesture.newRevision > resourceRevision)
+        && gesture.newRevision > resourceRevisionRef.current)
       .sort((left, right) => right.newRevision - left.newRevision)[0];
     const unresolvedGesture = gestures.find((gesture) => (
       (gesture.phase === 'committing' || gesture.phase === 'retryable')
@@ -72,7 +75,7 @@ const StatsBars = () => {
     gestures.forEach((gesture) => {
       const metadata = gestureMetadataRef.current[gesture.id] || gesture;
       const phase = metadata.phase || gesture.phase;
-      if (phase === 'active') {
+      if (phase === 'active' || phase === 'queued') {
         visibleValue += gesture.delta;
       }
     });
@@ -82,7 +85,7 @@ const StatsBars = () => {
       return Math.max(0, Math.min(Math.max(0, total), visibleValue));
     }
     return visibleValue;
-  }, [actionScopeKey, pendingGestures, resourceRevision]);
+  }, []);
 
   const clearGestureTimer = (gesture) => {
     if (gesture?.timer) clearInterval(gesture.timer);
@@ -141,9 +144,9 @@ const StatsBars = () => {
     const stats = authoritativeStatsRef.current || {};
     const current = Number(stats.barrieraCurrent ?? stats.barriera ?? 0);
     const total = Number(stats.barrieraTotal ?? stats.barriera ?? 0);
-    const next = current + gesture.delta + gesture.direction;
+    const next = optimisticResourceValue('barriera', current, gesture.id) + gesture.delta + gesture.direction;
     return total > 0 && next >= 0 && next <= total;
-  }, []);
+  }, [optimisticResourceValue]);
   const applyGestureTick = useCallback((gesture) => {
     if (!gesture || activeGestureRef.current?.id !== gesture.id
       || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey
@@ -165,6 +168,33 @@ const StatsBars = () => {
     return true;
   }, [canApplyGestureTick]);
   const commitGesture = useCallback(function commitGesture(gesture, canRetry = true) {
+    const drainQueue = (confirmedValue) => {
+      const next = Object.values(gestureMetadataRef.current).find((candidate) => (
+        candidate.resource === gesture.resource && candidate.phase === 'queued'
+      ));
+      if (!next) return;
+      const stats = authoritativeStatsRef.current || {};
+      const acknowledged = Object.values(gestureMetadataRef.current)
+        .filter((candidate) => candidate.resource === next.resource
+          && candidate.phase === 'awaiting-source-ack'
+          && candidate.newRevision > resourceRevisionRef.current)
+        .sort((left, right) => right.newRevision - left.newRevision)[0];
+      const baseline = Number.isFinite(confirmedValue) ? confirmedValue
+        : Number(acknowledged?.newValue ?? stats[`${next.resource}Current`] ?? stats[next.resource] ?? 0);
+      if (next.resource === 'barriera') {
+        const total = Math.max(0, Number(stats.barrieraTotal ?? stats.barriera ?? 0));
+        next.delta = Math.max(0, Math.min(total, baseline + next.delta)) - baseline;
+      }
+      if (next.delta === 0) {
+        discardGesture(next);
+        drainQueue(baseline);
+        return;
+      }
+      next.phase = 'committing';
+      next.frozenValue = baseline + next.delta;
+      updateGesture(next, {phase: next.phase, frozenValue: next.frozenValue, delta: next.delta});
+      commitGesture(next);
+    };
     executeResourceMutation({
       resource: gesture.resource,
       mode: 'delta',
@@ -180,14 +210,21 @@ const StatsBars = () => {
       const newRevision = Number(result?.newRevision);
       if (Number.isFinite(newValue) && Number.isFinite(newRevision)) {
         gesture.phase = 'awaiting-source-ack';
+        gesture.newValue = newValue;
+        gesture.newRevision = newRevision;
         gestureMetadataRef.current[gesture.id] = gesture;
         updateGesture(gesture, {phase: 'awaiting-source-ack', newValue, newRevision});
+        drainQueue(newValue);
         return;
       }
       discardGesture(gesture);
+      drainQueue(newValue);
     }).catch((error) => {
       if (!mountedRef.current || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey || lifecycleRef.current.generation !== gesture.lifecycleGeneration) return;
-      if (isDefinitiveUserDataCommandError(error)) discardGesture(gesture);
+      if (isDefinitiveUserDataCommandError(error)) {
+        discardGesture(gesture);
+        drainQueue();
+      }
       else if (canRetry) {
         // A transport failure may have committed after the response path broke.
         // Reuse the exact operation ID once so the receipt prevents a second write.
@@ -219,7 +256,8 @@ const StatsBars = () => {
     const currentField = {
       hp: 'hpCurrent', mana: 'manaCurrent', essenza: 'essenzaCurrent', barriera: 'barrieraCurrent',
     }[gesture.resource];
-    const currentValue = Number(stats[currentField] ?? (gesture.resource === 'barriera' ? stats.barriera : 0));
+    const currentValue = optimisticResourceValue(gesture.resource,
+      stats[currentField] ?? (gesture.resource === 'barriera' ? stats.barriera : 0), gesture.id);
     if (gesture.resource === 'barriera') {
       const total = Math.max(0, Number(stats.barrieraTotal ?? stats.barriera ?? 0));
       gesture.delta = Math.max(0, Math.min(total, currentValue + gesture.delta)) - currentValue;
@@ -235,12 +273,18 @@ const StatsBars = () => {
       discardGesture(gesture);
       return;
     }
-    gesture.phase = 'committing';
+    // Only one command per resource can be unresolved. Later gestures remain
+    // optimistic, then use the preceding receipt as their confirmed baseline.
+    const waiting = Object.values(gestureMetadataRef.current).some((candidate) => (
+      candidate.id !== gesture.id && candidate.resource === gesture.resource
+      && (candidate.phase === 'committing' || candidate.phase === 'retryable')
+    ));
+    gesture.phase = waiting ? 'queued' : 'committing';
     gesture.frozenValue = currentValue + gesture.delta;
     gestureMetadataRef.current[gesture.id] = gesture;
-    updateGesture(gesture, {phase: 'committing', frozenValue: gesture.frozenValue});
-    commitGesture(gesture);
-  }, [commitGesture, discardGesture, updateGesture]);
+    updateGesture(gesture, {phase: gesture.phase, frozenValue: gesture.frozenValue, delta: gesture.delta});
+    if (!waiting) commitGesture(gesture);
+  }, [commitGesture, discardGesture, optimisticResourceValue, updateGesture]);
   const retryableGesture = Object.values(pendingGestures).find((gesture) => gesture.phase === 'retryable'
     && gesture.scopeKey === actionScopeKey);
   const retryUnresolvedGesture = useCallback(() => {

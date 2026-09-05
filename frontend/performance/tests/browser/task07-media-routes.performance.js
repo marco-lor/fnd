@@ -101,6 +101,13 @@ for (const scenario of manifest.scenarios) {
       }
       expect(errors).toEqual([]);
 
+      if (scenario.id === 'task07-home-media') {
+        const inventoryWindow = require('./home-inventory-window');
+        await inventoryWindow.assertInitialHomeInventoryWindow(page);
+        expect(media.total).toBeLessThanOrEqual(61);
+        await inventoryWindow.assertRemainingHomeInventoryAccessible(page);
+      }
+
       if (scenario.id === 'task07-grigliata-media') {
         await page.waitForFunction(() => (
           typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'

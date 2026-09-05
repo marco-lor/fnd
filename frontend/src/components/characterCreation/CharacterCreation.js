@@ -628,6 +628,9 @@ function CharacterCreation() {
             retryKey: `character-race:${user.uid}:${race}`,
             retryScope: `character-creation:${currentNavigationScope}:race`,
           });
+          // Selecting a race resets Anima_1 on the server, even when the
+          // wizard retains the same visible Anima selection on a revisit.
+          if (isCurrentTransition()) selectionMutationProofRef.current.anima = null;
         }
         if (
           !componentMountedRef.current

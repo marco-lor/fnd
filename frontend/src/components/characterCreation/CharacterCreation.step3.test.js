@@ -979,4 +979,33 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
     await waitFor(() => expect(screen.queryByText(/Character creation failed/)).not.toBeInTheDocument());
     expect(mockNavigate).not.toHaveBeenCalledWith("/home");
   });
+
+  test('resaves the retained Anima after a different race resets it on the server', async () => {
+    resolveSharedData();
+    let serverAnima = '---';
+    mockUpdateCharacterCreation.mockImplementation(async (request) => {
+      if (request.action === 'selectRace') serverAnima = '---';
+      if (request.action === 'selectAnima') serverAnima = request.anima;
+    });
+    renderCharacterCreation();
+    await screen.findByRole('button', { name: 'Choose race' });
+    fireEvent.click(screen.getByRole('button', { name: 'Choose race' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('button', { name: 'Choose anima' });
+    fireEvent.click(screen.getByRole('button', { name: 'Choose anima' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('heading', { name: 'Points Distribution' });
+    expect(serverAnima).toBe('fire');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByRole('button', { name: 'Choose anima' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByRole('button', { name: 'Choose other race' });
+    fireEvent.click(screen.getByRole('button', { name: 'Choose other race' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('button', { name: 'Choose anima' });
+    expect(screen.getByTestId('selected-anima-state')).toHaveTextContent('fire');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('heading', { name: 'Points Distribution' });
+    expect(serverAnima).toBe('fire');
+  });
 });

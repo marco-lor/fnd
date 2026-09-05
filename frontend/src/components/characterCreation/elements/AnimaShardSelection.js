@@ -28,7 +28,8 @@ function AnimaShardSelection({
     : effectiveStatus === "malformed"
       ? "Anima shard data format is incorrect in the database."
       : effectiveStatus === "error"
-        ? varieError || "Failed to fetch anima shard data."
+        ? (typeof varieError === 'string' ? varieError : varieError?.message)
+          || "Failed to fetch anima shard data."
         : "";
 
   const handleAnimaSelect = (animaName, bonuses) => {

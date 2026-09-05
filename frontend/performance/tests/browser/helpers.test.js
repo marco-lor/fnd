@@ -953,6 +953,19 @@ test('reads compact changed-document telemetry without returning the event histo
   }
 });
 
+test('uses delivery totals when the bounded detailed event history is full', async () => {
+  const previousWindow = global.window;
+  global.window = {__FND_PERF__: {snapshot: () => ({
+    changedDocumentDeliveries: {[GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY]: 12},
+    events: Array.from({length: 50_000}, () => ({category: 'konva', metric: 'draw'})),
+  })}};
+  try {
+    assert.deepEqual(await readChangedDocumentDeliveryTelemetry({
+      evaluate: async (callback, argument) => callback(argument),
+    }, GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY), {changedDocumentsDelivered: 12, eventCount: 50_000});
+  } finally { global.window = previousWindow; }
+});
+
 test('reads a compact route cleanup summary and omits unrelated route state', async () => {
   const previousWindow = global.window;
   global.window = {

@@ -177,6 +177,74 @@ describe('StatsBars resource gestures', () => {
     }));
   });
 
+  test('keeps consecutive clicks optimistic while serializing their acknowledgements', async () => {
+    const first = deferred();
+    const second = deferred();
+    updateResource.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    useResources.mockReturnValue(withResourceRevision(8, 10));
+    const { rerender } = render(<StatsBars />);
+    const decrement = screen.getByTitle('-1 HP');
+    fireEvent.click(decrement);
+    fireEvent.click(decrement);
+    expect(hpValue()).toBe('6/10');
+    expect(updateResource).toHaveBeenCalledTimes(1);
+    // The first snapshot may precede its callable response.
+    useResources.mockReturnValue(withResourceRevision(7, 11));
+    rerender(<StatsBars />);
+    expect(hpValue()).toBe('6/10');
+    await act(async () => { first.resolve({newValue: 7, newRevision: 11}); });
+    expect(updateResource).toHaveBeenCalledTimes(2);
+    expect(hpValue()).toBe('6/10');
+    useResources.mockReturnValue(withResourceRevision(6, 12));
+    rerender(<StatsBars />);
+    expect(hpValue()).toBe('6/10');
+    await act(async () => { second.resolve({newValue: 6, newRevision: 12}); });
+    expect(hpValue()).toBe('6/10');
+  });
+
+  test('rebases all queued clicks after a definitive failure', async () => {
+    const first = deferred();
+    const second = deferred();
+    const third = deferred();
+    updateResource.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise);
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    render(<StatsBars />);
+    const decrement = screen.getByTitle('-1 HP');
+    fireEvent.click(decrement);
+    fireEvent.click(decrement);
+    fireEvent.click(decrement);
+    expect(hpValue()).toBe('5/10');
+    await act(async () => { first.reject({code: 'invalid-argument'}); });
+    expect(hpValue()).toBe('6/10');
+    expect(updateResource).toHaveBeenCalledTimes(2);
+    await act(async () => { second.resolve({newValue: 7, newRevision: 1}); });
+    expect(hpValue()).toBe('6/10');
+    expect(updateResource).toHaveBeenCalledTimes(3);
+    await act(async () => { third.resolve({newValue: 6, newRevision: 2}); });
+    expect(hpValue()).toBe('6/10');
+    errorLog.mockRestore();
+  });
+
+  test('holds queued clicks through ambiguous retries and drops them on scope invalidation', async () => {
+    const retry = deferred();
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    updateResource.mockRejectedValueOnce(new Error('transport')).mockReturnValueOnce(retry.promise);
+    const { rerender } = render(<StatsBars />);
+    const decrement = screen.getByTitle('-1 HP');
+    fireEvent.click(decrement);
+    fireEvent.click(decrement);
+    await act(async () => {});
+    expect(hpValue()).toBe('6/10');
+    expect(updateResource).toHaveBeenCalledTimes(2);
+    expect(updateResource.mock.calls[1][0].operationId).toBe(updateResource.mock.calls[0][0].operationId);
+    useAuthSession.mockReturnValue({user: {uid: 'user-2'}, repositoryAccessGeneration: 1});
+    rerender(<StatsBars />);
+    await act(async () => { retry.resolve({newValue: 7, newRevision: 1}); });
+    expect(updateResource).toHaveBeenCalledTimes(2);
+    expect(hpValue()).toBe('8/10');
+    errorLog.mockRestore();
+  });
+
   test('batches a two-second hold into its eleven optimistic ticks and one exact delta', async () => {
     render(<StatsBars />);
     const decrement = screen.getByTitle('-1 HP');

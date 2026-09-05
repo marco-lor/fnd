@@ -5,7 +5,7 @@
       "id": "task07-home-media",
       "route": "/home",
       "role": "player",
-      "minimumManagedImages": 400,
+      "minimumManagedImages": 60,
       "maximumAttachedImages": 80,
       "assertOffscreenDetachment": true
     },

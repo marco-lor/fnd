@@ -171,6 +171,22 @@ describe('Home config read ownership', () => {
     await waitFor(() => expect(screen.getByTestId('config-state')).toHaveTextContent('fresh:,d8'));
   });
 
+  test('keeps usable Varie available when optional schemas fail or remain pending', async () => {
+    const delayedSchema = deferred();
+    getSchema.mockRejectedValueOnce(new Error('schema unavailable'))
+      .mockReturnValueOnce(delayedSchema.promise);
+    render(<HomeReadPlane uid="player-a" repositoryAccessGeneration={4}>
+      <ConfigProbe /><ConfirmationHarness />
+    </HomeReadPlane>);
+    await waitFor(() => expect(latestConfig.status).toBe('fresh'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open confirmation' }));
+    expect(await screen.findByText('1d6')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Conferma/ })).not.toBeDisabled();
+    await act(async () => delayedSchema.resolve({ Parametri: { Special: { Dodge: {} } } }));
+    await waitFor(() => expect(latestConfig.specialSchemaKeys).toContain('Dodge'));
+    expect(latestConfig.status).toBe('fresh');
+  });
+
   test('ignores late completion from a replaced actor and repository generation', async () => {
     const oldVarie = deferred();
     const currentVarie = deferred();
