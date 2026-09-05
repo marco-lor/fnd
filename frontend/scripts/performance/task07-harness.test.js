@@ -347,6 +347,51 @@ test('rules emulator owner injects the demo Functions environment and propagates
   assert.equal(calls.at(-1)[1].includes(9499), true);
 });
 
+for (const [platform, javaHome, inheritedPath, expectedPath] of [
+  ['win32', 'C:\\portable-java', 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+    'C:\\portable-java\\bin;C:\\Windows\\System32;C:\\Program Files\\nodejs'],
+  ['linux', '/portable-java', '/usr/local/bin:/usr/bin', '/portable-java/bin:/usr/local/bin:/usr/bin'],
+]) test(`rules emulator child preserves inherited PATH behind portable Java on ${platform}`, async () => {
+  const captured = [];
+  await runRulesEmulators({
+    argv: ['--task08-only'],
+    assertEmulatorPortsFreeImpl: async () => {},
+    env: {
+      Path: inheritedPath,
+      KEEP_ME: 'inherited-value',
+    },
+    firebaseCli: 'firebase-cli.js',
+    fsImpl: {
+      existsSync: () => true,
+      mkdirSync: () => {},
+    },
+    platform,
+    resolvePortableJavaHomeImpl: () => javaHome,
+    spawnSyncImpl: (_command, _args, options) => {
+      captured.push(options.env);
+      return {status: 0};
+    },
+    waitForEmulatorPortsFreeImpl: async () => {},
+    withDemoFunctionsEnvironmentImpl: async (operation) => operation(),
+    withEmulatorPortCleanupImpl: async (operation, options) => {
+      try {
+        return await operation();
+      } finally {
+        await options.waitForPorts();
+      }
+    },
+  });
+
+  assert.equal(captured.length, 1);
+  const pathEntries = Object.entries(captured[0])
+    .filter(([key]) => key.toLowerCase() === 'path');
+  assert.deepEqual(pathEntries, [[
+    'PATH',
+    expectedPath,
+  ]]);
+  assert.equal(captured[0].KEEP_ME, 'inherited-value');
+});
+
 test('Task 07 soak requires three to five cycles', () => {
   assert.equal(resolveTask07SoakCycles(), 3);
   assert.equal(resolveTask07SoakCycles('3'), 3);
@@ -689,9 +734,10 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
   assert.notEqual(end, -1);
   const gate = workflow.slice(start, end);
   const commands = [
-    'npm run test:task07',
+    'npm --prefix functions ci',
     'npm --prefix functions run lint',
     'npm --prefix functions run build',
+    'npm run test:task07',
     'node --test --test-concurrency=1 functions/test/*.test.js',
     'npm run perf:check-media-boundaries',
     'rules-emulators.js --task07-only',

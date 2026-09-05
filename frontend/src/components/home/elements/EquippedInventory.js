@@ -6,8 +6,7 @@ import {
   LazyConfirmUseConsumableModal as ConfirmUseConsumableModal,
   LazyItemDetailsModal as ItemDetailsModal,
 } from './lazyHomeFeatures';
-// Utility (not a React hook) renamed locally to avoid hook lint rule triggering.
-import consumeConsumable from './useConsumable';
+import { ConsumableActionLayer, useConsumableAction } from './useConsumable';
 import {
   useEquipment,
   useInventory,
@@ -15,14 +14,13 @@ import {
   useResources,
 } from '../../../data/userData/userDataHooks';
 import { setEquipment } from '../../../data/userData/userDataCommands';
-import { stableDataJson } from '../../../data/userData/stableDataJson';
-import { buildAvailableEquipmentInventory } from './equipmentInventoryProjection';
 import MediaImage from '../../common/MediaImage';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
 import {
   collectInventoryCatalogItemIds,
-  resolveInventoryCatalogMediaList,
 } from '../../../data/inventoryCatalogProjection';
+import { useHomeInventoryProjection } from '../homeInventoryProjection';
+import { usePerformanceRenderProbe } from '../../../performance/PerformanceProfiler';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
@@ -72,8 +70,39 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
+const selectPresence = (data) => data !== null;
+
+const HomeConsumableConfirmation = ({
+  controller,
+  equipmentMutationsReady,
+  item,
+  onCancel,
+  onComplete,
+  user,
+}) => {
+  const { data: progression } = useProgression(user?.uid);
+  const { data: resources } = useResources(user?.uid);
+  const userData = useMemo(() => ({
+    ...(progression || {}),
+    ...(resources || {}),
+    stats: { ...(progression?.stats || {}), ...(resources?.stats || {}) },
+  }), [progression, resources]);
+  return (
+    <ConfirmUseConsumableModal
+      item={item}
+      userData={userData}
+      onCancel={onCancel}
+      onConfirm={(mode) => {
+        if (!user || !equipmentMutationsReady) return;
+        if (controller.begin({ item, mode })) onComplete();
+      }}
+    />
+  );
+};
+
 const EquippedInventory = () => {
-  const { user } = useAuthSession();
+  usePerformanceRenderProbe('EquippedInventory');
+  const { user, repositoryAccessGeneration = 0 } = useAuthSession();
   const {
     data: equipment,
     status: equipmentStatus,
@@ -90,15 +119,15 @@ const EquippedInventory = () => {
   );
   const { itemsById: catalogItemsById } = useCatalogItemsById(catalogItemIds);
   const {
-    data: progression,
+    data: progressionPresent,
     status: progressionStatus,
     uid: progressionUid,
-  } = useProgression(user?.uid);
+  } = useProgression(user?.uid, selectPresence);
   const {
-    data: resources,
+    data: resourcesPresent,
     status: resourcesStatus,
     uid: resourcesUid,
-  } = useResources(user?.uid);
+  } = useResources(user?.uid, selectPresence);
   const equipmentReady = equipmentStatus === 'fresh'
     && equipment !== null
     && equipmentUid === user?.uid;
@@ -106,75 +135,37 @@ const EquippedInventory = () => {
     && inventoryData !== null
     && inventoryUid === user?.uid;
   const progressionReady = progressionStatus === 'fresh'
-    && progression !== null
+    && Boolean(progressionPresent)
     && progressionUid === user?.uid;
   const resourcesReady = resourcesStatus === 'fresh'
-    && resources !== null
+    && Boolean(resourcesPresent)
     && resourcesUid === user?.uid;
   const equipmentMutationsReady = equipmentReady && inventoryReady && progressionReady && resourcesReady;
-  const inventory = useMemo(
-    () => resolveInventoryCatalogMediaList(inventoryData || [], catalogItemsById),
-    [catalogItemsById, inventoryData]
-  );
-  const inventoryById = useMemo(() => Object.fromEntries(inventory.map((entry) => [
-    entry?._task05?.inventoryId || entry?._instance?.instanceId,
-    entry,
-  ]).filter(([id]) => id)), [inventory]);
-  const equipped = useMemo(() => {
-    const candidates = [...inventory];
-    const usedIds = new Set();
-    const comparableSnapshot = (entry) => {
-      if (!entry || typeof entry !== 'object') return entry;
-      const snapshot = { ...entry };
-      delete snapshot._instance;
-      delete snapshot._task05;
-      delete snapshot.qty;
-      delete snapshot.quantity;
-      return snapshot;
-    };
-    const resolveEntry = (value) => {
-      if (typeof value === 'string') return inventoryById[value] || value;
-      if (!value || typeof value !== 'object') return value;
-      const requestedId = value?._instance?.instanceId;
-      if (requestedId && inventoryById[requestedId]) return inventoryById[requestedId];
-      const serialized = stableDataJson(comparableSnapshot(value));
-      let candidate = candidates.find((entry) => {
-        const id = entry?._task05?.inventoryId || entry?._instance?.instanceId;
-        return !usedIds.has(id) && stableDataJson(comparableSnapshot(entry)) === serialized;
-      });
-      if (!candidate) {
-        const catalogId = value.id || value.itemId;
-        candidate = candidates.find((entry) => {
-          const id = entry?._task05?.inventoryId || entry?._instance?.instanceId;
-          return !usedIds.has(id) && (entry.id === catalogId || entry.itemId === catalogId);
-        });
-      }
-      const resolvedId = candidate?._task05?.inventoryId || candidate?._instance?.instanceId;
-      if (resolvedId) usedIds.add(resolvedId);
-      return candidate || value;
-    };
-    return Object.fromEntries(Object.entries(
-      equipment?.slots || equipment?.equipped || {}
-    ).map(([slot, value]) => [slot, resolveEntry(value)]));
-  }, [equipment, inventory, inventoryById]);
-  const userData = useMemo(() => ({
-    ...(progression || {}),
-    ...(resources || {}),
-    stats: { ...(progression?.stats || {}), ...(resources?.stats || {}) },
-  }), [progression, resources]);
+  const inventoryProjection = useHomeInventoryProjection({
+    inventory: inventoryData,
+    equipment,
+    catalogItemsById,
+  });
+  const { availableEquipment: expandedAvailable, equipped, inventory } = inventoryProjection;
+  const consumableController = useConsumableAction({
+    inventory,
+    mutationsReady: equipmentMutationsReady,
+    repositoryAccessGeneration,
+    user,
+  });
   const [activeSlot, setActiveSlot] = useState(null);
   const [loading, setLoading] = useState(false);
   // Full item specifics now come from user's inventory/equipped entries directly
   const [previewItem, setPreviewItem] = useState(null); // item object to show in details modal
   const [confirmUse, setConfirmUse] = useState(null); // { slotKey, itemDoc }
-  const [usingConsumable, setUsingConsumable] = useState(false);
+  const usingConsumable = consumableController.isBusy;
   const [equipError, setEquipError] = useState('');
 
   useEffect(() => {
     setActiveSlot(null);
     setConfirmUse(null);
     setPreviewItem(null);
-  }, [user?.uid]);
+  }, [repositoryAccessGeneration, user?.uid]);
 
   const executeEquipmentMutation = useCallback(({ slot, inventoryId }) => {
     if (!equipmentMutationsReady) {
@@ -274,7 +265,6 @@ const EquippedInventory = () => {
 
   // Build available inventory by exact instance identity. Catalog IDs remain a
   // compatibility fallback only for unresolved legacy equipment values.
-  const expandedAvailable = buildAvailableEquipmentInventory({ inventory, equipped });
 
   // Inventory consumables (for unlimited belt case: slotCintura === 99)
   const inventoryConsumables = React.useMemo(() => {
@@ -412,6 +402,9 @@ const EquippedInventory = () => {
     if (!label) return <div />;
   const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
+    const itemName = typeof item === 'string'
+      ? item
+      : (itemDoc?.General?.Nome || itemDoc?.displayName || itemDoc?.name || itemDoc?.id || label);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
     const blocked = (isDisabledByTwoH(slotKey) && !item) || !equipmentMutationsReady;
     return (
@@ -425,7 +418,7 @@ const EquippedInventory = () => {
             if (blocked) return;
             item ? handleUnequip(slotKey) : openEquipModal(slotKey)
           }}
-          title={blocked ? 'Bloccato: arma a due mani equipaggiata nell\'altra mano' : (item ? `Click to unequip ${item.name || item}` : `Equip ${label}`)}
+          title={blocked ? 'Bloccato: arma a due mani equipaggiata nell\'altra mano' : (item ? `Click to unequip ${itemName}` : `Equip ${label}`)}
         >
           {item ? (
             <div className="h-10 w-10 mb-1 rounded-lg overflow-hidden border border-indigo-400/40 bg-slate-900/40 shadow-inner">
@@ -434,7 +427,7 @@ const EquippedInventory = () => {
                 mediaPurpose="item"
                 src={imgUrl || ''}
                 variant="thumbnail"
-                alt={typeof item === 'string' ? item : (item.name || item?.General?.Nome || item.id)}
+                alt={itemName}
                 width={40}
                 height={40}
                 sizes="40px"
@@ -456,7 +449,7 @@ const EquippedInventory = () => {
           )}
       {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (item) : (item.name || item?.General?.Nome || item.id))}</span>
+        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{itemName}</span>
             </div>
           )}
           {item && itemDoc && (
@@ -675,29 +668,16 @@ const EquippedInventory = () => {
         <ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
       )}
       {confirmUse && confirmUse.itemDoc && equipmentMutationsReady && (
-        <ConfirmUseConsumableModal
+        <HomeConsumableConfirmation
+          controller={consumableController}
+          equipmentMutationsReady={equipmentMutationsReady}
           item={confirmUse.itemDoc}
-          userData={userData}
           onCancel={() => setConfirmUse(null)}
-          onConfirm={async (mode) => {
-            // mode can be 'hp' or 'mana'
-            if (!user || !equipmentMutationsReady) return;
-            setUsingConsumable(true);
-            try {
-              await consumeConsumable({
-                user,
-                item: confirmUse.itemDoc,
-                mode, // regen target
-              });
-            } catch (e) {
-              console.error('Errore uso consumabile', e);
-            } finally {
-              setUsingConsumable(false);
-              setConfirmUse(null);
-            }
-          }}
+          onComplete={() => setConfirmUse(null)}
+          user={user}
         />
       )}
+      <ConsumableActionLayer controller={consumableController} />
     </div>
   );
 };

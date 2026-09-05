@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthSession } from '../../../AuthContext';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
@@ -12,10 +12,10 @@ import {
 } from '../../../data/media/mediaConsumerAdapter';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import useObjectUrl from '../../common/useObjectUrl';
+import { recordTask08Event } from '../../../performance/task08';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
 import {
 	collectInventoryCatalogItemIds,
-	resolveInventoryCatalogMediaList,
 } from '../../../data/inventoryCatalogProjection';
 import {
 	useEquipment,
@@ -28,7 +28,14 @@ import {
 	isDefinitiveUserDataCommandError,
 	mutateInventory,
 } from '../../../data/userData/userDataCommands';
-import { resolveEquippedInventoryIds } from './equipmentInventoryProjection';
+import {
+	createHomeInventoryProjection,
+	filterHomeInventoryItems,
+	HOME_INVENTORY_INITIAL_WINDOW,
+	inventoryWindow,
+	useHomeInventoryProjection,
+} from '../homeInventoryProjection';
+import { usePerformanceRenderProbe } from '../../../performance/PerformanceProfiler';
 
 const inventoryDocumentId = (entry, index) => (
 	entry?._task05?.inventoryId
@@ -38,84 +45,14 @@ const inventoryDocumentId = (entry, index) => (
 );
 
 export const buildInventoryView = (inventory, equipment, catalogItemsById = {}) => {
-	const inv = resolveInventoryCatalogMediaList(
-		Array.isArray(inventory) ? inventory : [],
-		catalogItemsById
-	);
-	const equippedValues = Object.values(equipment?.slots || equipment?.equipped || {}).filter(Boolean);
-	const equippedInventoryIds = resolveEquippedInventoryIds({
-		inventory: inv,
-		equipped: Object.fromEntries(equippedValues.map((value, index) => [index, value])),
-	});
-
-	const nonVarieInstances = [];
-	const varieMap = {};
-	inv.forEach((entry, index) => {
-		if (!entry) return;
-		const baseId = typeof entry === 'string'
-			? entry
-			: entry.id || entry.name || entry?.General?.Nome || `item-${index}`;
-		const baseName = typeof entry === 'string'
-			? entry
-			: entry?.General?.Nome || entry.name || baseId;
-		const type = typeof entry === 'string' ? '' : (entry.type || entry.item_type || '').toLowerCase();
-		const rarity = typeof entry === 'object' ? entry.rarity : undefined;
-		const quantity = typeof entry === 'object' && typeof entry.qty === 'number'
-			? Math.max(1, entry.qty)
-			: 1;
-		const stableInventoryId = inventoryDocumentId(entry, index);
-		const docObj = typeof entry === 'object' ? { ...entry, id: baseId } : null;
-		const equipped = equippedInventoryIds.has(stableInventoryId);
-		if (type === 'varie') {
-			if (!varieMap[baseId]) {
-				varieMap[baseId] = {
-					id: baseId,
-					name: baseName,
-					qty: 0,
-					rarity,
-					type: 'varie',
-					doc: docObj,
-					instances: [],
-					isEquipped: false,
-				};
-			}
-				varieMap[baseId].qty += quantity;
-			varieMap[baseId].instances.push({
-				inventoryId: stableInventoryId,
-				legacyIndex: entry?._task05?.legacyIndex,
-				quantity,
-				doc: docObj,
-			});
-			varieMap[baseId].isEquipped = varieMap[baseId].isEquipped || equipped;
-			return;
-		}
-		for (let ordinal = 0; ordinal < quantity; ordinal += 1) {
-			nonVarieInstances.push({
-				id: baseId,
-				name: baseName,
-				rarity,
-				type: type || 'oggetto',
-				doc: docObj,
-				invIndex: index,
-				inventoryId: stableInventoryId,
-				legacyIndex: entry?._task05?.legacyIndex,
-				isEquipped: equipped,
-			});
-		}
-	});
-	const seenCounts = {};
-	const numberedNonVarie = nonVarieInstances.map((item) => {
-		const count = (seenCounts[item.id] = (seenCounts[item.id] || 0) + 1);
-		return { ...item, displayName: count > 1 ? `${item.name} (${count})` : item.name };
-	});
-	return {
-		items: [...numberedNonVarie, ...Object.values(varieMap)],
-	};
+	const projection = createHomeInventoryProjection({ inventory, equipment, catalogItemsById });
+	return { items: projection.items };
 };
 
 // Simple inventory browser to occupy the right column
 // Shows a searchable, grouped list of items in user's inventory
 const Inventory = () => {
+	usePerformanceRenderProbe('Inventory');
 	const { user, repositoryAccessGeneration = 0 } = useAuthSession();
 	const task07MediaOperationOwner = useTask07MediaOperationOwner();
 	const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
@@ -132,11 +69,11 @@ const Inventory = () => {
 	const { itemsById: catalogItemsById } = useCatalogItemsById(catalogItemIds);
 	const { data: equipment } = useEquipment(user?.uid);
 	const {
-		data: resources,
+		data: resourcesGold,
 		status: resourcesStatus,
-	} = useResources(user?.uid);
+	} = useResources(user?.uid, (data) => data?.stats?.gold ?? 0);
 	const resourcesCommandsReady = resourcesStatus === 'fresh'
-		&& resources !== null;
+		&& resourcesGold !== null;
 	const inventoryCommandsReady = inventoryStatus === 'fresh'
 		&& inventory !== null;
 	const executeInventoryMutation = (payload, retryKey = null) => mutateInventory({
@@ -149,16 +86,27 @@ const Inventory = () => {
 		delta,
 		...(retryKey ? { retryKey } : {}),
 	});
-	const { items } = useMemo(
-		() => buildInventoryView(inventory, equipment, catalogItemsById),
-		[inventory, equipment, catalogItemsById]
-	);
+	const inventoryProjection = useHomeInventoryProjection({
+		inventory,
+		equipment,
+		catalogItemsById,
+	});
+	const { items, searchItems } = inventoryProjection;
 	const [q, setQ] = useState('');
+	const deferredQ = useDeferredValue(q);
+	const [windowState, setWindowState] = useState({
+		query: '',
+		items: searchItems,
+		count: HOME_INVENTORY_INITIAL_WINDOW,
+	});
 	const [previewItem, setPreviewItem] = useState(null);
 	const [previewScopeKey, setPreviewScopeKey] = useState(null);
-	const gold = typeof resources?.stats?.gold === 'number'
-		? resources.stats.gold
-		: parseInt(resources?.stats?.gold, 10) || 0;
+	const parsedGold = typeof resourcesGold === 'string'
+		? parseInt(resourcesGold, 10)
+		: Number.NaN;
+	const gold = typeof resourcesGold === 'number' && Number.isFinite(resourcesGold)
+		? resourcesGold
+		: (Number.isFinite(parsedGold) ? parsedGold : 0);
 	const [busyId, setBusyId] = useState(null);
 	const [confirmTarget, setConfirmTarget] = useState(null); // { id, name }
 	// gold adjustment overlay state
@@ -391,11 +339,40 @@ const Inventory = () => {
 		}
 	};
 
-	const filtered = items.filter(it =>
-		!q || it.name?.toLowerCase().includes(q.toLowerCase()) || it.type?.toLowerCase().includes(q.toLowerCase())
+	const filtered = useMemo(
+		() => filterHomeInventoryItems(searchItems, deferredQ),
+		[deferredQ, searchItems]
 	);
-	const varieList = filtered.filter(it => (it.type || '').toLowerCase() === 'varie');
-	const otherList = filtered.filter(it => (it.type || '').toLowerCase() !== 'varie');
+	const visibleCount = windowState.query === deferredQ && windowState.items === searchItems
+		? windowState.count
+		: HOME_INVENTORY_INITIAL_WINDOW;
+	const visibleWindow = useMemo(
+		() => inventoryWindow(filtered, visibleCount),
+		[filtered, visibleCount]
+	);
+	const visibleItems = visibleWindow.visibleItems;
+	const filterMeasurement = useMemo(() => ({
+		inputCount: items.length,
+		filteredCount: filtered.length,
+		queryLength: deferredQ.trim().length,
+		query: deferredQ.trim(),
+		mountedCount: visibleItems.length,
+		firstItemId: inventoryDocumentId(filtered[0], 0),
+		lastItemId: inventoryDocumentId(filtered[filtered.length - 1], filtered.length - 1),
+	}), [deferredQ, filtered, items.length, visibleItems.length]);
+	const filterMeasurementKey = JSON.stringify(filterMeasurement);
+	const committedFilterMeasurementRef = useRef(null);
+	useEffect(() => {
+		if (committedFilterMeasurementRef.current === filterMeasurementKey) return;
+		committedFilterMeasurementRef.current = filterMeasurementKey;
+		recordTask08Event({
+			metric: 'inventory-filter-result',
+			value: filterMeasurement.filteredCount,
+			tags: filterMeasurement,
+		});
+	}, [filterMeasurement, filterMeasurementKey]);
+	const varieList = visibleItems.filter(it => (it.type || '').toLowerCase() === 'varie');
+	const otherList = visibleItems.filter(it => (it.type || '').toLowerCase() !== 'varie');
 
 	return (
 		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl px-5 pt-5 pb-4 shadow-lg h-full flex flex-col">
@@ -439,7 +416,15 @@ const Inventory = () => {
 				<FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
 				<input
 					value={q}
-					onChange={e => setQ(e.target.value)}
+					onChange={e => {
+						const nextQuery = e.target.value;
+						setQ(nextQuery);
+						setWindowState({
+							query: nextQuery,
+							items: searchItems,
+							count: HOME_INVENTORY_INITIAL_WINDOW,
+						});
+					}}
 					placeholder="Cerca nome o tipo…"
 					className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-800/60 border border-slate-600/50 text-slate-200 placeholder-slate-400 focus:outline-none focus:border-slate-400"
 				/>
@@ -457,7 +442,7 @@ const Inventory = () => {
 							    const display = it.displayName || it.name;
 							    const key = `${it.id}-${it.invIndex ?? 'x'}-${idx}`;
 									return (
-											<li key={key} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
+							<li data-home-inventory-row="true" key={key} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
 									{hasMediaAsset(docObj, { fallbackSrc: imgUrl, variant: 'thumbnail' }) && (
 										<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
 											<MediaImage
@@ -521,7 +506,7 @@ const Inventory = () => {
 										const docObj = it.doc || it;
 										const imgUrl = docObj?.image_url;
 										return (
-											<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
+											<li data-home-inventory-row="true" key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
 												{hasMediaAsset(docObj, { fallbackSrc: imgUrl, variant: 'thumbnail' }) && (
 													<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
 														<MediaImage
@@ -562,6 +547,20 @@ const Inventory = () => {
 					</div>
 				) : (
 					<div className="text-slate-400 text-sm">Inventario vuoto.</div>
+				)}
+				{visibleWindow.hasMore && (
+					<button
+						type="button"
+						className="mt-4 w-full rounded-lg border border-indigo-400/40 px-3 py-2 text-sm font-medium text-indigo-200 hover:bg-indigo-500/10"
+						onClick={() => setWindowState({
+							query: deferredQ,
+							items: searchItems,
+							count: visibleCount + HOME_INVENTORY_INITIAL_WINDOW,
+						})}
+						aria-label={`Load more inventory items, ${visibleWindow.totalCount - visibleItems.length} remaining`}
+					>
+						Load more
+					</button>
 				)}
 			</div>
 

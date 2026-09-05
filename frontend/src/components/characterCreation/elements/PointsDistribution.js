@@ -1,14 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthSession } from '../../../AuthContext';
 import { useProgression } from '../../../data/userData/userDataHooks';
-import { getVarie } from '../../../data/configRepository';
-import { spendCharacterPoint } from '../../../data/userData/userDataCommands';
+import {
+  isDefinitiveUserDataCommandError,
+  spendCharacterPoint,
+} from '../../../data/userData/userDataCommands';
 import {
   runWithDurableOperationIntent,
 } from '../../../data/functions/backendOperationIntentStore';
 
-export default function PointsDistribution() {
-  const { user } = useAuthSession();
+const isRecord = (value) => (
+  value !== null
+  && typeof value === 'object'
+  && !Array.isArray(value)
+);
+
+export default function PointsDistribution({
+  varieData,
+  varieStatus,
+  varieError,
+  onRetry,
+  disabled = false,
+  onBusyChange,
+}) {
+  const {
+    user,
+    repositoryAccessGeneration = 0,
+  } = useAuthSession() || {};
   const { data: progression } = useProgression(user?.uid);
 
   // Base stats state
@@ -21,16 +39,38 @@ export default function PointsDistribution() {
   const [combStats, setCombStats] = useState(null);
   const [combatTokensAvailable, setCombatTokensAvailable] = useState(0);
   const [combatTokensSpent, setCombatTokensSpent] = useState(0);
-  const [combatStatCosts, setCombatStatCosts] = useState(null);
   const [cooldown, setCooldown] = useState(false); // cooldown state for button clicks
+  const controlsDisabledRef = useRef(Boolean(disabled));
+  const pointChangeBusyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pointScope = `${user?.uid || ''}:${repositoryAccessGeneration}`;
+  const pointScopeRef = useRef(pointScope);
+  const previousPointScopeRef = useRef(pointScope);
+  if (pointScopeRef.current !== pointScope) {
+    pointScopeRef.current = pointScope;
+    pointChangeBusyRef.current = false;
+  }
+  controlsDisabledRef.current = Boolean(disabled);
+  const combatStatCosts = isRecord(varieData?.cost_params_combat)
+    ? varieData.cost_params_combat
+    : {};
+  const effectiveVarieStatus = varieStatus || (varieData ? 'ready' : 'missing');
 
-  // Load combat cost table
   useEffect(() => {
-    (async () => {
-      const data = await getVarie() || {};
-      setCombatStatCosts(data.cost_params_combat || {});
-    })();
-  }, []);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      onBusyChange?.(false);
+    };
+  }, [onBusyChange]);
+
+  useEffect(() => {
+    if (previousPointScopeRef.current === pointScope) return;
+    previousPointScopeRef.current = pointScope;
+    pointChangeBusyRef.current = false;
+    setCooldown(false);
+    onBusyChange?.(false);
+  }, [onBusyChange, pointScope]);
 
   // Sync initial from context
   useEffect(() => {
@@ -53,6 +93,7 @@ export default function PointsDistribution() {
       actorUid: user.uid,
       kind: 'spend-character-point',
       intent: payload,
+      isDefinitiveError: isDefinitiveUserDataCommandError,
       invoke: (operationId) => spendCharacterPoint({
         ...payload,
         operationId,
@@ -68,6 +109,7 @@ export default function PointsDistribution() {
       actorUid: user.uid,
       kind: 'spend-character-point',
       intent: payload,
+      isDefinitiveError: isDefinitiveUserDataCommandError,
       invoke: (operationId) => spendCharacterPoint({
         ...payload,
         operationId,
@@ -115,11 +157,11 @@ export default function PointsDistribution() {
                   <td className="px-4 py-3 font-medium text-white">{name}</td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center space-x-2">
-                      <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus || cooldown} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canMinus || cooldown ? 'cursor-not-allowed' : ''}`}>
+                      <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus || cooldown || disabled} aria-busy={disabled || undefined} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canMinus || cooldown || disabled ? 'cursor-not-allowed' : ''}`}>
                         -
                       </button>
                       <span className="mx-2 font-mono w-6 text-center">{base}</span>
-                      <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus || cooldown} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canPlus || cooldown ? 'cursor-not-allowed' : ''}`}>
+                      <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus || cooldown || disabled} aria-busy={disabled || undefined} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canPlus || cooldown || disabled ? 'cursor-not-allowed' : ''}`}>
                         +
                       </button>
                     </div>
@@ -140,18 +182,61 @@ export default function PointsDistribution() {
 
   // generic change router
   const handleChange = useCallback((stat, delta, type) => {
-    if (cooldown) return; // prevent clicks during cooldown
+    if (
+      controlsDisabledRef.current
+      || pointChangeBusyRef.current
+      || cooldown
+    ) return; // prevent same-tick and rendered-state duplicate clicks
+    pointChangeBusyRef.current = true;
     setCooldown(true);
+    const operationScope = pointScope;
     const action = type === 'Base'
       ? handleBaseChange(stat, delta)
       : handleCombChange(stat, delta);
-    action.catch(err => console.error('Error changing stat:', err))
-          .finally(() => setTimeout(() => setCooldown(false), 500));
-  }, [cooldown, handleBaseChange, handleCombChange]);
+    Promise.resolve(action).catch(err => console.error('Error changing stat:', err))
+      .finally(() => {
+        pointChangeBusyRef.current = false;
+        if (!mountedRef.current || pointScopeRef.current !== operationScope) return;
+        setCooldown(false);
+        onBusyChange?.(false);
+      });
+    onBusyChange?.(true);
+  }, [cooldown, handleBaseChange, handleCombChange, onBusyChange, pointScope]);
+
+  if (effectiveVarieStatus === 'loading') {
+    return (
+      <div role="status" aria-live="polite" className="text-white/70 py-6">
+        Loading combat configuration...
+      </div>
+    );
+  }
+
+  if (effectiveVarieStatus === 'error') {
+    return (
+      <div className="text-red-300 py-6" role="status" aria-live="polite">
+        <div>{varieError?.message || 'Failed to fetch combat configuration.'}</div>
+        {typeof onRetry === 'function' && (
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={disabled}
+            className="mt-4 px-4 py-2 bg-blue-700 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
       <h2 className="text-xl font-semibold text-[#D4AF37] mb-4" style={{ textShadow: "0 0 8px rgba(255,215,0,0.4)" }}>Points Distribution</h2>
+      {(effectiveVarieStatus === 'missing' || effectiveVarieStatus === 'malformed') && (
+        <div role="status" className="mb-4 text-amber-200">
+          Combat cost configuration is {effectiveVarieStatus === 'missing' ? 'missing' : 'malformed'}; standard zero-cost fallback is in use.
+        </div>
+      )}
       
       <div className="flex flex-col md:flex-row md:gap-6">
         <div className="flex-1 mb-6 md:mb-0">
@@ -179,7 +264,7 @@ export default function PointsDistribution() {
               </div>
             </div>
           </div>
-          {renderTable(combStats, combatStatCosts||{}, combatTokensAvailable, combatTokensSpent, 'Combat')}
+          {renderTable(combStats, combatStatCosts, combatTokensAvailable, combatTokensSpent, 'Combat')}
         </div>
       </div>
     </div>

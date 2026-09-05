@@ -730,6 +730,27 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
+  test('retains delivery totals after detailed telemetry fills and resets both together', () => {
+    const runtime = loadRuntime(true);
+    runtime.installPerformanceRuntime();
+    try {
+      for (let index = 0; index < 50_000; index += 1) {
+        runtime.recordPerfEvent({category: 'konva', metric: 'draw'});
+      }
+      runtime.recordPerfEvent({category: 'firestore', metric: 'changed-documents-delivered', value: 2,
+        tags: {target: 'placements'}});
+      const snapshot = window.__FND_PERF__.snapshot();
+      expect(snapshot.events).toHaveLength(50_000);
+      expect(snapshot.changedDocumentDeliveries).toEqual({placements: 2});
+      expect(snapshot.droppedEventCount).toBeGreaterThan(0);
+      window.__FND_PERF__.reset();
+      expect(window.__FND_PERF__.snapshot().changedDocumentDeliveries).toEqual({});
+      expect(window.__FND_PERF__.snapshot().droppedEventCount).toBe(0);
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+    }
+  });
+
   test('keeps asynchronously-created startup resources under a leased shell owner', () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'shell-lease-test', actorRole: 'anonymous' };

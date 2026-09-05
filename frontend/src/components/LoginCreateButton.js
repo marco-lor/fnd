@@ -1,16 +1,20 @@
-import React from "react";
+import React, { useState } from "react";
+import PerformanceProfiler from "../performance/PerformanceProfiler";
 
-function LoginCreateButton({ handleCreate, isCreatingAccount, isCreateHovered, setIsCreateHovered }) {
+function LoginCreateButton({ handleCreate, isCreatingAccount, disabled = false }) {
+  const [isCreateHovered, setIsCreateHovered] = useState(false);
+
   return (
-    <div className="relative my-6 flex justify-center items-center h-40">
-      <button
-        type="button"
-        onClick={handleCreate}
-        className="relative w-20 h-20 rounded-full overflow-visible cursor-pointer focus:outline-none disabled:opacity-70"
-        onMouseEnter={() => setIsCreateHovered(true)}
-        onMouseLeave={() => setIsCreateHovered(false)}
-        disabled={isCreatingAccount}
-      >
+    <PerformanceProfiler id="LoginCreateButton">
+      <div className="relative my-6 flex justify-center items-center h-40">
+        <button
+          type="button"
+          onClick={handleCreate}
+          className="relative w-20 h-20 rounded-full overflow-visible cursor-pointer focus:outline-none disabled:opacity-70"
+          onMouseEnter={() => setIsCreateHovered(true)}
+          onMouseLeave={() => setIsCreateHovered(false)}
+          disabled={disabled || isCreatingAccount}
+        >
         {/* Base liquid metal cloud */}
         <div
           className="absolute inset-0"
@@ -146,9 +150,10 @@ function LoginCreateButton({ handleCreate, isCreatingAccount, isCreateHovered, s
             "Create"
           )}
         </div>
-      </button>
-    </div>
+        </button>
+      </div>
+    </PerformanceProfiler>
   );
 }
 
-export default LoginCreateButton;
+export default React.memo(LoginCreateButton);

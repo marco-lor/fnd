@@ -16,6 +16,7 @@ const {
   resultsDir,
   writeJson,
 } = require('./common');
+const { sourceTreeIdentity: collectSourceTreeIdentity } = require('./task08-report');
 
 const buildDir = path.join(frontendRoot, 'build');
 const requiredChunks = JSON.parse(fs.readFileSync(
@@ -134,6 +135,7 @@ const loginForbiddenPatterns = [
   /components[\\/]foesHub[\\/]/i,
   /components[\\/]admin[\\/]/i,
   /components[\\/]bazaar[\\/]elements[\\/]add/i,
+  /data[\\/]userData[\\/]userDataCommands\.(?:js|ts)$/i,
   /node_modules[\\/]firebase[\\/]storage/i,
   /node_modules[\\/]firebase[\\/]functions/i,
   /node_modules[\\/](?:react-)?konva[\\/]/i,
@@ -141,6 +143,12 @@ const loginForbiddenPatterns = [
 const loginModuleViolations = loginModules.filter((moduleName) => (
   loginForbiddenPatterns.some((pattern) => pattern.test(moduleName))
 ));
+if (loginModuleViolations.length) {
+  throw new Error(
+    'Task 08 Login asset contract failed: user-data command code or another '
+    + `forbidden module entered the Login chunks (${loginModuleViolations.join(', ')}).`
+  );
+}
 
 const assets = walk(buildDir)
   .filter((filePath) => !filePath.endsWith('.map'))
@@ -203,6 +211,7 @@ const report = {
   generatedAt: new Date().toISOString(),
   buildMode: 'performance',
   projectId,
+  sourceTreeIdentity: collectSourceTreeIdentity(),
   sourceMapsPresent: walk(buildDir).some((filePath) => filePath.endsWith('.map')),
   instrumentationMarkerPresent: walk(buildDir)
     .filter((filePath) => filePath.endsWith('.js'))

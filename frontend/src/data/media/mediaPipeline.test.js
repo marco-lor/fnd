@@ -302,6 +302,28 @@ describe('Task 07 server-authoritative media orchestration', () => {
     ]);
   });
 
+  test('does not repeat target preparation for a resumed retained media operation', async () => {
+    const harness = createHarness({
+      prepareResult: {
+        ok: true,
+        replay: true,
+        state: 'attached',
+        sourcePresent: true,
+        upload: uploadPlan,
+      },
+      status: attachedStatus,
+    });
+    const prepareEntity = jest.fn();
+
+    await runWithHarness(harness, {prepareEntity, resume: true});
+
+    expect(prepareEntity).not.toHaveBeenCalled();
+    expect(harness.order).toEqual([
+      TASK07_MEDIA_CALLABLES.prepare,
+      TASK07_MEDIA_CALLABLES.status,
+    ]);
+  });
+
   test('does not abandon after an ambiguous server attachment attempt', async () => {
     const harness = createHarness({ failAt: 'attach' });
     await expect(runWithHarness(harness)).rejects.toMatchObject({

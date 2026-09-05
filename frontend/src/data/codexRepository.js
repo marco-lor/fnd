@@ -73,3 +73,5 @@ export const patchCodex = async (fields) => {
   invalidate(CODEX_GET_INSTANCE_KEY);
   return result;
 };
+
+export const invalidateCodex = () => invalidate(CODEX_GET_INSTANCE_KEY);

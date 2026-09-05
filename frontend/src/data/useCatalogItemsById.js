@@ -4,6 +4,10 @@ import {
   CATALOG_ITEM_QUERY_MAX_IDS,
   subscribeCatalogItems,
 } from './catalogItemRepository';
+import {
+  useOptionalHomeReadSelector,
+  useOptionalHomeReadStore,
+} from '../components/home/homeReadStore';
 
 export const CATALOG_ITEM_QUERY_STARTUP_CONCURRENCY = 4;
 
@@ -142,6 +146,7 @@ const emptyState = (scopeKey = null, status = 'idle') => ({
 
 export const useCatalogItemsById = (itemIds) => {
   const { user, repositoryAccessGeneration = 0 } = useAuthSession();
+  const homeStore = useOptionalHomeReadStore();
   const normalizedIdsKey = JSON.stringify(normalizeCatalogItemIds(itemIds));
   const normalizedIds = useMemo(
     () => JSON.parse(normalizedIdsKey),
@@ -156,6 +161,7 @@ export const useCatalogItemsById = (itemIds) => {
   const [state, setState] = useState(() => emptyState());
 
   useEffect(() => {
+    if (homeStore) return undefined;
     if (!scopeKey) {
       setState(emptyState());
       return undefined;
@@ -252,16 +258,25 @@ export const useCatalogItemsById = (itemIds) => {
       cancelQueuedSubscriptions();
       startedSubscriptions.forEach((cancel) => cancel());
     };
-  }, [normalizedIds, scopeKey, startupScopeKey]);
+  }, [homeStore, normalizedIds, scopeKey, startupScopeKey]);
 
   const visibleState = state.scopeKey === scopeKey
     ? state
     : (scopeKey ? emptyState(scopeKey, 'loading') : emptyState());
-  return {
+  const localResult = {
     itemsById: visibleState.itemsById,
     status: visibleState.status,
     error: visibleState.error,
   };
+  return useOptionalHomeReadSelector(
+    (homeState) => homeState.catalog,
+    localResult,
+    (left, right) => (
+      left.itemsById === right.itemsById
+      && left.status === right.status
+      && left.error === right.error
+    )
+  );
 };
 
 export default useCatalogItemsById;

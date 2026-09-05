@@ -1,5 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import { FiGlobe, FiBookOpen, FiBriefcase } from 'react-icons/fi';
+import { usePerformanceRenderProbe } from '../../../performance/PerformanceProfiler';
 
 // Shallow + nested (for livello/descrizione objects) equality check
 const areSubObjectsEqual = (a, b) => {
@@ -54,6 +55,7 @@ const Badge = ({ children, color = 'emerald' }) => {
 };
 
 const ExtraComponent = ({ lingue, conoscenze, professioni, variant = 'stack' }) => {
+  usePerformanceRenderProbe('Extra');
   const sortedLingue = useMemo(() => (
     lingue ? Object.entries(lingue).sort(([a],[b]) => a.localeCompare(b,'it',{sensitivity:'base'})) : []
   ), [lingue]);

@@ -94,6 +94,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     await expect(page.getByRole('heading', { name: 'Inventario' })).toBeVisible();
     await page.waitForTimeout(750);
 
+    await require('./home-inventory-window').assertInitialHomeInventoryWindow(page);
     const inventoryMedia = await page.evaluate(() => {
       const heading = Array.from(document.querySelectorAll('h2'))
         .find((node) => node.textContent?.trim() === 'Inventario');
@@ -103,7 +104,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
       while (
         container
         && container !== document.body
-        && container.querySelectorAll('img[data-media-state]').length < 200
+        && container.querySelectorAll('[data-home-inventory-row]').length === 0
       ) {
         container = container.parentElement;
       }
@@ -139,8 +140,8 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
       };
     });
 
-    expect(inventoryMedia.total).toBeGreaterThanOrEqual(400);
-    expect(inventoryMedia.farOffscreen).toBeGreaterThan(300);
+    expect(inventoryMedia.total).toBe(60);
+    expect(inventoryMedia.farOffscreen).toBeGreaterThan(0);
     expect(inventoryMedia.farOffscreenAttached).toBe(0);
     expect(inventoryMedia.attached).toBeLessThan(80);
     expect(inventoryMedia.dimensionsMissing).toBe(0);
@@ -189,6 +190,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     expect(failedRequests).toEqual([]);
     expect(unhandledErrors).toEqual([]);
 
+    await require('./home-inventory-window').assertRemainingHomeInventoryAccessible(page);
     writeScenarioResult(TASK07_MEDIA_SHELL_SCENARIO, 1, {
       environment: {
         projectName: testInfo.project.name,

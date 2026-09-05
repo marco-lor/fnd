@@ -7,6 +7,7 @@ const { frontendRoot, resultsDir, writeJson } = require('./common');
 const buildDirectory = path.join(frontendRoot, 'build');
 const forbiddenContentTokens = Object.freeze([
   '__FND_PERF__',
+  '__FND_PERF_TASK08__',
   '__FND_PERF_BENCHMARKS__',
   '__FND_PERF_BOOTSTRAP__',
   '__FND_FIRESTORE_PERSISTENCE_EXPERIMENT__',

@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { FaTimes } from 'react-icons/fa';
 import { GiDrinkMe } from 'react-icons/gi';
+import { useHomeReadSelector } from '../homeReadStore';
 
 // Confirmation dialog for using a consumable. If both HP & Mana regeneration are available, user chooses.
 // mode selection passed to parent on confirm.
-import { getVarie } from '../../../data/configRepository';
 
 const LEVEL_THRESHOLDS = [1,4,7,10];
 const resolveLevelKey = (userLevel) => {
@@ -14,8 +14,21 @@ const resolveLevelKey = (userLevel) => {
   return '1';
 };
 
+const selectHomeConfig = (state) => state.config;
+
+export const resolveAnimaFaces = (dadiAnimaByLevel, userLevel) => {
+  const dice = Array.isArray(dadiAnimaByLevel) ? dadiAnimaByLevel : [];
+  const numericLevel = Math.max(1, Math.trunc(Number(userLevel) || 1));
+  const label = dice[numericLevel] ?? dice[dice.length - 1];
+  const match = /^d(\d+)$/i.exec(typeof label === 'string' ? label.trim() : '');
+  if (!match) return null;
+  const faces = Number.parseInt(match[1], 10);
+  return Number.isInteger(faces) && faces > 0 ? faces : null;
+};
+
 const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
   const [mode, setMode] = useState(null); // 'hp' | 'mana'
+  const homeConfig = useHomeReadSelector(selectHomeConfig);
   // Removed unused state (rolling/pendingMeta/finalTotal) to satisfy ESLint no-unused-vars.
 
   // Extract regen dice counts based on Parametri.Special fields for current level logic is handled upstream (we receive full item doc).
@@ -49,32 +62,10 @@ const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
   // When only one regeneration type exists, preselect automatically.
   useEffect(() => { if (singleMode) setMode(singleMode); }, [singleMode]);
 
-  // Fetch anima die faces once (same logic as useConsumable) for preview.
-  const [animaFaces, setAnimaFaces] = useState(null);
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const varie = await getVarie();
-        if (varie) {
-          const arr = varie.dadiAnimaByLevel || [];
-          const level = Number(userData?.stats?.level || 1);
-            const diceTypeStr = arr[level] || arr[arr.length - 1];
-            if (diceTypeStr && /^d\d+$/i.test(diceTypeStr)) {
-              const parsed = parseInt(diceTypeStr.replace(/^d/i, ''), 10);
-              if (!Number.isNaN(parsed) && mounted) setAnimaFaces(parsed);
-            } else if (mounted) {
-              setAnimaFaces(10);
-            }
-        } else if (mounted) {
-          setAnimaFaces(10);
-        }
-      } catch {
-        if (mounted) setAnimaFaces(10);
-      }
-    })();
-    return () => { mounted = false; };
-  }, [userData?.stats?.level]);
+  const animaFaces = resolveAnimaFaces(
+    homeConfig.dadiAnimaByLevel,
+    userData?.stats?.level
+  );
 
   // Compute dice count for selected mode based on actual player level.
   const levelKey = resolveLevelKey(Number(userData?.stats?.level || 1));
@@ -101,6 +92,11 @@ const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
   const formulaText = mode && diceCountForMode && animaFaces
     ? `${diceCountForMode}d${animaFaces}${bonusAdd ? `+${bonusAdd}` : ''}`
     : null;
+  const configLoading = !noRegen && homeConfig.status === 'loading';
+  const configFailed = !noRegen && homeConfig.status === 'error';
+  const configInvalid = !noRegen && homeConfig.status === 'fresh' && !animaFaces;
+  const regenerationReady = homeConfig.status === 'fresh' && Boolean(animaFaces);
+  const confirmationDisabled = noRegen ? false : (!mode || !regenerationReady);
 
   return (
     <div className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
@@ -130,16 +126,42 @@ const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
           )}
           {/* Removed obsolete regen summary text per request */}
           {/* Formula preview matching DiceRoller description */}
-          {(!noRegen && mode) && (
+          {!noRegen && (
             <div className="mt-2 text-xs">
-              {formulaText ? (
+              {configLoading ? (
+                <div
+                  role="status"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-2 text-slate-400"
+                >
+                  Caricamento configurazione Dado Anima…
+                </div>
+              ) : (configFailed || configInvalid) ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-red-700/60 bg-red-950/30 px-3 py-2 text-red-200"
+                >
+                  <span>
+                    {configFailed
+                      ? 'Impossibile caricare la configurazione Dado Anima.'
+                      : 'Nessun dado Anima valido disponibile.'}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Riprova configurazione consumabile"
+                    onClick={() => homeConfig.retry?.()}
+                    className="ml-3 rounded-md border border-red-500/60 px-2 py-1 text-[11px] text-red-100 hover:bg-red-900/40"
+                  >
+                    Riprova
+                  </button>
+                </div>
+              ) : formulaText ? (
                 <div className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/70 px-3 py-2 font-mono text-slate-200">
                   <span>{formulaText}</span>
                   <span className="text-[10px] text-slate-400">{bonusAdd ? `Bonus ${bonusCreazione}x${diceCountForMode}=${bonusAdd}` : 'Nessun bonus'}</span>
                 </div>
               ) : (
                 <div className="inline-flex items-center gap-2 rounded-lg border border-slate-700/60 bg-slate-800/50 px-3 py-2 text-slate-400">
-                  {animaFaces == null ? 'Caricamento formula…' : 'Nessun dado disponibile'}
+                  {mode ? 'Nessun dado disponibile' : 'Seleziona cosa rigenerare'}
                 </div>
               )}
             </div>
@@ -152,8 +174,8 @@ const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
             >Annulla</button>
             <button
               onClick={() => { onConfirm(noRegen ? null : mode); }}
-              disabled={!mode && !noRegen}
-              className={`px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-medium shadow ${(!mode && !noRegen) ? 'bg-slate-700/60 text-slate-400 cursor-not-allowed' : 'bg-gradient-to-r from-emerald-600 to-green-600 text-white hover:opacity-95'}`}
+              disabled={confirmationDisabled}
+              className={`px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-medium shadow ${confirmationDisabled ? 'bg-slate-700/60 text-slate-400 cursor-not-allowed' : 'bg-gradient-to-r from-emerald-600 to-green-600 text-white hover:opacity-95'}`}
             ><GiDrinkMe className="w-3 h-3" /> Conferma</button>
           </div>
         </div>

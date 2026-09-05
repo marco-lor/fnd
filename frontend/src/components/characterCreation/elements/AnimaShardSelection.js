@@ -1,95 +1,65 @@
-import React, { useState, useEffect } from "react";
-import { getVarie } from '../../../data/configRepository';
+import React from "react";
 
-function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
-  // Local state for anima shards
-  const [animaShards, setAnimaShards] = useState({});
-  const [levelUpBonuses, setLevelUpBonuses] = useState({});
-  const [loadingAnima, setLoadingAnima] = useState(true);
-  const [error, setError] = useState("");
+const isRecord = (value) => (
+  value !== null
+  && typeof value === "object"
+  && !Array.isArray(value)
+);
 
-  // Fetch anima shards data from Firestore
-  useEffect(() => {
-    const fetchAnimaData = async () => {
-      setLoadingAnima(true);
-      setError("");
-      try {
-        const varieData = await getVarie();
-        if (varieData) {
-          
-          // Get initial anima bonuses
-          if (varieData && varieData.modAnima) {
-            setAnimaShards(varieData.modAnima);
-            console.log("Anima shards loaded successfully:", varieData.modAnima);
-          } else {
-            console.log("'modAnima' field is missing or not an object.");
-            setAnimaShards({});
-            setError("Anima shard data format is incorrect in the database.");
-          }
-          
-          // Get level up anima bonuses
-          if (varieData && varieData.levelUpAnimaBonus) {
-            setLevelUpBonuses(varieData.levelUpAnimaBonus);
-            console.log("Level up bonuses loaded successfully:", varieData.levelUpAnimaBonus);
-          } else {
-            console.log("'levelUpAnimaBonus' field is missing or not an object.");
-            setLevelUpBonuses({});
-          }
-          
-        } else {
-          console.log("Varie document ('/utils/varie') not found in Firestore.");
-          setAnimaShards({});
-          setLevelUpBonuses({});
-          setError("Could not find the Anima Shard configuration in the database.");
-        }
-      } catch (error) {
-        console.error("Error fetching anima shards:", error);
-        setError(`Failed to fetch anima shard data: ${error.message}`);
-        setAnimaShards({});
-        setLevelUpBonuses({});
-      } finally {
-        setLoadingAnima(false);
-      }
-    };
+function AnimaShardSelection({
+  onAnimaSelect,
+  selectedAnima,
+  varieData,
+  varieStatus,
+  varieError,
+  onRetry,
+  disabled = false,
+}) {
+  const effectiveStatus = varieStatus || (varieData ? "ready" : "missing");
+  const animaShards = effectiveStatus === "ready" && isRecord(varieData?.modAnima)
+    ? varieData.modAnima
+    : {};
+  const levelUpBonuses = isRecord(varieData?.levelUpAnimaBonus)
+    ? varieData.levelUpAnimaBonus
+    : {};
 
-    if (user) {
-      fetchAnimaData();
-    } else {
-      setLoadingAnima(false);
-    }
-  }, [user]);
+  const error = effectiveStatus === "missing"
+    ? "Could not find the Anima Shard configuration in the database."
+    : effectiveStatus === "malformed"
+      ? "Anima shard data format is incorrect in the database."
+      : effectiveStatus === "error"
+        ? (typeof varieError === 'string' ? varieError : varieError?.message)
+          || "Failed to fetch anima shard data."
+        : "";
 
-  // Function to handle anima shard selection
   const handleAnimaSelect = (animaName, bonuses) => {
-    const levelUpBonus = levelUpBonuses[animaName] || {};
-    onAnimaSelect({ 
-      name: animaName, 
-      bonuses: bonuses,
-      levelUpBonus: levelUpBonus 
+    const levelUpBonus = isRecord(levelUpBonuses[animaName])
+      ? levelUpBonuses[animaName]
+      : {};
+    onAnimaSelect({
+      name: animaName,
+      bonuses,
+      levelUpBonus,
     });
   };
 
-  // Function to format parameter bonuses for display
-  const formatBonuses = (bonuses) => {
-    return Object.entries(bonuses).map(([param, value]) => (
+  const formatBonuses = (bonuses) => (
+    Object.entries(isRecord(bonuses) ? bonuses : {}).map(([param, value]) => (
       <span key={param} className="block">
         <span className="font-medium text-yellow-300">{param}:</span> +{value}
       </span>
-    ));
-  };
+    ))
+  );
 
-  // Function to render the anima shard selection area
   const renderAnimaSelection = () => {
-    // Show loading state while fetching anima shards
-    if (loadingAnima) {
+    if (effectiveStatus === "loading") {
       return (
         <div className="col-span-full text-center py-6 text-white/60">
           Loading anima shards...
         </div>
       );
     }
-    
-    // Show error or 'no anima shards' message if fetching failed or no shards found
+
     if (Object.keys(animaShards).length === 0) {
       return (
         <div className="col-span-full text-center py-6 text-red-400">
@@ -97,32 +67,32 @@ function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
         </div>
       );
     }
-    
-    // Render the anima shard cards
+
     return Object.entries(animaShards).map(([animaName, bonuses]) => {
-      const levelBonus = levelUpBonuses[animaName] || {};
-      
+      const levelBonus = isRecord(levelUpBonuses[animaName])
+        ? levelUpBonuses[animaName]
+        : {};
+
       return (
-        <div
+        <button
+          type="button"
           key={animaName}
-          // Apply conditional styling based on selection state
           className={`p-4 rounded-lg cursor-pointer transition-all duration-300 text-left h-full flex flex-col ${
             selectedAnima?.name === animaName
               ? 'bg-blue-700/70 border-2 border-blue-400 shadow-[0_0_10px_rgba(100,150,255,0.7)] scale-105'
               : 'bg-[rgba(40,40,60,0.7)] border border-[rgba(150,150,255,0.2)] hover:bg-[rgba(60,60,80,0.7)] hover:scale-102'
           }`}
-          onClick={() => handleAnimaSelect(animaName, bonuses)}
+          onClick={() => {
+            if (!disabled) handleAnimaSelect(animaName, bonuses);
+          }}
+          disabled={disabled}
+          aria-busy={disabled || undefined}
         >
-          {/* Anima Shard Title */}
           <h3 className="text-lg font-semibold text-[#D4AF37] mb-2">{animaName}</h3>
-          
-          {/* Initial Bonuses */}
           <div className="text-white/80 text-sm mb-3">
             <p className="mb-1 font-medium text-blue-300">Initial Bonuses:</p>
             {formatBonuses(bonuses)}
           </div>
-          
-          {/* Level Up Bonuses */}
           <div className="text-white/80 text-sm mt-auto pt-2 border-t border-white/20">
             <p className="mb-1 font-medium text-green-300">Level Up Bonus:</p>
             {Object.keys(levelBonus).length > 0 ? (
@@ -134,7 +104,7 @@ function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
               This bonus is applied each time you level up.
             </p>
           </div>
-        </div>
+        </button>
       );
     });
   };
@@ -145,19 +115,26 @@ function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
         Select Your Anima Shard
       </label>
       <p className="text-white/70 text-sm mb-4 text-left">
-        Each Anima Shard grants different parameter bonuses that will shape your character's abilities, 
+        Each Anima Shard grants different parameter bonuses that will shape your character's abilities,
         and provides additional bonuses each time you level up. Choose wisely based on your preferred playstyle.
       </p>
-      {/* Grid for anima shard cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {renderAnimaSelection()}
       </div>
-      
-      {/* Error Display Area */}
-      {error && !loadingAnima && Object.keys(animaShards).length === 0 && (
+      {error && effectiveStatus !== "loading" && Object.keys(animaShards).length === 0 && (
         <div className="w-full mt-4 p-3 bg-red-900/60 border border-red-700 rounded text-white text-sm shadow-md">
           {error}
         </div>
+      )}
+      {effectiveStatus === "error" && typeof onRetry === "function" && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={disabled}
+          className="mt-4 px-4 py-2 bg-blue-700 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
+        >
+          Retry
+        </button>
       )}
     </div>
   );

@@ -56,13 +56,16 @@ test('Task 07 media shell renders and stays dormant cross-browser', async ({
         .filter(([key]) => key.endsWith('::catalog.items-batch.subscribe.v1'))
         .reduce((total, [, count]) => total + Number(count || 0), 0),
     }));
-    expect(shell.managedImages).toBeGreaterThanOrEqual(400);
+    await require('./home-inventory-window').assertInitialHomeInventoryWindow(page);
+    expect(shell.managedImages).toBeGreaterThanOrEqual(60);
+    expect(shell.managedImages).toBeLessThanOrEqual(61);
     expect(shell.catalogListeners).toBeGreaterThan(0);
     expect(shell.catalogListeners).toBeLessThanOrEqual(50);
     expect(shell.meteorSlots).toBe(2);
     expect(shell.activeMeteors).toBe(0);
     expect(shell.audioNodes).toBeLessThanOrEqual(4);
     expect(shell.activeAudioSources).toBe(0);
+    await require('./home-inventory-window').assertRemainingHomeInventoryAccessible(page);
     expect(errors).toEqual([]);
   } finally {
     await drainPageConnections(page).catch(() => {});

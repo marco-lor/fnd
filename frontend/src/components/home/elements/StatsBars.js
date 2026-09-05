@@ -1,14 +1,21 @@
 // file: ./frontend/src/components/home/elements/StatsBars.js
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuthSession } from '../../../AuthContext';
 import { useResources } from '../../../data/userData/userDataHooks';
-import { updateResource } from '../../../data/userData/userDataCommands';
+import {
+  createUserOperationId,
+  isDefinitiveUserDataCommandError,
+  updateResource,
+} from '../../../data/userData/userDataCommands';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
 import { FaRedo, FaBan } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
+import { usePerformanceRenderProbe } from '../../../performance/PerformanceProfiler';
+import { getTask08ResourceHoldId, recordTask08Event } from '../../../performance/task08';
 
 const StatsBars = () => {
+  usePerformanceRenderProbe('StatsBars');
   const { user, repositoryAccessGeneration = 0 } = useAuthSession();
   const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
   const actionScopeRef = useRef(actionScopeKey);
@@ -19,7 +26,22 @@ const StatsBars = () => {
   } = useResources(user?.uid);
   const mutationsReady = resourcesStatus === 'fresh'
     && userData !== null;
+  const lifecycleRef = useRef({scopeKey: actionScopeKey, ready: mutationsReady, generation: 0});
+  if (lifecycleRef.current.scopeKey !== actionScopeKey || lifecycleRef.current.ready !== mutationsReady) {
+    lifecycleRef.current = {
+      scopeKey: actionScopeKey,
+      ready: mutationsReady,
+      generation: lifecycleRef.current.generation + 1,
+    };
+  }
   const executeResourceMutation = (payload) => updateResource(payload);
+  const authoritativeStatsRef = useRef(userData?.stats || {});
+  authoritativeStatsRef.current = userData?.stats || {};
+  const [pendingGestures, setPendingGestures] = useState({});
+  const activeGestureRef = useRef(null);
+  const gestureMetadataRef = useRef({});
+  const gestureSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
   // State for custom input modal
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customInputValue, setCustomInputValue] = useState('');
@@ -27,17 +49,337 @@ const StatsBars = () => {
   const [customFeedbackMessage, setCustomFeedbackMessage] = useState('');
   const [customActionScopeKey, setCustomActionScopeKey] = useState(null);
 
-  // Refs for long-press intervals.
-  const hpIntervalRef = useRef(null);
-  const manaIntervalRef = useRef(null);
-  const essenzaIntervalRef = useRef(null);
-  const barrieraIntervalRef = useRef(null);
-  useEffect(() => () => {
-    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  const resourceRevision = Number.isFinite(Number(userData?.revision))
+    ? Number(userData.revision)
+    : 0;
+  const resourceRevisionRef = useRef(resourceRevision);
+  resourceRevisionRef.current = resourceRevision;
+  const optimisticResourceValue = useCallback((resource, authoritativeValue, excludeId) => {
+    const gestures = Object.values(gestureMetadataRef.current)
+      .filter((gesture) => gesture.resource === resource
+        && gesture.scopeKey === actionScopeRef.current && gesture.id !== excludeId);
+    const acknowledgedGesture = gestures
+      .filter((gesture) => gesture.phase === 'awaiting-source-ack'
+        && Number.isFinite(gesture.newRevision)
+        && gesture.newRevision > resourceRevisionRef.current)
+      .sort((left, right) => right.newRevision - left.newRevision)[0];
+    const unresolvedGesture = gestures.find((gesture) => (
+      (gesture.phase === 'committing' || gesture.phase === 'retryable')
+      && Number.isFinite(gesture.frozenValue)
+    ));
+    let visibleValue = unresolvedGesture
+      ? unresolvedGesture.frozenValue
+      : acknowledgedGesture
+      ? acknowledgedGesture.newValue
+      : Number(authoritativeValue || 0);
+    gestures.forEach((gesture) => {
+      const metadata = gestureMetadataRef.current[gesture.id] || gesture;
+      const phase = metadata.phase || gesture.phase;
+      if (phase === 'active' || phase === 'queued') {
+        visibleValue += gesture.delta;
+      }
     });
-  }, [mutationsReady, user?.uid]);
+    if (resource === 'barriera') {
+      const stats = authoritativeStatsRef.current || {};
+      const total = Number(stats.barrieraTotal ?? stats.barriera ?? 0);
+      return Math.max(0, Math.min(Math.max(0, total), visibleValue));
+    }
+    return visibleValue;
+  }, []);
+
+  const clearGestureTimer = (gesture) => {
+    if (gesture?.timer) clearInterval(gesture.timer);
+    if (gesture) gesture.timer = null;
+  };
+  const discardGesture = useCallback((gesture) => {
+    clearGestureTimer(gesture);
+    if (activeGestureRef.current?.id === gesture?.id) activeGestureRef.current = null;
+    if (gesture?.id) delete gestureMetadataRef.current[gesture.id];
+    if (gesture?.id && mountedRef.current) {
+      setPendingGestures((previous) => {
+        if (!previous[gesture.id]) return previous;
+        const next = { ...previous };
+        delete next[gesture.id];
+        return next;
+      });
+    }
+  }, []);
+
+  const cancelAllGestures = useCallback(() => {
+    const capturedGestures = Object.values(gestureMetadataRef.current);
+    // Releasing capture can synchronously fire lostpointercapture. Invalidate
+    // all ownership before that browser callback has a chance to finalize.
+    activeGestureRef.current = null;
+    gestureMetadataRef.current = {};
+    capturedGestures.forEach((gesture) => {
+      clearGestureTimer(gesture);
+      try {
+        if (gesture.element?.hasPointerCapture?.(gesture.pointerId)) {
+          gesture.element.releasePointerCapture(gesture.pointerId);
+        }
+      } catch (_) {}
+    });
+    if (mountedRef.current) setPendingGestures({});
+  }, []);
+
+  useEffect(() => {
+    if (mutationsReady) return;
+    cancelAllGestures();
+  }, [cancelAllGestures, mutationsReady]);
+
+  const updateGesture = useCallback((gesture, patch) => {
+    if (!gesture?.id || !mountedRef.current) return;
+    setPendingGestures((previous) => {
+      const current = previous[gesture.id];
+      if (!current) return previous;
+      return {
+        ...previous,
+        [gesture.id]: {...current, ...patch},
+      };
+    });
+  }, []);
+
+  const canApplyGestureTick = useCallback((gesture) => {
+    if (gesture.resource !== 'barriera') return true;
+    const stats = authoritativeStatsRef.current || {};
+    const current = Number(stats.barrieraCurrent ?? stats.barriera ?? 0);
+    const total = Number(stats.barrieraTotal ?? stats.barriera ?? 0);
+    const next = optimisticResourceValue('barriera', current, gesture.id) + gesture.delta + gesture.direction;
+    return total > 0 && next >= 0 && next <= total;
+  }, [optimisticResourceValue]);
+  const applyGestureTick = useCallback((gesture) => {
+    if (!gesture || activeGestureRef.current?.id !== gesture.id
+      || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey
+      || lifecycleRef.current.generation !== gesture.lifecycleGeneration
+      || !canApplyGestureTick(gesture)) return false;
+    gesture.delta += gesture.direction;
+    setPendingGestures((previous) => ({
+      ...previous,
+      [gesture.id]: {
+        id: gesture.id,
+        resource: gesture.resource,
+        delta: gesture.delta,
+        scopeKey: gesture.scopeKey,
+        phase: gesture.phase,
+        startRevision: gesture.startRevision,
+        operationId: gesture.operationId,
+      },
+    }));
+    return true;
+  }, [canApplyGestureTick]);
+  const commitGesture = useCallback(function commitGesture(gesture, canRetry = true) {
+    const drainQueue = (confirmedValue) => {
+      const next = Object.values(gestureMetadataRef.current).find((candidate) => (
+        candidate.resource === gesture.resource && candidate.phase === 'queued'
+      ));
+      if (!next) return;
+      const stats = authoritativeStatsRef.current || {};
+      const acknowledged = Object.values(gestureMetadataRef.current)
+        .filter((candidate) => candidate.resource === next.resource
+          && candidate.phase === 'awaiting-source-ack'
+          && candidate.newRevision > resourceRevisionRef.current)
+        .sort((left, right) => right.newRevision - left.newRevision)[0];
+      const baseline = Number.isFinite(confirmedValue) ? confirmedValue
+        : Number(acknowledged?.newValue ?? stats[`${next.resource}Current`] ?? stats[next.resource] ?? 0);
+      if (next.resource === 'barriera') {
+        const total = Math.max(0, Number(stats.barrieraTotal ?? stats.barriera ?? 0));
+        next.delta = Math.max(0, Math.min(total, baseline + next.delta)) - baseline;
+      }
+      if (next.delta === 0) {
+        discardGesture(next);
+        drainQueue(baseline);
+        return;
+      }
+      next.phase = 'committing';
+      next.frozenValue = baseline + next.delta;
+      updateGesture(next, {phase: next.phase, frozenValue: next.frozenValue, delta: next.delta});
+      commitGesture(next);
+    };
+    executeResourceMutation({
+      resource: gesture.resource,
+      mode: 'delta',
+      value: gesture.delta,
+      operationId: gesture.operationId,
+      retryKey: gesture.retryKey,
+      retryScope: gesture.scopeKey,
+      task08HoldId: gesture.holdId,
+      task08LocalSequence: gesture.sequence,
+    }).then((result) => {
+      if (!mountedRef.current || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey || lifecycleRef.current.generation !== gesture.lifecycleGeneration) return;
+      const newValue = Number(result?.newValue);
+      const newRevision = Number(result?.newRevision);
+      if (Number.isFinite(newValue) && Number.isFinite(newRevision)) {
+        gesture.phase = 'awaiting-source-ack';
+        gesture.newValue = newValue;
+        gesture.newRevision = newRevision;
+        gestureMetadataRef.current[gesture.id] = gesture;
+        updateGesture(gesture, {phase: 'awaiting-source-ack', newValue, newRevision});
+        drainQueue(newValue);
+        return;
+      }
+      discardGesture(gesture);
+      drainQueue(newValue);
+    }).catch((error) => {
+      if (!mountedRef.current || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey || lifecycleRef.current.generation !== gesture.lifecycleGeneration) return;
+      if (isDefinitiveUserDataCommandError(error)) {
+        discardGesture(gesture);
+        drainQueue();
+      }
+      else if (canRetry) {
+        // A transport failure may have committed after the response path broke.
+        // Reuse the exact operation ID once so the receipt prevents a second write.
+        commitGesture(gesture, false);
+      } else {
+        gesture.phase = 'retryable';
+        gestureMetadataRef.current[gesture.id] = gesture;
+        updateGesture(gesture, {phase: 'retryable'});
+      }
+      console.error(`Error updating ${gesture.resource}:`, error);
+    });
+  }, [discardGesture, updateGesture]);
+  const finalizeGesture = useCallback((pointerId, terminal = 'pointerup') => {
+    const gesture = activeGestureRef.current;
+    if (!gesture || gesture.pointerId !== pointerId || gesture.finalized
+      || !mountedRef.current
+      || !lifecycleRef.current.ready
+      || lifecycleRef.current.scopeKey !== gesture.scopeKey
+      || lifecycleRef.current.generation !== gesture.lifecycleGeneration) return;
+    gesture.finalized = true;
+    clearGestureTimer(gesture);
+    try {
+      if (gesture.element?.hasPointerCapture?.(pointerId)) gesture.element.releasePointerCapture(pointerId);
+    } catch (_) {
+      // Pointer capture can already have been released by a terminal browser event.
+    }
+    if (activeGestureRef.current?.id === gesture.id) activeGestureRef.current = null;
+    const stats = authoritativeStatsRef.current || {};
+    const currentField = {
+      hp: 'hpCurrent', mana: 'manaCurrent', essenza: 'essenzaCurrent', barriera: 'barrieraCurrent',
+    }[gesture.resource];
+    const currentValue = optimisticResourceValue(gesture.resource,
+      stats[currentField] ?? (gesture.resource === 'barriera' ? stats.barriera : 0), gesture.id);
+    if (gesture.resource === 'barriera') {
+      const total = Math.max(0, Number(stats.barrieraTotal ?? stats.barriera ?? 0));
+      gesture.delta = Math.max(0, Math.min(total, currentValue + gesture.delta)) - currentValue;
+    }
+    recordTask08Event({ metric: 'resource-gesture-terminal', tags: {
+      terminal,
+      resource: gesture.resource,
+      effectiveDelta: gesture.delta,
+      localSequence: gesture.sequence,
+      ...(gesture.holdId ? {holdId: gesture.holdId} : {}),
+    } });
+    if (gesture.delta === 0) {
+      discardGesture(gesture);
+      return;
+    }
+    // Only one command per resource can be unresolved. Later gestures remain
+    // optimistic, then use the preceding receipt as their confirmed baseline.
+    const waiting = Object.values(gestureMetadataRef.current).some((candidate) => (
+      candidate.id !== gesture.id && candidate.resource === gesture.resource
+      && (candidate.phase === 'committing' || candidate.phase === 'retryable')
+    ));
+    gesture.phase = waiting ? 'queued' : 'committing';
+    gesture.frozenValue = currentValue + gesture.delta;
+    gestureMetadataRef.current[gesture.id] = gesture;
+    updateGesture(gesture, {phase: gesture.phase, frozenValue: gesture.frozenValue, delta: gesture.delta});
+    if (!waiting) commitGesture(gesture);
+  }, [commitGesture, discardGesture, optimisticResourceValue, updateGesture]);
+  const retryableGesture = Object.values(pendingGestures).find((gesture) => gesture.phase === 'retryable'
+    && gesture.scopeKey === actionScopeKey);
+  const retryUnresolvedGesture = useCallback(() => {
+    const gesture = retryableGesture && gestureMetadataRef.current[retryableGesture.id];
+    if (!gesture || !lifecycleRef.current.ready || lifecycleRef.current.scopeKey !== gesture.scopeKey
+      || lifecycleRef.current.generation !== gesture.lifecycleGeneration) return;
+    gesture.phase = 'committing';
+    updateGesture(gesture, {phase: 'committing'});
+    commitGesture(gesture, false);
+  }, [commitGesture, retryableGesture, updateGesture]);
+  const startGesture = useCallback((resource, direction, event) => {
+    if (!mutationsReady || retryableGesture || activeGestureRef.current || event?.isPrimary === false || event?.button > 0) return;
+    // JSDOM's PointerEvent shim omits pointerId; browsers always provide it.
+    const pointerId = Number.isFinite(event?.pointerId) && event.pointerId > 0 ? event.pointerId : 1;
+    const scopeKey = actionScopeRef.current;
+    const sequence = ++gestureSequenceRef.current;
+    const gesture = {
+      id: `gesture-${sequence}-${createUserOperationId('resource')}`,
+      operationId: createUserOperationId('resource-gesture'),
+      retryKey: `resource-gesture:${scopeKey}:${sequence}`,
+      resource,
+      direction,
+      delta: 0,
+      pointerId,
+      scopeKey,
+      element: event.currentTarget,
+      timer: null,
+      finalized: false,
+      phase: 'active',
+      startRevision: resourceRevision,
+      sequence,
+      lifecycleGeneration: lifecycleRef.current.generation,
+      holdId: getTask08ResourceHoldId(),
+    };
+    gestureMetadataRef.current[gesture.id] = gesture;
+    try {
+      event.currentTarget?.setPointerCapture?.(pointerId);
+    } catch (_) {
+      delete gestureMetadataRef.current[gesture.id];
+      return;
+    }
+    activeGestureRef.current = gesture;
+    event.preventDefault?.();
+    applyGestureTick(gesture);
+    gesture.timer = setInterval(() => applyGestureTick(gesture), 200);
+  }, [applyGestureTick, mutationsReady, resourceRevision, retryableGesture]);
+  const keyboardGesture = useCallback((resource, direction, event) => {
+    if (event.detail !== 0 || !mutationsReady || retryableGesture || activeGestureRef.current) return;
+    const scopeKey = actionScopeRef.current;
+    const sequence = ++gestureSequenceRef.current;
+    const gesture = {
+      id: `keyboard-${sequence}-${createUserOperationId('resource')}`,
+      operationId: createUserOperationId('resource-gesture'),
+      retryKey: `resource-gesture:${scopeKey}:${sequence}`,
+      resource,
+      direction,
+      delta: 0,
+      pointerId: `keyboard-${sequence}`,
+      scopeKey,
+      finalized: false,
+      phase: 'active',
+      startRevision: resourceRevision,
+      sequence,
+      lifecycleGeneration: lifecycleRef.current.generation,
+      holdId: getTask08ResourceHoldId(),
+    };
+    activeGestureRef.current = gesture;
+    applyGestureTick(gesture);
+    finalizeGesture(gesture.pointerId, 'keyboard');
+  }, [applyGestureTick, finalizeGesture, mutationsReady, resourceRevision, retryableGesture]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+    mountedRef.current = false;
+    cancelAllGestures();
+    };
+  }, [cancelAllGestures]);
+
+  useEffect(() => {
+    if (!mountedRef.current) return;
+    setPendingGestures((previous) => {
+      let changed = false;
+      const next = {...previous};
+      Object.entries(previous).forEach(([id, gesture]) => {
+        if (gesture.scopeKey === actionScopeKey
+          && gesture.phase === 'awaiting-source-ack'
+          && resourceRevision >= gesture.newRevision) {
+          delete next[id];
+          delete gestureMetadataRef.current[id];
+          changed = true;
+        }
+      });
+      return changed ? next : previous;
+    });
+  }, [actionScopeKey, resourceRevision]);
   // Activation overlay state for Barriera
   const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
   const [barrieraActionScopeKey, setBarrieraActionScopeKey] = useState(null);
@@ -55,11 +397,8 @@ const StatsBars = () => {
     setBarrieraActionScopeKey(null);
     setBarrieraActivateValue('');
     setBarrieraActivateTurns('');
-    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    });
-  }, [actionScopeKey]);
+    cancelAllGestures();
+  }, [actionScopeKey, cancelAllGestures]);
 
   // --- HP adjustment functions ---
   const handleResetHP = async () => {
@@ -69,50 +408,6 @@ const StatsBars = () => {
       } catch (error) {
         console.error("Error resetting HP:", error);
       }
-    }
-  };
-
-  const handleDecrementHP = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: -1 });
-      } catch (error) {
-        console.error("Error decrementing HP:", error);
-      }
-    }
-  };
-
-  const handleIncrementHP = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: 1 });
-      } catch (error) {
-        console.error("Error incrementing HP:", error);
-      }
-    }
-  };
-
-  const handleDecrementHPStart = () => {
-    handleDecrementHP();
-    hpIntervalRef.current = setInterval(handleDecrementHP, 200);
-  };
-
-  const handleDecrementHPEnd = () => {
-    if (hpIntervalRef.current) {
-      clearInterval(hpIntervalRef.current);
-      hpIntervalRef.current = null;
-    }
-  };
-
-  const handleIncrementHPStart = () => {
-    handleIncrementHP();
-    hpIntervalRef.current = setInterval(handleIncrementHP, 200);
-  };
-
-  const handleIncrementHPEnd = () => {
-    if (hpIntervalRef.current) {
-      clearInterval(hpIntervalRef.current);
-      hpIntervalRef.current = null;
     }
   };
 
@@ -228,50 +523,6 @@ const StatsBars = () => {
     }
   };
 
-  const handleDecrementMana = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: -1 });
-      } catch (error) {
-        console.error("Error decrementing Mana:", error);
-      }
-    }
-  };
-
-  const handleIncrementMana = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: 1 });
-      } catch (error) {
-        console.error("Error incrementing Mana:", error);
-      }
-    }
-  };
-
-  const handleDecrementManaStart = () => {
-    handleDecrementMana();
-    manaIntervalRef.current = setInterval(handleDecrementMana, 200);
-  };
-
-  const handleDecrementManaEnd = () => {
-    if (manaIntervalRef.current) {
-      clearInterval(manaIntervalRef.current);
-      manaIntervalRef.current = null;
-    }
-  };
-
-  const handleIncrementManaStart = () => {
-    handleIncrementMana();
-    manaIntervalRef.current = setInterval(handleIncrementMana, 200);
-  };
-
-  const handleIncrementManaEnd = () => {
-    if (manaIntervalRef.current) {
-      clearInterval(manaIntervalRef.current);
-      manaIntervalRef.current = null;
-    }
-  };
-
   // --- Essenza adjustment functions ---
   const handleResetEssenza = async () => {
     if (user && userData?.stats) {
@@ -283,52 +534,11 @@ const StatsBars = () => {
     }
   };
 
-  const handleDecrementEssenza = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: -1 });
-      } catch (error) {
-        console.error("Error decrementing Essenza:", error);
-      }
-    }
-  };
-
-  const handleIncrementEssenza = async () => {
-    if (user && userData?.stats) {
-      try {
-        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: 1 });
-      } catch (error) {
-        console.error("Error incrementing Essenza:", error);
-      }
-    }
-  };
-
-  const handleDecrementEssenzaStart = () => {
-    handleDecrementEssenza();
-    essenzaIntervalRef.current = setInterval(handleDecrementEssenza, 200);
-  };
-
-  const handleDecrementEssenzaEnd = () => {
-    if (essenzaIntervalRef.current) {
-      clearInterval(essenzaIntervalRef.current);
-      essenzaIntervalRef.current = null;
-    }
-  };
-
-  const handleIncrementEssenzaStart = () => {
-    handleIncrementEssenza();
-    essenzaIntervalRef.current = setInterval(handleIncrementEssenza, 200);
-  };
-
-  const handleIncrementEssenzaEnd = () => {
-    if (essenzaIntervalRef.current) {
-      clearInterval(essenzaIntervalRef.current);
-      essenzaIntervalRef.current = null;
-    }
-  };
-
   // Small reusable stat row
-  const StatRow = ({
+  // Keep the row component identity stable: a local optimistic tick must not
+  // unmount the captured button before its terminal pointer event arrives.
+  const statRowRef = useRef(null);
+  if (!statRowRef.current) statRowRef.current = ({
     label,
     icon: Icon,
     colorTrack,
@@ -337,10 +547,12 @@ const StatsBars = () => {
     current,
     total,
     onReset,
-    onDecStart,
-    onDecEnd,
-    onIncStart,
-    onIncEnd,
+    onDecPointerDown,
+    onDecPointerEnd,
+    onDecKeyboard,
+    onIncPointerDown,
+    onIncPointerEnd,
+    onIncKeyboard,
     onOpenDec,
     onOpenInc,
     singleValue = false,
@@ -386,13 +598,13 @@ const StatsBars = () => {
             <ResetIcon className="w-3.5 h-3.5" />
           </button>
           <button
-            onMouseDown={decDisabled ? undefined : onDecStart}
-            onMouseUp={decDisabled ? undefined : onDecEnd}
-            onMouseLeave={decDisabled ? undefined : onDecEnd}
-            onTouchStart={decDisabled ? undefined : onDecStart}
-            onTouchEnd={decDisabled ? undefined : onDecEnd}
+            onPointerDown={decDisabled ? undefined : onDecPointerDown}
+            onPointerUp={decDisabled ? undefined : onDecPointerEnd}
+            onPointerCancel={decDisabled ? undefined : onDecPointerEnd}
+            onLostPointerCapture={decDisabled ? undefined : onDecPointerEnd}
+            onClick={decDisabled ? undefined : onDecKeyboard}
             disabled={decDisabled}
-            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border  ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            className={`touch-none inline-flex items-center justify-center h-7 w-7 rounded-xl border  ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
             title={decDisabled ? (decDisabledTitle || 'Non modificabile') : `-1 ${label}`}
           >
             <FaAngleLeft className="w-3.5 h-3.5" />
@@ -424,17 +636,17 @@ const StatsBars = () => {
           <button
             onClick={incDisabled ? undefined : onOpenInc}
             disabled={incDisabled}
-            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            className={`touch-none inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/60 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
             title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `Aggiungi ${label} (valore custom)`}
           >
             <FaAnglesRight className="w-3.5 h-3.5" />
           </button>
           <button
-            onMouseDown={incDisabled ? undefined : onIncStart}
-            onMouseUp={incDisabled ? undefined : onIncEnd}
-            onMouseLeave={incDisabled ? undefined : onIncEnd}
-            onTouchStart={incDisabled ? undefined : onIncStart}
-            onTouchEnd={incDisabled ? undefined : onIncEnd}
+            onPointerDown={incDisabled ? undefined : onIncPointerDown}
+            onPointerUp={incDisabled ? undefined : onIncPointerEnd}
+            onPointerCancel={incDisabled ? undefined : onIncPointerEnd}
+            onLostPointerCapture={incDisabled ? undefined : onIncPointerEnd}
+            onClick={incDisabled ? undefined : onIncKeyboard}
             disabled={incDisabled}
             className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
             title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `+1 ${label}`}
@@ -448,6 +660,7 @@ const StatsBars = () => {
       </div>
     );
   };
+  const StatRow = statRowRef.current;
 
   // --- Barriera handlers (single value) ---
   const handleResetBarriera = async () => {
@@ -463,53 +676,6 @@ const StatsBars = () => {
       });
     } catch (e) {
       console.error('Error resetting Barriera:', e);
-    }
-  };
-
-  const handleDecrementBarriera = async () => {
-    if (user && userData?.stats) {
-      let newVal = (userData.stats.barrieraCurrent || 0) - 1;
-      if (newVal < 0) newVal = 0;
-      try {
-        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
-      } catch (e) {
-        console.error('Error decrementing Barriera:', e);
-      }
-    }
-  };
-
-  const handleIncrementBarriera = async () => {
-    if (user && userData?.stats) {
-      const current = userData.stats.barrieraCurrent || 0;
-      const total = userData.stats.barrieraTotal || 0;
-      if (total <= 0 || current >= total) return; // cannot grow past total
-      const newVal = Math.min(total, current + 1);
-      try {
-        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
-      } catch (e) {
-        console.error('Error incrementing Barriera:', e);
-      }
-    }
-  };
-
-  const handleDecrementBarrieraStart = () => {
-    handleDecrementBarriera();
-    barrieraIntervalRef.current = setInterval(handleDecrementBarriera, 200);
-  };
-  const handleDecrementBarrieraEnd = () => {
-    if (barrieraIntervalRef.current) {
-      clearInterval(barrieraIntervalRef.current);
-      barrieraIntervalRef.current = null;
-    }
-  };
-  const handleIncrementBarrieraStart = () => {
-    handleIncrementBarriera();
-    barrieraIntervalRef.current = setInterval(handleIncrementBarriera, 200);
-  };
-  const handleIncrementBarrieraEnd = () => {
-    if (barrieraIntervalRef.current) {
-      clearInterval(barrieraIntervalRef.current);
-      barrieraIntervalRef.current = null;
     }
   };
 
@@ -558,10 +724,12 @@ const StatsBars = () => {
   const barrierDecDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata' : '');
 
   return (
-    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
+    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg">
       {/* Decorative glows to match EquippedInventory */}
-      <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
-      <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+        <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
+        <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+      </div>
 
       {/* Custom Input Modal (full-screen overlay retained via portal to avoid clipping) */}
       {showCustomInput && customActionScopeKey === actionScopeKey && createPortal(
@@ -664,19 +832,26 @@ const StatsBars = () => {
       )}
 
       <div className="relative flex flex-col gap-4">
+        {retryableGesture && (
+          <button type="button" onClick={retryUnresolvedGesture} className="self-start text-xs text-amber-200 underline" aria-label="Retry saving resource change">
+            Retry save
+          </button>
+        )}
         <div className="space-y-4">
           <StatRow
             label="HP"
             icon={GiHearts}
             colorTrack="bg-red-900/30"
             colorFill="bg-gradient-to-r from-red-500 to-rose-500"
-            current={userData?.stats?.hpCurrent || 0}
+            current={optimisticResourceValue('hp', userData?.stats?.hpCurrent)}
             total={userData?.stats?.hpTotal || 0}
             onReset={handleResetHP}
-            onDecStart={handleDecrementHPStart}
-            onDecEnd={handleDecrementHPEnd}
-            onIncStart={handleIncrementHPStart}
-            onIncEnd={handleIncrementHPEnd}
+            onDecPointerDown={(event) => startGesture('hp', -1, event)}
+            onDecPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onDecKeyboard={(event) => keyboardGesture('hp', -1, event)}
+            onIncPointerDown={(event) => startGesture('hp', 1, event)}
+            onIncPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onIncKeyboard={(event) => keyboardGesture('hp', 1, event)}
             onOpenDec={() => openCustomInput('hp-decrement')}
             onOpenInc={() => openCustomInput('hp-increment')}
             resetDisabled={!mutationsReady}
@@ -689,13 +864,15 @@ const StatsBars = () => {
             icon={GiMagicSwirl}
             colorTrack="bg-indigo-900/30"
             colorFill="bg-gradient-to-r from-indigo-600 to-fuchsia-600"
-            current={userData?.stats?.manaCurrent || 0}
+            current={optimisticResourceValue('mana', userData?.stats?.manaCurrent)}
             total={userData?.stats?.manaTotal || 0}
             onReset={handleResetMana}
-            onDecStart={handleDecrementManaStart}
-            onDecEnd={handleDecrementManaEnd}
-            onIncStart={handleIncrementManaStart}
-            onIncEnd={handleIncrementManaEnd}
+            onDecPointerDown={(event) => startGesture('mana', -1, event)}
+            onDecPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onDecKeyboard={(event) => keyboardGesture('mana', -1, event)}
+            onIncPointerDown={(event) => startGesture('mana', 1, event)}
+            onIncPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onIncKeyboard={(event) => keyboardGesture('mana', 1, event)}
             onOpenDec={() => openCustomInput('mana-decrement')}
             onOpenInc={() => openCustomInput('mana-increment')}
             resetDisabled={!mutationsReady}
@@ -708,13 +885,15 @@ const StatsBars = () => {
             icon={FaDroplet}
             colorTrack="bg-teal-900/30"
             colorFill="bg-gradient-to-r from-teal-500 to-emerald-400"
-            current={userData?.stats?.essenzaCurrent || 0}
+            current={optimisticResourceValue('essenza', userData?.stats?.essenzaCurrent)}
             total={userData?.stats?.essenzaTotal || 0}
             onReset={handleResetEssenza}
-            onDecStart={handleDecrementEssenzaStart}
-            onDecEnd={handleDecrementEssenzaEnd}
-            onIncStart={handleIncrementEssenzaStart}
-            onIncEnd={handleIncrementEssenzaEnd}
+            onDecPointerDown={(event) => startGesture('essenza', -1, event)}
+            onDecPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onDecKeyboard={(event) => keyboardGesture('essenza', -1, event)}
+            onIncPointerDown={(event) => startGesture('essenza', 1, event)}
+            onIncPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onIncKeyboard={(event) => keyboardGesture('essenza', 1, event)}
             onOpenDec={() => openCustomInput('essenza-decrement')}
             onOpenInc={() => openCustomInput('essenza-increment')}
             resetDisabled={!mutationsReady}
@@ -728,13 +907,15 @@ const StatsBars = () => {
             colorTrack="bg-amber-900/30"
             colorFill="bg-gradient-to-r from-amber-500 to-yellow-500"
             colorFillInactive="bg-slate-700/40"
-            current={barrierCurrent}
+            current={optimisticResourceValue('barriera', barrierCurrent)}
             total={barrierTotal}
             onReset={handleResetBarriera}
-            onDecStart={handleDecrementBarrieraStart}
-            onDecEnd={handleDecrementBarrieraEnd}
-            onIncStart={handleIncrementBarrieraStart}
-            onIncEnd={handleIncrementBarrieraEnd}
+            onDecPointerDown={(event) => startGesture('barriera', -1, event)}
+            onDecPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onDecKeyboard={(event) => keyboardGesture('barriera', -1, event)}
+            onIncPointerDown={(event) => startGesture('barriera', 1, event)}
+            onIncPointerEnd={(event) => finalizeGesture(Number.isFinite(event.pointerId) && event.pointerId > 0 ? event.pointerId : activeGestureRef.current?.pointerId, event.type)}
+            onIncKeyboard={(event) => keyboardGesture('barriera', 1, event)}
             onOpenDec={() => openCustomInput('barriera-decrement')}
             onOpenInc={() => openCustomInput('barriera-increment')}
             onIconClick={mutationsReady ? () => { setBarrieraActionScopeKey(actionScopeKey); setShowBarrieraActivate(true); } : undefined}

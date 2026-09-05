@@ -32,9 +32,21 @@ const task07CallablesPath = path.join(
   'tests',
   'task07-media-callables.test.js'
 );
+const task05CallablesPath = path.join(
+  frontendRoot,
+  'performance',
+  'tests',
+  'task05-callables.test.js'
+);
 const fixtureSeedCommand = [path.join(__dirname, 'fixtures.js'), 'seed'];
 
-const buildRulesExecCommands = ({ task07Only = false } = {}) => {
+const buildRulesExecCommands = ({ task07Only = false, task08Only = false } = {}) => {
+  if (task08Only) {
+    return [
+      fixtureSeedCommand,
+      serialNodeTest(task05CallablesPath),
+    ];
+  }
   if (task07Only) {
     return [
       fixtureSeedCommand,
@@ -74,7 +86,7 @@ const runRulesExec = ({
   argv = process.argv.slice(2),
   spawnSyncImpl = childProcess.spawnSync,
 } = {}) => {
-  const allowedArguments = new Set(['--task07-only']);
+  const allowedArguments = new Set(['--task07-only', '--task08-only']);
   const unknownArgument = argv.find((argument) => !allowedArguments.has(argument));
   if (unknownArgument) {
     throw new Error(`Unknown rules runner argument: ${unknownArgument}`);
@@ -82,6 +94,7 @@ const runRulesExec = ({
   assertPerformanceProject(projectId);
   const commands = buildRulesExecCommands({
     task07Only: argv.includes('--task07-only'),
+    task08Only: argv.includes('--task08-only'),
   });
   for (const args of commands) {
     const result = spawnSyncImpl(process.execPath, args, {

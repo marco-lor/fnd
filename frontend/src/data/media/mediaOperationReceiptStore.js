@@ -326,7 +326,7 @@ const acquireReceipt = ({
     writeStore(storage, receipts.map((entry, index) => (
       index === existingIndex ? refreshed : entry
     )));
-    return refreshed;
+    return {receipt: refreshed, resumed: refreshed.attempt === 0};
   }
   if (receipts.length >= MAX_RECEIPTS) {
     throw new Task07MediaOperationReceiptError(
@@ -353,7 +353,7 @@ const acquireReceipt = ({
     updatedAt: now,
   };
   writeStore(storage, [...receipts, receipt]);
-  return receipt;
+  return {receipt, resumed: false};
 };
 
 const clearReceipt = ({ storage, receipt, now }) => {
@@ -593,7 +593,7 @@ export const runWithTask07MediaOperationReceipt = async ({
         'Task 07 receipt clock is invalid.'
       );
     }
-    const receipt = acquireReceipt({
+    const acquired = acquireReceipt({
       storage: resolvedStorage,
       intentDigest,
       kind: normalized.kind,
@@ -601,6 +601,7 @@ export const runWithTask07MediaOperationReceipt = async ({
       previousAssetId: requestedPreviousAssetId,
       now: acquiredAt,
     });
+    const {receipt, resumed} = acquired;
     const stableRevision = buildTask07MediaStableRevision({
       expectedRevision: receipt.expectedRevision,
       attempt: receipt.attempt,
@@ -612,6 +613,7 @@ export const runWithTask07MediaOperationReceipt = async ({
         stableRevision,
         expectedRevision: receipt.expectedRevision,
         previousAssetId: receipt.previousAssetId,
+        resumed,
         signal,
       });
       if (!task07MediaReceiptOutcomeIsAmbiguous(result)) {

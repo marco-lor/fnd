@@ -2,6 +2,10 @@ import {
   __resetCallableRegistryForTests,
   getCallable,
 } from '../functions/callableRegistry';
+import {
+  getTask08ResourceHoldId,
+  recordTask08Event,
+} from '../../performance/task08';
 
 const USER_DATA_CALLABLES = Object.freeze({
   spendCharacterPointV2: getCallable('spendCharacterPointV2'),
@@ -25,6 +29,9 @@ const USER_DATA_CALLABLES = Object.freeze({
 // action. Deriving this key from a payload would merge distinct, intentional
 // operations (for example, two identical long-press resource ticks).
 const retainedOperationIds = new Map();
+const inFlightOperations = new Map();
+const inFlightOperationMetadata = new Map();
+let task08InvocationSequence = 0;
 export const USER_DATA_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,79}$/;
 const DEFINITIVE_CALLABLE_CODES = new Set([
   'already-exists',
@@ -79,11 +86,76 @@ const requireRetryScope = (retryScope) => {
   return retryScope;
 };
 
+const task08CommandTags = ({
+  name,
+  payload,
+  operationId,
+  retryKey,
+  holdId,
+  invocationSequence,
+  localSequence,
+}) => ({
+  command: name,
+  explicitOperationId: Boolean(operationId),
+  retryKeyProvided: Boolean(retryKey),
+  ...(holdId ? { holdId, invocationSequence } : {}),
+  ...(localSequence != null ? { localSequence } : {}),
+  ...(name === 'task05UpdateResource' ? {
+    resource: payload?.resource,
+    mode: payload?.mode,
+    value: payload?.value,
+  } : {}),
+  ...(name === 'task05CharacterCreation' ? {
+    action: payload?.action,
+  } : {}),
+  ...(name === 'task05PrepareConsumable' || name === 'task05CommitConsumable' ? {
+    resource: payload?.resource ?? 'none',
+  } : {}),
+});
+
+const task08ErrorCode = (error) => {
+  const code = typeof error?.code === 'string' ? error.code : 'unknown';
+  return code.replace(/^functions\//, '').slice(0, 80) || 'unknown';
+};
+
+const canonicalRequestKey = (value, seen = new Set()) => {
+  if (value === undefined) return 'undefined';
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? JSON.stringify(value) : `number:${String(value)}`;
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[cyclic]';
+    seen.add(value);
+    const result = `[${value.map((entry) => canonicalRequestKey(entry, seen)).join(',')}]`;
+    seen.delete(value);
+    return result;
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) return '{cyclic}';
+    seen.add(value);
+    const result = `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${canonicalRequestKey(value[key], seen)}`
+    )).join(',')}}`;
+    seen.delete(value);
+    return result;
+  }
+  return `${typeof value}:${String(value)}`;
+};
+
 const releaseOtherRetainedOperations = (retryScope, activeCacheKey) => {
   if (!retryScope) return;
-  retainedOperationIds.forEach((entry, cacheKey) => {
-    if (cacheKey !== activeCacheKey && entry.retryScope === retryScope) {
-      retainedOperationIds.delete(cacheKey);
+  retainedOperationIds.forEach((entry, retainedKey) => {
+    if (retainedKey !== activeCacheKey && entry.retryScope === retryScope) {
+      retainedOperationIds.delete(retainedKey);
+    }
+  });
+  inFlightOperationMetadata.forEach((entry, inFlightKey) => {
+    if (entry.retainedKey !== activeCacheKey && entry.retryScope === retryScope) {
+      inFlightOperations.delete(inFlightKey);
+      inFlightOperationMetadata.delete(inFlightKey);
     }
   });
 };
@@ -95,42 +167,123 @@ const callWithOperation = async ({
   operationId,
   retryKey,
   retryScope,
+  task08HoldId,
+  task08LocalSequence,
 }) => {
   const explicitOperationId = operationId ? requireOperationId(operationId) : null;
   const cacheKey = !explicitOperationId && retryKey
     ? `${name}:${requireRetryKey(retryKey)}`
     : null;
+  const requestKey = canonicalRequestKey(payload);
+  const retainedKey = cacheKey ? `${cacheKey}:${requestKey}` : null;
   const resolvedRetryScope = cacheKey && retryScope
     ? `${name}:${requireRetryScope(retryScope)}`
     : null;
   if (cacheKey && resolvedRetryScope) {
-    releaseOtherRetainedOperations(resolvedRetryScope, cacheKey);
+    releaseOtherRetainedOperations(resolvedRetryScope, retainedKey);
   }
-  const retainedEntry = cacheKey ? retainedOperationIds.get(cacheKey) : null;
-  if (retainedEntry && retainedEntry.retryScope !== resolvedRetryScope) {
-    retainedOperationIds.delete(cacheKey);
+  const candidateRetainedEntry = retainedKey
+    ? retainedOperationIds.get(retainedKey)
+    : null;
+  const retainedEntry = candidateRetainedEntry
+    && candidateRetainedEntry.retryScope === resolvedRetryScope
+    ? candidateRetainedEntry
+    : null;
+  if (candidateRetainedEntry && !retainedEntry) {
+    retainedOperationIds.delete(retainedKey);
   }
   const resolvedOperationId = explicitOperationId
-    || (cacheKey ? retainedOperationIds.get(cacheKey)?.operationId : null)
+    || retainedEntry?.operationId
     || createUserOperationId(prefix);
-  if (cacheKey) {
-    retainedOperationIds.set(cacheKey, {
+  if (retainedKey) {
+    retainedOperationIds.set(retainedKey, {
       operationId: resolvedOperationId,
+      retryScope: resolvedRetryScope,
+      cacheKey,
+    });
+  }
+  const inFlightKey = explicitOperationId
+    ? `${name}:explicit:${explicitOperationId}:${requestKey}`
+    : retainedKey
+      ? `${retainedKey}:${resolvedRetryScope || ''}`
+      : null;
+  if (inFlightKey && inFlightOperations.has(inFlightKey)) {
+    return inFlightOperations.get(inFlightKey);
+  }
+  const holdId = task08HoldId || (typeof getTask08ResourceHoldId === 'function'
+    ? getTask08ResourceHoldId()
+    : null);
+  const invocationSequence = holdId ? ++task08InvocationSequence : null;
+  const measurementTags = task08CommandTags({
+    name,
+    payload,
+    operationId,
+    retryKey,
+    holdId,
+    invocationSequence,
+    localSequence: task08LocalSequence,
+  });
+  const run = (async () => {
+    recordTask08Event({ metric: 'command-start', tags: measurementTags });
+    const clearRetainedEntry = () => {
+      if (!retainedKey) return;
+      const current = retainedOperationIds.get(retainedKey);
+      if (current?.operationId === resolvedOperationId) {
+        retainedOperationIds.delete(retainedKey);
+      }
+    };
+    try {
+      const result = await call(name, {
+        ...payload,
+        operationId: requireOperationId(resolvedOperationId),
+      });
+      clearRetainedEntry();
+      recordTask08Event({ metric: 'command-success', tags: measurementTags });
+      if (result?.replayed === false) {
+        recordTask08Event({
+          metric: 'command-applied',
+          tags: {
+            ...measurementTags,
+            ...(name === 'task05UpdateResource' ? {
+              appliedDelta: result.appliedDelta,
+              newValue: result.newValue,
+              newRevision: result.newRevision,
+            } : {}),
+          },
+        });
+      } else if (result?.replayed !== true) {
+        // A success without replay=false is not evidence of a physical write.
+        recordTask08Event({
+          metric: 'command-non-replayed-success',
+          tags: measurementTags,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (retainedKey && isDefinitiveUserDataCommandError(error)) {
+        clearRetainedEntry();
+      }
+      recordTask08Event({
+        metric: 'command-failure',
+        tags: { ...measurementTags, code: task08ErrorCode(error) },
+      });
+      throw error;
+    }
+  })();
+  if (inFlightKey) {
+    inFlightOperations.set(inFlightKey, run);
+    inFlightOperationMetadata.set(inFlightKey, {
+      retainedKey,
       retryScope: resolvedRetryScope,
     });
   }
   try {
-    const result = await call(name, {
-      ...payload,
-      operationId: requireOperationId(resolvedOperationId),
-    });
-    if (cacheKey) retainedOperationIds.delete(cacheKey);
-    return result;
-  } catch (error) {
-    if (cacheKey && isDefinitiveUserDataCommandError(error)) {
-      retainedOperationIds.delete(cacheKey);
+    return await run;
+  } finally {
+    if (inFlightKey && inFlightOperations.get(inFlightKey) === run) {
+      inFlightOperations.delete(inFlightKey);
+      inFlightOperationMetadata.delete(inFlightKey);
     }
-    throw error;
   }
 };
 
@@ -166,13 +319,15 @@ export const adjustGold = ({ userId, delta, operationId, retryKey }) => callWith
   retryKey,
 });
 
-export const updateResource = ({ userId, resource, mode, value, operationId, retryKey, retryScope, ...options }) => callWithOperation({
+export const updateResource = ({ userId, resource, mode, value, operationId, retryKey, retryScope, task08HoldId, task08LocalSequence, ...options }) => callWithOperation({
   name: 'task05UpdateResource',
   prefix: 'resource',
   payload: { ...options, ...(userId ? { userId } : {}), resource, mode, value },
   operationId,
   retryKey,
   retryScope,
+  task08HoldId,
+  task08LocalSequence,
 });
 
 export const updateGrigliataCharacterResources = ({ operationId, retryKey, ...payload }) => callWithOperation({
@@ -248,12 +403,13 @@ export const commitConsumable = ({ operationId, retryKey, ...payload }) => callW
   retryKey,
 });
 
-export const updateCharacterCreation = ({ operationId, retryKey, ...payload }) => callWithOperation({
+export const updateCharacterCreation = ({ operationId, retryKey, retryScope, ...payload }) => callWithOperation({
   name: 'task05CharacterCreation',
   prefix: 'character-creation',
   payload,
   operationId,
   retryKey,
+  retryScope,
 });
 
 export const consumeTurnEffects = ({ operationId, retryKey, retryScope, ...payload }) => callWithOperation({
@@ -268,6 +424,9 @@ export const consumeTurnEffects = ({ operationId, retryKey, retryScope, ...paylo
 export const __resetUserDataCommandsForTests = () => {
   if (process.env.NODE_ENV === 'test') {
     retainedOperationIds.clear();
+    inFlightOperations.clear();
+    inFlightOperationMetadata.clear();
+    task08InvocationSequence = 0;
     __resetCallableRegistryForTests();
   }
 };
