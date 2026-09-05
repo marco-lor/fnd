@@ -1,6 +1,6 @@
 # Task 19 - Grigliata incremental fog atlases
 
-Depends on Task 18.
+Depends on Tasks 04 and 07. Agree tile identity/version/render contracts with Task 20; Task 18 is required only if consuming its changed visibility outputs.
 
 ## Outcome
 
@@ -17,7 +17,7 @@ Make fog rendering work proportional to changed tiles and atlas groups, avoiding
 
 1. Instrument tile decodes, bytes decoded, rasterizations, pixel/sample tests, atlas builds, dirty rectangles, allocations, and duration by update cause.
 2. Maintain an ID/coordinate-keyed decoded tile store updated from `docChanges()`. Preserve identity and cached bitmap/raster output for unchanged tiles.
-3. Assign tiles to stable, bounded atlas groups. Mark only changed groups dirty and update their dirty rectangles or replace those group canvases; do not rebuild every group.
+3. First measure the gain from incremental invalidation alone. Change atlas layout only if residual cost justifies it; assign tiles to stable, bounded atlas groups when needed. Mark only changed groups dirty and update their dirty rectangles or replace those group canvases; do not rebuild every group.
 4. Rasterize shared logical tile content once per content/version key and fan out references to applicable owner/view compositions where authorization allows.
 5. Replace repeated polygon/sample membership work with a profiled scanline, mask, bitmap, or equivalent representation. Keep exact edge and opacity semantics under golden tests.
 6. Coalesce brush samples to animation frames and minimum board-space distance. Derive the complete touched-tile set for each segment so fast movement cannot leave gaps.
@@ -40,7 +40,7 @@ Make fog rendering work proportional to changed tiles and atlas groups, avoiding
 - Fast diagonal and curved brush traces at low/high zoom: assert no gaps and bounded sample count.
 - Repeated update/delete/restore and rapid supersession tests for correct generation cancellation.
 - Browser performance/heap trace during a sustained brush session and a five-peer update burst.
-- Worker/fallback output equivalence, hidden-tab/unmount cancellation, and cache-eviction tests.
+- Hidden-tab/unmount cancellation and cache-eviction tests; worker/main-thread equivalence only if a worker is introduced.
 
 ## Acceptance gates
 
@@ -48,4 +48,12 @@ Make fog rendering work proportional to changed tiles and atlas groups, avoiding
 - Decode, raster, and atlas counters grow with changed tiles/groups, not total stored tiles.
 - Sustained brushing meets Task 01 frame-time and memory budgets with no visible gaps or stale fog frames.
 - Cache memory plateaus under the standard fixture and returns within the agreed margin after route unmount.
-- Golden rendering and authorization-isolation tests pass on worker and fallback paths.
+- Golden rendering and authorization-isolation tests pass on the selected main-thread path and on the worker path if introduced.
+
+## Release units and measurement contract
+
+19A: profile/update invalidation on existing representation. 19B: atlas/layout change only if 19A leaves a measured bottleneck. Worker is an optional later experiment.
+
+512 and 1,024 tiles, one-tile change and sustained brush traces; count decodes, rasters, group rebuilds and peak/settled heap. One tile affects only its decode/raster and documented affected atlas groups; verify all edges, zooms and owner isolation.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.

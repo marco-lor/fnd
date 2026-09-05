@@ -8,18 +8,18 @@ Make administrative pages load compact paged summaries, fetch heavy detail/edito
 
 ## Evidence
 
-- `DMDashboard.js:40-66` subscribes to all full user aggregates and restarts based on the broad auth object.
-- `playerInfo.js:93-101` refetches all users after many mutations despite the live listener.
-- Item catalog and many editors load before expansion/intent (`playerInfo.js:10-39,103-122`).
-- Admin downloads full user documents for a small table (`adminPage.js:44-100`).
-- Lock-all and level-up bulk paths have fixed batch ceilings.
+- `DMDashboard.js` already uses `useManagerUserData`. `frontend/src/data/userData/managerUserData.js` pages 10 users but subscribes eight domains per listed user, including inventory, spells and techniques.
+- `frontend/src/components/dmDashboard/elements/playerInfo.js` has a no-op `refreshUserData`; do not implement removal of a nonexistent reload.
+- `playerInfo.js` already uses `lazyPlayerInfoOverlays` and `lazyBazaarEditors`; preserve lazy code boundaries and measure residual catalog data loading separately.
+- `frontend/src/components/admin/adminPage.js` already uses `getAdminUsersPage` and `getCallable`; verify payload fields, paging and remaining operation costs independently.
+- Reuse Task 06 bulk-operation infrastructure; establish current lock/level-up limits and failure behavior before proposing any additional scaling work.
 
 ## Implementation elements
 
 1. Define security-reviewed player/admin summary projections with only card/table fields, stable ordering, page cursors, and search.
 2. Load selected/expanded user detail separately. Subscribe only while visible and return to zero detail listeners on collapse.
 3. Depend on stable UID/role, not full auth profile identity.
-4. Remove `refreshUserData` full collection reads. Let shared subscriptions reconcile successful writes.
+4. Preserve shared reconciliation and the no-op refresh behavior. Reuse existing directory and Task 06 operation infrastructure; verify remaining Admin paths independently from Dashboard.
 5. Use atomic increment/transactions for gold and other concurrent counters.
 6. Load item catalog and editor chunks on first relevant expansion/open; cache/search through summaries rather than full catalog download.
 7. Use a `Set` and identity-preserving reconciliation for selected users.
@@ -36,7 +36,7 @@ Make administrative pages load compact paged summaries, fetch heavy detail/edito
 ## Tests
 
 - Summary pagination/search/order/authorization and detail subscribe/unsubscribe.
-- One overlay save performs no full-users read; one gold change performs one atomic write without surrounding reads.
+- One overlay save performs no full-users read; one gold change performs no full-users reload. Count required transaction/authorization reads separately from avoidable UI reads; preserve authoritative concurrency checks.
 - Collapsed dashboard has zero dice/detail listeners; expanding N users stays within the stated budget and collapse cleans up.
 - Bulk operation progress, retry, duplicate request, partial failure, and >500-write fixture.
 - Admin role/delete pending, double-submit, error recovery, and large table behavior.
@@ -46,4 +46,12 @@ Make administrative pages load compact paged summaries, fetch heavy detail/edito
 - Initial DM/Admin reads are bounded and transfer compact summaries only.
 - A mutation rerenders/reloads only the relevant user row/detail.
 - Heavy editor/catalog code and data are not loaded for a collapsed dashboard.
-- Bulk actions succeed beyond previous fixed batch ceilings.
+- Preserve the established capacity, progress and retry behavior of current operations; improve limits only where a fresh large-fixture test demonstrates a remaining ceiling.
+
+## Release units and measurement contract
+
+11A: Dashboard summary/detail ownership. 11B: separate Admin source/operation audit and targeted fix. Bulk-operation changes are separate releases using existing infrastructure.
+
+200 users; page size 10 with 0, 1 and 3 expanded rows. Record listeners per domain and transferred bytes. Collapsed rows must own zero inventory/spell/technique detail listeners; required summary/resource feeds are counted explicitly.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.

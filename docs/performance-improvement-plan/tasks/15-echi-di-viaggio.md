@@ -8,11 +8,11 @@ Reduce map transfer by at least 70%, use one NPC data source, and keep marker/NP
 
 ## Evidence
 
-- `mappa_art.png` is 7,994,651 bytes and `mappa_precisa.png` is 6,894,688 bytes; both are imported in `EchiDiViaggio.js:5-6`.
-- Page and `NpcSidebar` independently subscribe to all `echi_npcs` (`EchiDiViaggio.js:310-342`, `NpcSidebar.js:561-591`).
-- Public/private marker collections are unbounded (`MapEditor.js:68-84`).
+- `mappa_art.png` is 7,994,651 bytes and `mappa_precisa.png` is 6,894,688 bytes; both are imported in `EchiDiViaggio.js`.
+- Page and `NpcSidebar` independently subscribe to all `echi_npcs` (`EchiDiViaggio.js`, `NpcSidebar.js`).
+- Public/private marker collections are unbounded (`MapEditor.js`).
 - Sidebar hover is lifted to the page and rebuilds marker trees; each marker carries state/effects and a hidden hover-card subtree.
-- NPC sidebar renders the complete list and original portraits (`NpcSidebar.js:1053-1084`).
+- NPC sidebar renders the complete list and original portraits (`NpcSidebar.js`).
 
 ## Implementation elements
 
@@ -46,3 +46,11 @@ Reduce map transfer by at least 70%, use one NPC data source, and keep marker/NP
 - NPC listener cardinality is one per mounted route.
 - Hover/list scrolling remains responsive and original portraits are not fetched for thumbnails.
 - Marker work is bounded by active map/page policy rather than total history.
+
+## Release units and measurement contract
+
+15A: map formats/delivery with visual approval. 15B: one NPC subscription shared by page/sidebar. 15C: marker query/render redesign only after complete-marker semantics are specified. A/B are independent early candidates.
+
+500 NPCs / 2,000 markers; exact PNG sizes remain 7,994,651 and 6,894,688 bytes in this checkout. Target <=30% combined modern transfer at declared viewport/zoom with readable labels, complete maps and <=1 CSS pixel marker displacement. Do not trade readability for the byte target; record approved exception if necessary.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.

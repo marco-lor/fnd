@@ -1,26 +1,26 @@
 # Task 10 - Bazaar editor consolidation
 
-Depends on Task 09.
+Depends on Tasks 04 and 07. Task 09 summary contracts are required only for editor changes that consume them.
 
 ## Outcome
 
-Replace four duplicated, eager, high-read editor implementations with on-demand shared infrastructure and type-specific adapters.
+Replace measured duplicated data/form work in the four editor implementations with on-demand shared infrastructure and type-specific adapters.
 
 ## Evidence
 
-- `addWeapon`, `addArmatura`, `addAccessorio`, and `addConsumabile` are each roughly 1,000-1,120 lines and statically imported.
-- Editors fetch full users even when custom visibility is unused.
-- Effects refetch multiple schemas/common documents when local `customSpells` changes.
+- `frontend/src/components/bazaar/lazyBazaarEditors.js` already dynamically imports all four editors. Keep that boundary; module length is not a performance measurement.
+- All four editors already use `getUserDirectoryPage`. Measure whether directory calls happen before custom visibility intent, and verify paging completeness and cache reuse; full-user fetching is not the current gap.
+- Effects invoke cached `getSchema`/common repositories when `customSpells` changes. Count effect runs, repository calls and actual backend reads separately; repeated calls do not prove backend refetches.
 - Accessorio/Consumabile add whole-collection live spell/technique listeners.
 - Deep-cloned controlled form objects cause broad rerenders on each nested change.
 
 ## Implementation elements
 
-1. Lazy-load the editor framework only after authorized editor intent.
-2. Create a schema-driven core for common identity, visibility, parameters, requirements, spells/techniques, media, validation, save, and inventory-edit behavior.
+1. Preserve existing lazy imports; measure cold open, reopen and switching types before changing loading.
+2. Extract a small common data/form unit only when profiling or parity tests justify it. Start with directory/config ownership; a generic schema-driven framework is not required.
 3. Keep explicit Weapon/Armor/Accessory/Consumable adapters for genuine contract differences; avoid a generic form that hides rules.
-4. Load common schemas/data once in parallel and cache them. Load the minimal user directory only when custom visibility opens.
-5. Remove local form state from remote-fetch dependencies; merge custom names through pure selectors.
+4. Preserve cached schema/common repositories; eliminate measured redundant effect/derivation work. Defer the existing minimal directory path until custom visibility intent and preserve complete option resolution.
+5. Separate pure custom-name derivation from cached repository loading where measured effect repetition warrants it; retain required invalidation when remote data changes.
 6. Replace whole-form deep clones with structurally shared reducer actions and memoized field sections.
 7. Use bounded independent media upload concurrency, upload-first metadata commit, and retryable orphan cleanup from Task 07.
 8. Keep one shared source for common spells/techniques; use realtime only if a documented editor requirement needs it.
@@ -44,4 +44,12 @@ Replace four duplicated, eager, high-read editor implementations with on-demand 
 
 - Common data is loaded once per editor session and user directory only on demand.
 - Local editor changes cause zero Firestore reads.
-- Source and route chunk duplication fall measurably while behavioral parity remains green.
+- The selected read/render/byte metric improves while four-type behavioral parity remains green; source-line reduction is not a gate.
+
+## Release units and measurement contract
+
+10A: on-demand directory/config ownership. 10B: one measured common form extraction after parity fixtures; independent of 09B unless using its catalog contract.
+
+All four create/edit/inventory modes; measure cold/reopen reads and typing commits. Local field changes cause zero new reads; user directory opens only on custom visibility intent.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.

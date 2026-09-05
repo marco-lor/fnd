@@ -1,6 +1,6 @@
 # Task 21 - Grigliata writes, music, and migrations
 
-Depends on Tasks 16-20.
+Depends on Tasks 04, 05, 06 and 07. Placement, lighting ownership, music and migration retirement are separate units; none waits for all of Tasks 16-20.
 
 ## Outcome
 
@@ -8,10 +8,10 @@ Finish Grigliata optimization by narrowing routine writes, making multi-document
 
 ## Evidence
 
-- Placement movement can also write user settings (`useGrigliataPlacementActions.js:269-320`), amplifying a high-frequency gameplay path.
-- Lighting operations in `GrigliataPage.js:5286-5628` can perform sequential full-array writes and expose partial intermediate state.
+- Placement movement can also write user settings (`useGrigliataPlacementActions.js`), amplifying a high-frequency gameplay path.
+- Lighting operations in `GrigliataPage.js` can perform sequential full-array writes and expose partial intermediate state.
 - Global and Grigliata music paths can each own subscriptions/audio work, duplicating listeners and playback resources.
-- Route startup performs migration/repair work (`GrigliataPage.js:1784-1977`), adding reads/writes and contention to normal navigation.
+- Route startup performs migration/repair work (`GrigliataPage.js`), adding reads/writes and contention to normal navigation.
 - Large page/control modules obscure ownership and make unrelated state changes more likely to propagate.
 
 ## Implementation elements
@@ -21,11 +21,11 @@ Finish Grigliata optimization by narrowing routine writes, making multi-document
 3. Debounce/coalesce only transient movement that is semantically replaceable; preserve final position, ownership validation, optimistic rollback, and peer convergence.
 4. Give lighting/source updates canonical per-entity documents or bounded chunks with revisions. Commit multi-entity actions atomically through batch/transaction/server orchestration.
 5. Detect concurrent lighting edits and stale revisions rather than last-writer-wins replacement of an entire array. Keep client retries idempotent.
-6. Consolidate global and Grigliata playback into one lifecycle-owned music service/store with one active session subscription, one media element/graph, stable selectors, and explicit priority rules.
+6. Audit existing Task 07 media/music lifecycle infrastructure first and extend it rather than introducing a second service. Consolidate remaining global and Grigliata playback into one lifecycle-owned music service/store with one active session subscription, one media element/graph, stable selectors, and explicit priority rules.
 7. Bound track metadata/artwork preloads and clean up listeners, object URLs, media sources, timers, and audio nodes on sign-out/route/session change.
 8. Move schema repair/migration out of Grigliata route mount into explicit, versioned, resumable, idempotent administrative jobs with progress and dry-run support.
 9. Remove route-time repair branches only after migration verification proves all supported versions readable and rollback remains available.
-10. Split large page/control modules along the measured data/render boundaries created in Tasks 16-20. Preserve public behavior; module count is not itself an acceptance metric.
+10. Only when profiling justifies it, split large page/control modules along the measured data/render boundaries created in Tasks 16-20. Preserve public behavior; module count is not itself an acceptance metric.
 
 ## Boundaries and non-goals
 
@@ -49,4 +49,12 @@ Finish Grigliata optimization by narrowing routine writes, making multi-document
 - Lighting actions are atomic, bounded, idempotent, and conflict-aware; sequential full-array replacement is absent from routine paths.
 - A mounted application owns exactly one active music subscription/runtime under the documented priority contract.
 - Grigliata route mount performs no schema migration or bulk repair writes.
-- Standard-session Grigliata reads, writes, renders, draw calls, frames, and heap now meet the complete Task 01 budgets.
+- Each unit meets its affected metric budgets without regressing retained journeys. Complete integrated Grigliata budget acceptance belongs to Task 22.
+
+## Release units and measurement contract
+
+21A: narrow placement writes. 21B: lighting ownership/atomicity contract, decided before 18B visibility integration. 21C: music lifecycle using Task 07 infrastructure. 21D: explicit migration retirement. These are independent except their own consumed contracts; optional modularization follows measured need.
+
+200 placements / 20 light sources and named music route-switch trace; count final coordinate writes, unrelated settings writes (target zero), atomic light-state observations, live audio graphs/listeners and route-mount migration writes (target zero). Recheck residual source paths against delivered foundations before changing them.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.

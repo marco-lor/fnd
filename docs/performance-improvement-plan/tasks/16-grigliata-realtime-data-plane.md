@@ -6,9 +6,11 @@ Depends on Tasks 04, 05, 06, and 07.
 
 Make Grigliata listener, read, memory, and React-update cost proportional to the active role, tab, viewport, and bounded library window instead of every available dataset.
 
-## Evidence
+## Evidence to refresh
 
-- Grigliata contains 27 production `onSnapshot` calls; `useGrigliataPageData.js:148-637` mounts most core feeds for the route lifetime.
+The July listener counts below are historical source observations. Recount by query signature, owner and role before choosing budgets; do not treat them as current runtime counts.
+
+- Grigliata contains 27 production `onSnapshot` calls; `useGrigliataPageData.js` mounts most core feeds for the route lifetime.
 - Player AoE state can fan out to roughly 20 listeners, while some panels add their own user/library listeners.
 - Manager panels are hidden by tab state but are imported eagerly and their repositories are not consistently scoped to visible work.
 - Presence, interaction, image, foe, background, track, and placement collections can grow without a complete retention or pagination contract.
@@ -19,8 +21,8 @@ Make Grigliata listener, read, memory, and React-update cost proportional to the
 1. Inventory every Grigliata listener by owner, role, tab, query, payload, update rate, retention, and cleanup behavior. Persist listener-cardinality telemetry from Task 04.
 2. Separate the always-required gameplay plane from manager libraries and optional overlays. Mount optional repositories only while their tab/feature is active, with a documented short cache if remount cost warrants it.
 3. Replace per-entity/per-player subscription fan-out with bounded aggregate or chunked queries. Define a hard listener budget for player and game-master sessions.
-4. Add TTL/archive cleanup for ephemeral presence, cursors, pings, interactions, requests, and other session artifacts. Perform cleanup in trusted, retryable server work.
-5. Create one projected user directory source for names/avatars/roles rather than reading full user documents or mounting panel-local directory listeners.
+4. Separately assess retention needs and add TTL/archive cleanup for ephemeral presence, cursors, pings, interactions, requests, and other session artifacts. Perform cleanup in trusted, retryable server work when required. Retention work is not a prerequisite for optional-tab listener cleanup.
+5. Reuse or extend the delivered `frontend/src/data/userDirectoryRepository.js` for names/avatars/roles; introduce a projection only for a verified missing contract. Avoid full-user reads and panel-local duplicate directory listeners.
 6. Use `snapshot.docChanges()` and stable ID-keyed maps so one changed document preserves identity for every unchanged entity. Produce ordered arrays only at selector boundaries.
 7. Add explicit cursor/page contracts for backgrounds, foes, images, tracks, users, and other libraries. Queries must have matching indexes and stable deterministic ordering.
 8. Deduplicate repositories that currently serve the same collection to page, board, galleries, and dialogs. Define one owner and selectors for each feed.
@@ -51,3 +53,11 @@ Make Grigliata listener, read, memory, and React-update cost proportional to the
 - A one-document change does not replace all unchanged entity identities or rerender every consumer.
 - All unbounded Grigliata library queries have a bounded cursor or explicitly measured finite-domain exception.
 - Read volume over the standard five-peer scenario meets the Task 01 budget without lost realtime behavior.
+
+## Release units and measurement contract
+
+16A: current feed/role ownership and budgets. 16B: optional-tab cleanup/dedup. 16C: library paging and stable entities. Retention jobs are separate if evidence warrants them.
+
+200 placements / 500 library assets / five peers; record a numeric listener/read/byte budget for each supported role/tab combination before implementation, including essential gameplay feeds while tabs are hidden. Optional closed-tab listeners target zero; exceptions require measured ownership. Never truncate active gameplay entities.
+
+Follow the [roadmap release/evidence rules](../README.md#rules-for-every-task) for each unit. Source observations identify work to verify, not fresh timing or deployed status. Record current measured values and numeric targets separately before implementation; use existing budget keys where available.
