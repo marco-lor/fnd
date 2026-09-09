@@ -295,10 +295,11 @@ describe('Inventory command safety', () => {
 		useInventory.mockReturnValue({ data: inventoryFixture(120), status: 'fresh' });
 		const { container } = render(<Inventory />);
 
-		while (screen.queryByRole('button', { name: /^Load more inventory items/ })) {
-			fireEvent.click(screen.getByRole('button', { name: /^Load more inventory items/ }));
-		}
+		expect(mountedInventoryRows(container)).toBe(60);
+		const loadMore = screen.getByRole('button', { name: 'Load more inventory items, 60 remaining' });
+		fireEvent.click(loadMore);
 		expect(mountedInventoryRows(container)).toBe(120);
+		expect(loadMore).not.toBeInTheDocument();
 
 		fireEvent.change(screen.getByPlaceholderText('Cerca nome o tipo…'), {
 			target: { value: 'Fixture item 115' },

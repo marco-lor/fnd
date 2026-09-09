@@ -14,6 +14,7 @@ export function useBazaarCatalog(scopeKey,uid,filters) {
  current.current={key,identity,scopeKey,revision};
  const sequence=useRef(0);
  const facetSequence=useRef(0);
+ const invalidateRequests=useCallback(()=>{sequence.current++;facetSequence.current++;},[]);
  useEffect(()=>{
   let live=true;
   if(!uid)return undefined;
@@ -23,11 +24,11 @@ export function useBazaarCatalog(scopeKey,uid,filters) {
    setMeta({scope:scopeKey,revision:r,error:null});
   },e=>{
    if(!live||current.current.scopeKey!==scopeKey)return;
-   current.current.revision=null;sequence.current++;facetSequence.current++;
+   current.current.revision=null;invalidateRequests();
    setMeta({scope:scopeKey,revision:null,error:e.message});
   });
-  return()=>{live=false;sequence.current++;facetSequence.current++;unsubscribe();};
- },[scopeKey,uid,subscriptionAttempt]);
+  return()=>{live=false;invalidateRequests();unsubscribe();};
+ },[scopeKey,uid,subscriptionAttempt,invalidateRequests]);
  const load=useCallback(async(cursor=null)=>{
   if(revision===null)return;
   const token=++sequence.current;

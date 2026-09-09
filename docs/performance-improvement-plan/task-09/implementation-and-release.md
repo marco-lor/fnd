@@ -17,7 +17,8 @@ Fresh pre-commit checks on September 9, 2026:
 - Performance harness unit suite: 489 passed.
 - New Task09 migration/overlay/profile/build-mode checks: 27 passed.
 - Release guards: 62 passed.
-- Frontend full suite: 164 suites passed, one failed; 1,548 tests passed, one failed (1,549 total). Inventory.test.js:294 timed out at the default 5 seconds. An unchanged-timeout isolated rerun reproduced the same failure (12 passed, one failed). Root cause remains unresolved; the Inventory source/test files themselves are unchanged by this patch. This is not a green frontend gate.
+- Frontend full suite after PR remediation: 165 suites and 1,549 tests passed with the default timeout. The Inventory test previously spent over five seconds repeating whole-DOM accessibility queries before its filter assertions. Its 120-item fixture now expands with one explicit click and verifies the button disappears; both filter/reset assertions remain.
+- Strict CI normal build, disabled-instrumentation verification, query/import/callable/media boundary checks and 23 focused query/browser-harness tests passed. The query registry now describes the revision listener and three catalog indexes. Browser setup activates the seeded catalog with background triggers disabled and accounts for Task09 HTTP calls as foreground activity.
 
 Prior isolated emulator evidence includes catalog visibility/rules, trusted writes, price/idempotency and media lifecycle coverage. These checks are distinct from actual staging acceptance.
 
