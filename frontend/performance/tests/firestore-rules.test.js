@@ -50,6 +50,39 @@ before(async () => {
 
 after(async () => environment?.cleanup());
 
+test('webmaster creation preflight reads missing IDs without exposing hidden items or permitting client writes', async () => {
+  const userId = 'task09-preflight-webmaster';
+  const hiddenId = 'task09-preflight-hidden';
+  const missingId = 'task09-preflight-new';
+  const webmaster = environment.authenticatedContext(userId).firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users', userId), {role: 'webmaster'});
+    await setDoc(doc(context.firestore(), 'items', hiddenId), {visibility: 'none'});
+  });
+  try {
+    const missing = await assertSucceeds(getDoc(doc(webmaster, 'items', missingId)));
+    assert.equal(missing.exists(), false);
+    await assertFails(getDoc(doc(webmaster, 'items', hiddenId)));
+    await assertFails(getDocs(collection(webmaster, 'items')));
+    await assertFails(setDoc(doc(webmaster, 'items', missingId), {visibility: 'all'}));
+    await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), 'items', missingId)));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', userId), {role: 'player'});
+    });
+    await assertFails(getDoc(doc(webmaster, 'items', missingId)));
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', userId), {role: 'webmaster', deletionState: 'pending'});
+    });
+    await assertFails(getDoc(doc(webmaster, 'items', missingId)));
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), 'users', userId));
+      await deleteDoc(doc(context.firestore(), 'items', hiddenId));
+      await deleteDoc(doc(context.firestore(), 'items', missingId));
+    });
+  }
+});
+
 test('anonymous, player, DM, and webmaster rules match their intended boundaries', async () => {
   const anonymous = environment.unauthenticatedContext().firestore();
   const player = environment.authenticatedContext('perf-player').firestore();

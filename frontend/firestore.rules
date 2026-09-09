@@ -1848,6 +1848,10 @@ service cloud.firestore {
       allow write: if false;
     }
     match /items/{docId} {
+      // Editors check for name collisions before calling the trusted writer.
+      // This permits only missing-document preflights, never hidden payloads or lists.
+      allow get: if isWebmaster()
+        && !exists(/databases/$(database)/documents/items/$(docId));
       allow read: if isActiveSignedIn() && (docId.matches('schema_.*')
         || isDM() || resource.data.get("visibility", "none") == "all"
         || (resource.data.get("visibility", "none") == "custom"

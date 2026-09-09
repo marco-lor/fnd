@@ -11,6 +11,7 @@ import { acquireItem } from './elements/acquireItem';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
 import ComparisonPanel from './elements/comparisonComponent';
+import { AddWeaponOverlay } from './elements/addWeapon';
 
 // Exercise the production summary hook with the current server semantic source.
 jest.mock('../../data/bazaarCatalogRepository', () => {
@@ -190,6 +191,26 @@ describe('Bazaar layout', () => {
       return () => {};
     });
   });
+
+  test.each(['armatura', 'accessorio', 'consumabile', 'weapon'])(
+    'weapon editor only edits a pinned weapon, with pinned type %s', async (itemType) => {
+      AddWeaponOverlay.mockClear();
+      const item = {id: 'pinned-' + itemType, item_type: itemType, General: {Nome: 'Pinned item'}, Specific: {}, Parametri: {}};
+      onSnapshot.mockImplementation((_target, next) => {
+        next({forEach: visit => visit({id: item.id, data: () => item})});
+        return () => {};
+      });
+      render(<Bazaar />);
+      fireEvent.click(await screen.findByTestId('bazaar-item-card-' + item.id));
+      await screen.findByTestId('comparison-panel-content');
+      fireEvent.click(screen.getByRole('button', {name: itemType === 'weapon' ? 'Modifica Arma' : '+ Arma'}));
+      await waitFor(() => expect(AddWeaponOverlay).toHaveBeenCalled());
+      const props = AddWeaponOverlay.mock.calls.at(-1)[0];
+      expect(props.editMode).toBe(itemType === 'weapon');
+      if (itemType === 'weapon') expect(props.initialData.id).toBe(item.id);
+      else expect(props.initialData).toBeNull();
+    }
+  );
 
   test('hover keeps the card list render count stable and filter persistence is debounced',async()=>{
     const probe=require('../../performance/PerformanceProfiler').usePerformanceRenderProbe;

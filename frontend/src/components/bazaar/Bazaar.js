@@ -644,8 +644,8 @@ function BazaarContent() {
             setShowOverlay(false);
           }}
           showMessage={displayConfirmation}
-          initialData={lockedItem ? panelItem : null}
-          editMode={!!lockedItem}
+          initialData={lockedItem && lockedItem.item_type === "weapon" ? panelItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "weapon")}
         />
       )}      {showArmaturaOverlay && (
         <AddArmaturaOverlay
