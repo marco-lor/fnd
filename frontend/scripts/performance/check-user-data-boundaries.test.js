@@ -183,7 +183,7 @@ test('required Home and Bazaar acceptance routes use V2 user data boundaries', (
   assert.equal(findDirectAccessesInSource(comparison).length, 0);
   assert.match(comparison, /useProgression\(user\?\.uid\)/);
   assert.match(comparison, /authUserData\?\.role/);
-  assert.match(comparison, /getUserDirectoryPage\(\)/);
+  assert.match(comparison, /getUserDirectoryPage\(\{ cursor \}\)/);
 
   const addWeaponAccesses = findDirectAccessesInSource(addWeapon);
   assert.equal(addWeaponAccesses.length, 0);

@@ -58,18 +58,18 @@ describe('catalogItemRepository', () => {
     );
 
     expect(onSnapshot).toHaveBeenCalledTimes(1);
-    expect(collection).toHaveBeenCalledWith(expect.anything(), 'items');
+    expect(collection).toHaveBeenCalledWith(expect.anything(), 'catalogMedia');
     expect(where).toHaveBeenCalledWith(
       '__name__',
       'in',
       ['shield-1', 'sword-1']
     );
     expect(query).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'items' }),
+      expect.objectContaining({ path: 'catalogMedia' }),
       expect.objectContaining({ operator: 'in' })
     );
     expect(labelFirestoreTarget).toHaveBeenCalledWith(
-      expect.objectContaining({ base: expect.objectContaining({ path: 'items' }) }),
+      expect.objectContaining({ base: expect.objectContaining({ path: 'catalogMedia' }) }),
       'catalog.items-batch.subscribe.v1'
     );
 

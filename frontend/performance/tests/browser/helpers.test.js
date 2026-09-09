@@ -1756,3 +1756,12 @@ test('scenario restoration skips no-op writes and patches only drifted fixture s
   );
   assert.equal(scenarioRestorePatch('codex', {}), null);
 });
+
+
+test('profiling warmup requires an explicit opt-in and refuses mixed build modes', () => {
+  const report = { schemaVersion: 1, buildMode: 'performance-react-profile', projectId: 'demo-fnd-perf',
+    assets: [{ path: 'static/js/main.profile.js', category: 'javascript', rawBytes: 10, sha256: 'a'.repeat(64) }] };
+  assert.throws(() => createStaticAssetWarmupBatches(report), /performance build report/);
+  assert.equal(createStaticAssetWarmupBatches(report, { profiling: true }).flat().length, 1);
+  assert.throws(() => createStaticAssetWarmupBatches({ ...report, buildMode: 'performance' }, { profiling: true }), /performance build report/);
+});

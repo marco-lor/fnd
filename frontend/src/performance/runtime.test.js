@@ -435,15 +435,16 @@ describe('performance runtime', () => {
     }
   });
 
-  test('correlates a watchdog at the pinned WebChannel send boundary', () => {
+  test.each([false, true])('correlates the separately pinned WebChannel mode (profiling=%s)', (profiling) => {
+    process.env.REACT_APP_FND_PERF_REACT_PROFILE = profiling ? '1' : '0';
     const runtime = loadRuntime(true);
     try {
       window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-webchannel-test', actorRole: 'dm' };
       runtime.installPerformanceRuntime();
       runtime.startRouteMeasurement('/grigliata', 'dm');
       const minifiedCallback = new Function(
-        'e',
-        'return function(){e()}'
+        profiling ? 'i' : 'e',
+        profiling ? 'return function(){i()}' : 'return function(){e()}'
       )(() => {});
       const firestoreWatchdog = window.setTimeout(minifiedCallback, 45_000);
       const channel = new MockWebChannelXhrIo();
@@ -459,6 +460,7 @@ describe('performance runtime', () => {
       window.clearTimeout(firestoreWatchdog);
     } finally {
       runtime.teardownPerformanceRuntimeForTests();
+      delete process.env.REACT_APP_FND_PERF_REACT_PROFILE;
     }
   });
 

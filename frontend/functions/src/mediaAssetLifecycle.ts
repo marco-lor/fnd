@@ -1,3 +1,4 @@
+import {synchronizeCatalogMedia} from './bazaarCatalog';
 import * as admin from "firebase-admin";
 import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
@@ -450,12 +451,14 @@ export const task07RetireMediaAsset = onCall(
         }
         if (targetBinding.assetId !== assetId) return;
         const now = Timestamp.now();
-        transaction.update(targetRef, task07NestedMediaRetirementPatch({
+        const catalogPatch = task07NestedMediaRetirementPatch({
           current: target.data() || {},
           plan,
           revision: targetBinding.revision,
           timestamp: now,
-        }));
+        });
+        await synchronizeCatalogMedia(transaction, db, targetRef, target.data() || {}, catalogPatch);
+        transaction.update(targetRef, catalogPatch);
         return;
       }
       if (manifestState === "superseded") return;
@@ -516,6 +519,7 @@ export const task07RetireMediaAsset = onCall(
           targetUpdate.durationMs = FieldValue.delete();
         }
       }
+      await synchronizeCatalogMedia(transaction, db, targetRef, target.data() || {}, targetUpdate);
       if (plan.targetKind === "common-technique") {
         transaction.set(targetRef, targetUpdate, {merge: true});
       } else {
@@ -960,15 +964,9 @@ const stageRemovedReferences = async (input: {
         // a replacement asset is fenced by the current transactional read.
         if (!entryStillExists && !currentBinding.conflict &&
           currentBinding.assetId === removedAssetId) {
-          transaction.update(
-            currentTargetRef,
-            task07NestedMediaRetirementPatch({
-              current: currentTarget.data() || {},
-              plan,
-              revision: currentBinding.revision,
-              timestamp: now,
-            })
-          );
+          const catalogPatch = task07NestedMediaRetirementPatch({current: currentTarget.data() || {}, plan, revision: currentBinding.revision, timestamp: now});
+          await synchronizeCatalogMedia(transaction, db, currentTargetRef, currentTarget.data() || {}, catalogPatch);
+          transaction.update(currentTargetRef, catalogPatch);
         }
       }
       transaction.update(ref, {

@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const webpack = require('webpack');
 const { ensureDirectory, frontendRoot, resultsDir, writeJson } = require('./common');
+const { performanceBuildMode } = require('./build-mode');
+const mode = performanceBuildMode(process.argv.slice(2));
 
 process.env.BABEL_ENV = 'production';
 process.env.NODE_ENV = 'production';
@@ -48,7 +50,7 @@ compiler.run((error, stats) => {
     nestedModules: true,
   });
   ensureDirectory(resultsDir);
-  writeJson(path.join(resultsDir, 'webpack-stats.json'), json);
+  writeJson(path.join(resultsDir, mode.statsFile), json);
   finish(0);
 });
 

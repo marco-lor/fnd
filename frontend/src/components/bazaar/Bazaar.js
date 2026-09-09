@@ -1,18 +1,14 @@
+import { useBazaarCatalog, useBazaarDetail } from '../../data/useBazaarCatalog';
 // file: ./frontend/src/components/bazaar/Bazaar.js
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, onSnapshot, query, where, or, and } from "../../performance/firestore";
-import { db } from '../firebaseConfig';
 import { useAuth, useAuthSession } from '../../AuthContext';
 import ComparisonPanel from './elements/comparisonComponent';
 import { acquireItem } from './elements/acquireItem';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
 import FiltersSection from './elements/FiltersSection';
-import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
 import { useShellLayout } from '../common/shellLayout';
-import { FiShoppingBag } from 'react-icons/fi';
 import { canPrefetchModules } from '../common/lazyLoading';
-import { getSchema } from '../../data/configRepository';
 import {
   AddAccessorioOverlay,
   AddArmaturaOverlay,
@@ -24,8 +20,10 @@ import { useResources } from '../../data/userData/userDataHooks';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import { normalizeCatalogItemMedia } from './catalogItemMedia';
+import PerformanceProfiler, { usePerformanceRenderProbe } from '../../performance/PerformanceProfiler';
 
-function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
+const ItemCard = React.memo(function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
+  usePerformanceRenderProbe('BazaarItemCard');
   const [imageError, setImageError] = useState(false);
   const title = item.General?.Nome || 'Oggetto Sconosciuto';
   const { media: itemMedia, fallbackSrc: imageUrl } = normalizeCatalogItemMedia(item);
@@ -57,7 +55,11 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
       whileHover={{ scale: 1.02 }}
       onMouseEnter={() => onHoverItem(item)}
       onMouseLeave={() => onHoverItem(null)}
-      onClick={onLockToggle}
+      onClick={() => onLockToggle(item)}
+      tabIndex={0}
+      role="button"
+      aria-label={`Inspect ${title}`}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onLockToggle(item); } }}
     >
       <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-xl border border-gray-700/70 bg-gray-900/70">
         {hasImage && !imageError ? (
@@ -65,6 +67,8 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
             media={itemMedia}
             src={imageUrl}
             variant="card"
+            rootMargin="0px"
+            compatibilityMode="derivative-read"
             alt={title}
             width={640}
             height={480}
@@ -137,27 +141,9 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
       )}
     </motion.div>
   );
-}
-
-function BazaarDetailPlaceholder() {
-  return (
-    <div
-      className="flex h-full min-h-[22rem] flex-col items-center justify-center rounded-l-lg border-l border-gray-700 bg-gray-900/95 px-6 py-8 text-center"
-      data-testid="bazaar-detail-placeholder"
-    >
-      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-slate-500/60 bg-slate-800/70 text-slate-300">
-        <FiShoppingBag className="text-3xl" />
-      </div>
-      <h3 className="text-lg font-semibold text-white">Item Detail</h3>
-      <p className="mt-2 max-w-xs text-sm leading-relaxed text-slate-400">
-        Hover an item to inspect it. Click a tile to pin its details while you browse the Bazaar.
-      </p>
-    </div>
-  );
-}
+});
 
 const BAZAAR_FILTERS_STORAGE_KEY = 'bazaar.filters';
-const EMPTY_BAZAAR_ITEMS = Object.freeze([]);
 
 const normalizeFilterArray = (value) => {
   if (!Array.isArray(value)) {
@@ -192,30 +178,6 @@ const createDefaultBazaarFilters = () => ({
   onlyAffordable: false,
 });
 
-const isMeaningfulSpecialValue = (value) => {
-  if (Array.isArray(value)) {
-    return value.some(isMeaningfulSpecialValue);
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.values(value).some(isMeaningfulSpecialValue);
-  }
-
-  if (typeof value === 'number') {
-    return !Number.isNaN(value);
-  }
-
-  if (typeof value === 'boolean') {
-    return value;
-  }
-
-  return value != null && String(value).trim() !== '';
-};
-
-const getAvailableSpecialKeys = (item) => Object.entries(item?.Parametri?.Special || {})
-  .filter(([, value]) => isMeaningfulSpecialValue(value))
-  .map(([key]) => key);
-
 const loadBazaarFilters = () => {
   const defaultFilters = createDefaultBazaarFilters();
 
@@ -245,6 +207,11 @@ const loadBazaarFilters = () => {
 
 
 export default function Bazaar() {
+  return <PerformanceProfiler id="Bazaar" committedProbeOwner="child"><BazaarContent /></PerformanceProfiler>;
+}
+
+function BazaarContent() {
+  usePerformanceRenderProbe('Bazaar');
   const { topInset } = useShellLayout();
   const { user, userData } = useAuth();
   const { repositoryAccessGeneration = 0 } = useAuthSession();
@@ -252,10 +219,6 @@ export default function Bazaar() {
   const catalogScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}:${normalizedRole}`;
   const catalogScopeRef = useRef(catalogScopeKey);
   catalogScopeRef.current = catalogScopeKey;
-  const [catalogState, setCatalogState] = useState({ scopeKey: null, items: [] });
-  const items = catalogState.scopeKey === catalogScopeKey
-    ? catalogState.items
-    : EMPTY_BAZAAR_ITEMS;
   const [savedFilters] = useState(() => loadBazaarFilters());
   const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
   const [selectedSlot, setSelectedSlot] = useState(savedFilters.selectedSlot);
@@ -267,13 +230,13 @@ export default function Bazaar() {
   const [selectedBaseParams, setSelectedBaseParams] = useState(savedFilters.selectedBaseParams);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
+  const lockedRef = useRef(lockedItem);
+  lockedRef.current = lockedItem;
+  const [page, setPage] = useState(0);
   const [onlyAffordable, setOnlyAffordable] = useState(savedFilters.onlyAffordable);
-  const [specialSchemaKeys, setSpecialSchemaKeys] = useState([]);
 
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
-  const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
-  const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
+  const [editor, setEditor] = useState(null);
+  const activeEditor = editor?.scopeKey === catalogScopeKey ? editor : null;
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const {
@@ -287,8 +250,26 @@ export default function Bazaar() {
   const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
   const [pendingPurchaseRetryKey, setPendingPurchaseRetryKey] = useState(null);
   const [pendingPurchaseScopeKey, setPendingPurchaseScopeKey] = useState(null);
+  const [purchaseUncertain, setPurchaseUncertain] = useState(false);
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
-  const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
+  const [settledSearch, setSettledSearch] = useState(searchTerm);
+  useEffect(() => { const timer = setTimeout(() => setSettledSearch(searchTerm), 150); return () => clearTimeout(timer); }, [searchTerm]);
+  const deferredSearch = useDeferredValue(settledSearch);
+  const catalog = useBazaarCatalog(catalogScopeKey,user?.uid,{searchTerm:deferredSearch,selectedSlot,selectedHands,selectedTipo,selectedItemType,selectedSpecialParams,selectedCombatParams,selectedBaseParams,onlyAffordable,userGold:onlyAffordable?userGold:0});
+  const items = catalog.rows;
+  const pageGridRef = useRef(null);
+  const pageKeyRef = useRef(catalog.queryKey);
+  pageKeyRef.current = catalog.queryKey;
+  const lastPage = useRef(page);
+  useEffect(() => {
+    if (lastPage.current !== page) {
+      pageGridRef.current?.scrollIntoView?.({block:'start'});
+      pageGridRef.current?.focus({preventScroll:true});
+      lastPage.current = page;
+    }
+  }, [page]);
+  useEffect(() => setPage(0), [catalog.queryKey]);
+  const purchaseDetail = useBazaarDetail(pendingPurchaseScopeKey === catalogScopeKey ? pendingPurchaseItem : null, catalogScopeKey, catalog.revision);
   const prefetchEditor = (kind) => {
     if (!isAdmin || !canPrefetchModules()) return;
     BAZAAR_EDITOR_DESCRIPTORS[kind]?.preload().catch(() => {});
@@ -298,152 +279,17 @@ export default function Bazaar() {
   // access scope. Mask the previous scope during the render that observes a
   // UID/role generation change, then clear its transient UI state.
   useEffect(() => {
-    setCatalogState({ scopeKey: catalogScopeKey, items: [] });
     setHoveredItem(null);
     setLockedItem(null);
     setPendingPurchaseItem(null);
     setPendingPurchaseRetryKey(null);
     setPendingPurchaseScopeKey(null);
     setPurchasingItemId(null);
-    setShowOverlay(false);
-    setShowArmaturaOverlay(false);
-    setShowAccessorioOverlay(false);
-    setShowConsumabileOverlay(false);
+    setEditor(null);
   }, [catalogScopeKey]);
 
-  // Listen to items respecting visibility
   useEffect(() => {
-    if (!user) return;
-    const subscriptionScopeKey = catalogScopeKey;
-    const publishItems = (nextItems) => {
-      if (catalogScopeRef.current !== subscriptionScopeKey) return;
-      setCatalogState({ scopeKey: subscriptionScopeKey, items: nextItems });
-    };
-
-    const itemsRef = collection(db, 'items');
-
-    // If the user is a DM they can see ALL items (except schema docs) without visibility filtering
-    // Otherwise apply existing visibility rules: 'all' OR ('custom' AND allowed_users contains user)
-    const buildUnsubscribe = () => {
-      if (isDM) {
-        return onSnapshot(
-          itemsRef,
-          (snapshot) => {
-            const allItems = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-                allItems.push({ id: doc.id, ...data });
-              }
-            });
-            publishItems(allItems);
-          },
-          (error) => {
-            console.error('Error listening to items collection (DM view):', error);
-            publishItems([]);
-          }
-        );
-      } else {
-        const q = query(
-          itemsRef,
-            or(
-              where('visibility', '==', 'all'),
-              and(
-                where('visibility', '==', 'custom'),
-                where('allowed_users', 'array-contains', user.uid)
-              )
-            )
-        );
-        return onSnapshot(
-          q,
-          (snapshot) => {
-            const filteredItems = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-                filteredItems.push({ id: doc.id, ...data });
-              }
-            });
-            publishItems(filteredItems);
-          },
-          (error) => {
-            console.error('Error listening to items collection:', error);
-            publishItems([]);
-          }
-        );
-      }
-    };
-
-    const unsubscribe = buildUnsubscribe();
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [catalogScopeKey, isDM, user]);
-
-  // A pending confirmation is valid only while its exact catalog record stays
-  // in the current authorized query. Refresh the payload when the catalog
-  // changes and close it immediately if visibility or existence is lost.
-  useEffect(() => {
-    if (!pendingPurchaseItem || pendingPurchaseScopeKey !== catalogScopeKey) return;
-    const currentItem = items.find((item) => item.id === pendingPurchaseItem.id);
-    if (!currentItem) {
-      setPendingPurchaseItem(null);
-      setPendingPurchaseRetryKey(null);
-      setPendingPurchaseScopeKey(null);
-      return;
-    }
-    if (currentItem !== pendingPurchaseItem) setPendingPurchaseItem(currentItem);
-  }, [catalogScopeKey, items, pendingPurchaseItem, pendingPurchaseScopeKey]);
-
-  useEffect(() => {
-    const currentLockedItemId = lockedItem?.id;
-    if (currentLockedItemId) {
-      const newVersionOfLockedItem = items.find(item => item.id === currentLockedItemId);
-      if (newVersionOfLockedItem) {
-        if (JSON.stringify(newVersionOfLockedItem) !== JSON.stringify(lockedItem)) {
-          setLockedItem(newVersionOfLockedItem);
-        }
-      } else {
-        setLockedItem(null);
-        if (hoveredItem && hoveredItem.id === currentLockedItemId) {
-          setHoveredItem(null);
-        }
-      }
-    }
-  }, [items, lockedItem, hoveredItem]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      try {
-        const schemas = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => getSchema(id)));
-        if (!isMounted) {
-          return;
-        }
-
-        const keys = new Set();
-        schemas.forEach((schema) => {
-          Object.keys(schema?.Parametri?.Special || {}).forEach((key) => keys.add(key));
-        });
-
-        setSpecialSchemaKeys(Array.from(keys).sort());
-      } catch (error) {
-        console.warn('Failed to load special parameter schema keys:', error);
-        if (isMounted) {
-          setSpecialSchemaKeys([]);
-        }
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
+    const timer = setTimeout(() => {
     try {
       localStorage.setItem(
         BAZAAR_FILTERS_STORAGE_KEY,
@@ -462,6 +308,8 @@ export default function Bazaar() {
     } catch (error) {
       console.error('Failed to save Bazaar filters:', error);
     }
+    }, 250);
+    return () => clearTimeout(timer);
   }, [
     searchTerm,
     selectedSlot,
@@ -474,24 +322,10 @@ export default function Bazaar() {
     onlyAffordable,
   ]);
 
-  const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
-  const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
-  const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
-  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
-  const populatedSpecialKeys = new Set(items.flatMap((item) => getAvailableSpecialKeys(item)));
-  const orderedSpecialParams = specialSchemaKeys
-    .filter((key) => populatedSpecialKeys.has(key));
-  const extraSpecialParams = Array.from(populatedSpecialKeys)
-    .filter((key) => !specialSchemaKeys.includes(key))
-    .sort((a, b) => a.localeCompare(b));
-  const specialParams = ['All', ...orderedSpecialParams, ...extraSpecialParams];
-  const combatParams = ['All', ...Array.from(new Set(items.flatMap(item => 
-    item.Parametri?.Combattimento ? Object.keys(item.Parametri.Combattimento) : []
-  )))];
-  
-  const baseParams = ['All', ...Array.from(new Set(items.flatMap(item => 
-    item.Parametri?.Base ? Object.keys(item.Parametri.Base) : []
-  )))];
+  const {slots,hands,tipos,itemTypes,specialParams,combatParams,baseParams} = useMemo(() => {
+    const facet = catalog.facets || {};
+    return {slots:['All',...(facet.slots || [])],hands:['All',...(facet.hands || [])],tipos:['All',...(facet.tipos || [])],itemTypes:['All',...(facet.itemTypes || [])],specialParams:['All',...(facet.special || [])],combatParams:['All',...(facet.combat || [])],baseParams:['All',...(facet.base || [])]};
+  }, [catalog.facets]);
 
   // Generic toggle utility and specific handlers (restored after refactor)
   const toggleFilter = (currentFilters, setFilters, value) => {
@@ -537,114 +371,19 @@ export default function Bazaar() {
     }
   }, []);
 
-  const handleHoverItem = (item) => {
-    if (!lockedItem) {
-      setHoveredItem(item);
-    }
-  };
-
-  const handleLockToggle = (itemToToggle) => {
-    if (lockedItem && lockedItem.id === itemToToggle.id) {
+  const handleHoverItem = useCallback((item) => {
+    if (!lockedRef.current) setHoveredItem(item ? {...item, _scopeKey: catalogScopeKey} : null);
+  }, [catalogScopeKey]);
+  const handleLockToggle = useCallback((itemToToggle) => {
+    if (lockedRef.current?.id === itemToToggle.id) {
       setLockedItem(null);
-      setHoveredItem(itemToToggle);
+      setHoveredItem({...itemToToggle, _scopeKey: catalogScopeKey});
     } else {
-      setLockedItem(itemToToggle);
+      setLockedItem({...itemToToggle, _scopeKey: catalogScopeKey});
       setHoveredItem(null);
     }
-  };
-
-  const filteredItems = items.filter((item) => {
-    const matchesSearch = searchTerm.trim() === '' ||
-      (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
-    const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
-    const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
-    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
-    const matchesSpecialParams = selectedSpecialParams.includes('All') || selectedSpecialParams.some((param) => isMeaningfulSpecialValue(item.Parametri?.Special?.[param]));
-    const rawPrice = item?.General?.prezzo ?? 0;
-    const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
-    const matchesAffordable = !onlyAffordable || price <= userGold;
-    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType && matchesSpecialParams && matchesAffordable;
-  }).sort((a, b) => {
-    // Debug: Log when sorting is triggered
-    const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
-    const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
-    const shouldSort = shouldSortCombat || shouldSortBase;
-    
-    if (shouldSort) {
-      console.log('Attempting to sort by params - Combat:', selectedCombatParams, 'Base:', selectedBaseParams);
-    }
-    
-    // If parameters are selected for sorting, sort by their contribution at level 1
-    if (shouldSort) {
-      let scoreA = 0;
-      let scoreB = 0;
-      
-      // Add combat parameter scores
-      if (shouldSortCombat) {
-        selectedCombatParams.forEach(param => {
-          let valueA = 0;
-          let valueB = 0;
-          
-          if (a.Parametri?.Combattimento?.[param]) {
-            const paramDataA = a.Parametri.Combattimento[param];
-            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
-          }
-          
-          if (b.Parametri?.Combattimento?.[param]) {
-            const paramDataB = b.Parametri.Combattimento[param];
-            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
-          }
-          
-          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
-          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
-          
-          scoreA += valueA;
-          scoreB += valueB;
-        });
-      }
-      
-      // Add base parameter scores
-      if (shouldSortBase) {
-        selectedBaseParams.forEach(param => {
-          let valueA = 0;
-          let valueB = 0;
-          
-          if (a.Parametri?.Base?.[param]) {
-            const paramDataA = a.Parametri.Base[param];
-            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
-          }
-          
-          if (b.Parametri?.Base?.[param]) {
-            const paramDataB = b.Parametri.Base[param];
-            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
-          }
-          
-          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
-          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
-          
-          scoreA += valueA;
-          scoreB += valueB;
-        });
-      }
-      
-      // Debug logging (remove after testing)
-      if (scoreA !== scoreB) {
-        console.log(`Sorting: ${a.General?.Nome || 'Unknown'} (${scoreA}) vs ${b.General?.Nome || 'Unknown'} (${scoreB})`);
-      }
-      
-      // Sort by highest score first (descending)
-      if (scoreB !== scoreA) {
-        return scoreB - scoreA;
-      }
-    }
-    
-    // Default sort by name if no combat params selected or scores are equal
-    const nameA = (a.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
-    const nameB = (b.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
-    return nameA.localeCompare(nameB);
-  });
+  }, [catalogScopeKey]);
+  const filteredItems = useMemo(() => items.slice(page * 50, (page + 1) * 50), [items, page]);
 
   const displayConfirmation = useCallback((message, type = "success") => {
     setConfirmationMessage(message);
@@ -654,7 +393,7 @@ export default function Bazaar() {
     }, 2500);
   }, []);
 
-  const startPurchaseFlow = (item) => {
+  const startPurchaseFlow = useCallback((item) => {
     if (!user || !resourcesReady) {
       displayConfirmation('Devi essere loggato per acquistare.', 'error');
       return;
@@ -667,16 +406,19 @@ export default function Bazaar() {
       displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
       return;
     }
+    if (pendingPurchaseItem && pendingPurchaseScopeKey === catalogScopeKey) return;
+    setPurchaseUncertain(false);
     setPendingPurchaseItem(item);
     setPendingPurchaseRetryKey(`${user.uid}:${createUserOperationId('purchase-flow')}`);
     setPendingPurchaseScopeKey(catalogScopeKey);
-  };
+  }, [user, resourcesReady, userGold, pendingPurchaseItem, pendingPurchaseScopeKey, catalogScopeKey, displayConfirmation]);
 
   const confirmPurchase = async () => {
-    const item = items.find((candidate) => candidate.id === pendingPurchaseItem?.id);
+    const item = purchaseUncertain ? pendingPurchaseItem : purchaseDetail.item;
     const actionScopeKey = catalogScopeKey;
     if (
       !item
+      || item.id !== pendingPurchaseItem?.id
       || !user
       || !resourcesReady
       || pendingPurchaseScopeKey !== catalogScopeKey
@@ -691,7 +433,7 @@ export default function Bazaar() {
     const name = item.General?.Nome || 'Oggetto';
   // Stacking allowed: skip already-owned guard
     const gold = userGold;
-    if (price > gold) {
+    if (price > gold && !purchaseUncertain) {
       displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
       return;
     }
@@ -717,15 +459,18 @@ export default function Bazaar() {
           displayConfirmation(`Acquisto completato: "${name}". Oro rimanente: ${res.newGold}`);
         }
       } else {
+        preservePendingPurchase = true;
         displayConfirmation('Risposta inattesa dalla transazione.', 'error');
       }
     } catch (e) {
+      preservePendingPurchase = true;
       if (catalogScopeRef.current === actionScopeKey) {
         displayConfirmation(`Errore durante l'acquisto: ${e.message}`, 'error');
       }
     } finally {
       if (catalogScopeRef.current !== actionScopeKey) return;
       setPurchasingItemId(null);
+      setPurchaseUncertain(preservePendingPurchase);
       if (!preservePendingPurchase) {
         setPendingPurchaseItem(null);
         setPendingPurchaseRetryKey(null);
@@ -733,28 +478,51 @@ export default function Bazaar() {
       }
     }
   };
-  const handleAddWeaponClick = () => {
-    setShowOverlay(true);
+  const openEditor = (kind) => {
+    if (!isAdmin) return;
+    const editSelection = lockedItem?._scopeKey === catalogScopeKey && lockedItem.item_type === kind;
+    if (editSelection && (!panelItem || panelItem.id !== lockedItem.id)) return;
+    // An open form owns its loaded detail and target ID until it closes.
+    // Revision refreshes may replace or clear the live comparison detail.
+    setEditor({kind, item: editSelection ? panelItem : null, scopeKey: catalogScopeKey});
   };
-  const handleAddArmaturaClick = () => {
-    setShowArmaturaOverlay(true);
-  };
-  const handleAddAccessorioClick = () => {
-    setShowAccessorioOverlay(true);
-  };
-  const handleAddConsumabileClick = () => {
-    setShowConsumabileOverlay(true);
-  };
+  const handleAddWeaponClick = () => openEditor('weapon');
+  const handleAddArmaturaClick = () => openEditor('armatura');
+  const handleAddAccessorioClick = () => openEditor('accessorio');
+  const handleAddConsumabileClick = () => openEditor('consumabile');
 
-  const panelItem = lockedItem || hoveredItem;
+  const selectedPanelItem = lockedItem?._scopeKey === catalogScopeKey ? lockedItem : hoveredItem?._scopeKey === catalogScopeKey ? hoveredItem : null;
+  const detail = useBazaarDetail(selectedPanelItem, catalogScopeKey, catalog.revision, lockedItem ? 0 : 150);
+  const panelItem = detail.item;
   const stickyTop = topInset + 24;
   const comparisonPanelHeight = `calc(100vh - ${stickyTop + 24}px)`;
   const layoutColumnsClassName = 'xl:grid-cols-[18rem_minmax(0,1fr)_minmax(20rem,28vw)]';
+
+  const cardGrid = useMemo(() => (<PerformanceProfiler id="BazaarCardGrid">{filteredItems.length > 0 ? (
+              filteredItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onPurchase={startPurchaseFlow}
+                  onHoverItem={handleHoverItem}
+                  onLockToggle={handleLockToggle}
+                  isLocked={lockedItem?.id === item.id}
+                  purchasing={purchasingItemId === item.id}
+                  purchaseDisabled={!resourcesReady || !!pendingPurchaseItem}
+                  userGold={userGold}
+                />
+              ))
+            ) : (
+              <p className="col-span-full mt-8 text-center text-gray-400">Nessun oggetto trovato corrispondente ai filtri.</p>
+            )}</PerformanceProfiler>), [filteredItems, startPurchaseFlow, handleHoverItem, handleLockToggle, lockedItem?.id, purchasingItemId, resourcesReady, pendingPurchaseItem, userGold]);
 
   return (
     <div className="relative w-full min-h-screen flex flex-col">
       <div className={`relative z-10 grid flex-grow items-start gap-6 px-4 py-4 md:px-6 md:py-6 ${layoutColumnsClassName}`}>
         <FiltersSection
+          onOpenFilter={catalog.loadFacets}
+          optionsLoading={catalog.facetsLoading}
+          optionsError={catalog.facetsError}
           slots={slots}
           hands={hands}
           tipos={tipos}
@@ -821,7 +589,10 @@ export default function Bazaar() {
             </div>
           )}
 
-          <div className="mb-4">            <input
+          <div className="mb-4">
+            {catalog.error && <p role="alert">{catalog.error} <button onClick={() => { setPage(0); catalog.retry(); }}>Riprova</button></p>}
+            {catalog.loading && <p role="status">Caricamento catalogo...</p>}
+            <input
               type="text"
               value={searchTerm}
               onChange={handleSearchChange}
@@ -830,25 +601,15 @@ export default function Bazaar() {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
-            {filteredItems.length > 0 ? (
-              filteredItems.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  onPurchase={startPurchaseFlow}
-                  onHoverItem={handleHoverItem}
-                  onLockToggle={() => handleLockToggle(item)}
-                  isLocked={lockedItem && lockedItem.id === item.id}
-                  purchasing={purchasingItemId === item.id}
-                  purchaseDisabled={!resourcesReady}
-                  userGold={userGold}
-                />
-              ))
-            ) : (
-              <p className="col-span-full mt-8 text-center text-gray-400">Nessun oggetto trovato corrispondente ai filtri.</p>
-            )}
+          <div ref={pageGridRef} tabIndex={-1} aria-label="Oggetti della pagina" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
+            {cardGrid}
           </div>
+          <nav aria-label="Pagine catalogo" className="mt-4 flex flex-wrap items-center gap-3">
+            {page > 0 && <button type="button" onClick={() => setPage(p => p - 1)}>Pagina precedente</button>}
+            <span>Pagina {page + 1}</span>
+            {(page + 1) * 50 < items.length && <button type="button" onClick={() => setPage(p => p + 1)}>Pagina successiva</button>}
+            {catalog.cursor && (page + 1) * 50 >= items.length && <button type="button" disabled={catalog.loading} onClick={async () => { const key = catalog.queryKey; const loaded = await catalog.loadMore(); if (loaded && pageKeyRef.current === key) setPage(p => p + 1); }}>Carica altri</button>}
+          </nav>
         </div>
 
         <div
@@ -861,59 +622,45 @@ export default function Bazaar() {
         >
           <div className="overflow-hidden rounded-2xl shadow-2xl">
             <div className="xl:h-[var(--bazaar-comparison-panel-height)]">
-              {panelItem ? (
-                <ComparisonPanel
-                  item={panelItem}
-                  showMessage={displayConfirmation}
-                  key={`comparisonPanel-${panelItem.id}`}
-                />
-              ) : (
-                <BazaarDetailPlaceholder />
-              )}
+              {detail.error && <p role="alert">Oggetto non disponibile.</p>}
+              <ComparisonPanel item={panelItem} scopeKey={catalogScopeKey} showMessage={displayConfirmation} />
             </div>
           </div>
         </div>
       </div>
 
-      {showOverlay && (
+      {activeEditor?.kind === 'weapon' && (
         <AddWeaponOverlay
-          onClose={(success) => {
-            setShowOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem || null}
-          editMode={!!lockedItem}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
-      )}      {showArmaturaOverlay && (
+      )}
+      {activeEditor?.kind === 'armatura' && (
         <AddArmaturaOverlay
-          onClose={(success) => {
-            setShowArmaturaOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "armatura" ? lockedItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "armatura")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
-      {showAccessorioOverlay && (
+      {activeEditor?.kind === 'accessorio' && (
         <AddAccessorioOverlay
-          onClose={(success) => {
-            setShowAccessorioOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "accessorio" ? lockedItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
-      {showConsumabileOverlay && (
+      {activeEditor?.kind === 'consumabile' && (
         <AddConsumabileOverlay
-          onClose={(success) => {
-            setShowConsumabileOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "consumabile" ? lockedItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "consumabile")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
@@ -932,14 +679,21 @@ export default function Bazaar() {
           </motion.div>
         )}
       </AnimatePresence>
-      {/* Purchase Confirmation Modal */}
+      {/* The intent survives page/revision refreshes; only explicit cancel or a definitive result clears it. */}
+      {pendingPurchaseItem && pendingPurchaseScopeKey === catalogScopeKey && !purchaseDetail.item && !purchaseUncertain && (
+        <div role="status" className="fixed bottom-5 rounded bg-slate-800 p-4">
+          {purchaseDetail.error ? 'Oggetto non disponibile.' : 'Verifica disponibilità...'}
+          <button disabled={!!purchasingItemId} onClick={() => { if (purchasingItemId) return; setPendingPurchaseItem(null); setPendingPurchaseRetryKey(null); setPendingPurchaseScopeKey(null); }}>Annulla acquisto</button>
+        </div>
+      )}
       {pendingPurchaseItem
         && pendingPurchaseScopeKey === catalogScopeKey
-        && items.some((item) => item.id === pendingPurchaseItem.id)
+        && (purchaseDetail.item || purchaseUncertain)
         && resourcesReady
         && pendingPurchaseRetryKey?.startsWith(`${user?.uid}:`) && (
         <PurchaseConfirmModal
-          item={pendingPurchaseItem}
+          item={purchaseDetail.item || pendingPurchaseItem}
+          retryUncertain={purchaseUncertain}
             userGold={userGold}
           onConfirm={confirmPurchase}
           onClose={() => {

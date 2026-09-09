@@ -46,7 +46,7 @@ export const subscribeCatalogItems = (itemIds, observer) => {
     listen: ({ next, error }) => onSnapshot(
       labelFirestoreTarget(
         query(
-          collection(db, 'items'),
+          collection(db, 'catalogMedia'),
           where(documentId(), 'in', stableItemIds)
         ),
         CATALOG_ITEMS_METRIC_KEY

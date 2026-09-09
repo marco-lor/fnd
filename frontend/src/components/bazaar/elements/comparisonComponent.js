@@ -1,6 +1,7 @@
+import { catalogDeleteDoc } from '../../../data/bazaarCatalogRepository';
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { deleteDoc, doc } from '../../../performance/firestore';
+import { doc } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 import { createLegacyStorageCleanup } from '../../common/legacyMediaStorage';
 import { computeValue } from '../../common/computeFormula';
@@ -390,8 +391,10 @@ const SpellCard = ({ spellName, spell, userData }) => {
   );
 };
 
-export default function ComparisonPanel({ item, showMessage }) {
+export default function ComparisonPanel({ item, showMessage, scopeKey }) {
   const { user, userData: authUserData } = useContext(AuthContext);
+  const panelScope = scopeKey || `${user?.uid || 'anonymous'}:${authUserData?.role || 'unknown'}`;
+  const itemIdentity = `${panelScope}:${item?.id || ''}`;
   const { data: progression } = useProgression(user?.uid);
   const userData = useMemo(() => ({
     ...(progression || {}),
@@ -416,39 +419,37 @@ export default function ComparisonPanel({ item, showMessage }) {
   /* ----------------------------------------------------------------------- */
   /*  Fetch schema based on item type                                        */
   /* ----------------------------------------------------------------------- */
+  const [stateIdentity, setStateIdentity] = useState(itemIdentity);
+  const [schemaIdentity, setSchemaIdentity] = useState(null);
+  const requestedSchema = `${panelScope}:${item?.item_type || ''}`;
   useEffect(() => {
-    const fetchSchema = async () => {
-      if (!item?.item_type) {
-        setSchema(null);
-        return;
-      }
-
-      setIsSchemaLoading(true);
-      try {
-        const schemaData = await getSchema(`schema_${item.item_type}`);
-        if (schemaData) {
-          setSchema(schemaData);
-        } else {
-          console.warn(`Schema for item type "${item.item_type}" not found.`);
-          setSchema(null);
-        }
-      } catch (error) {
-        console.error(`Error fetching schema for item type "${item.item_type}":`, error);
-        setSchema(null);
-      } finally {
-        setIsSchemaLoading(false);
-      }
-    };
-
-    fetchSchema();
-  }, [item?.item_type]);
+    setStateIdentity(itemIdentity);
+    setShowDeleteConfirmation(false);
+    setShowEditOverlay(false);
+    setImageError(false);
+    setAllowedUsersNames([]);
+    setAllowedUsersLoading(false);
+  }, [itemIdentity]);
+  useEffect(() => {
+    let active = true;
+    setSchema(null);
+    setSchemaIdentity(requestedSchema);
+    setIsSchemaLoading(Boolean(item?.item_type));
+    if (item?.item_type) {
+      getSchema(`schema_${item.item_type}`).then(value => {
+        if (active) setSchema(value || null);
+      }).catch(() => { if (active) setSchema(null); })
+        .finally(() => { if (active) setIsSchemaLoading(false); });
+    }
+    return () => { active = false; };
+  }, [item?.item_type, panelScope, requestedSchema]);
 
   /* ----------------------------------------------------------------------- */
   /*  Helpers & derived data                                                 */
   /* ----------------------------------------------------------------------- */
-  const general        = item.General   || {};
-  const specific       = item.Specific  || {};
-  const parametri      = item.Parametri || {};
+  const general        = item?.General   || {};
+  const specific       = item?.Specific  || {};
+  const parametri      = item?.Parametri || {};
   const baseParams     = parametri.Base         || {};
   const combatParams   = parametri.Combattimento|| {};
   const specialParams  = parametri.Special      || {};
@@ -477,7 +478,7 @@ export default function ComparisonPanel({ item, showMessage }) {
             {data[col]}
             {computable && userParams && (
               <span className="ml-1 text-gray-400">
-                ({computeValue(data[col], userParams)})
+                ({computeValue(String(data[col]), userParams)})
               </span>
             )}
           </>
@@ -524,7 +525,7 @@ export default function ComparisonPanel({ item, showMessage }) {
   /*  Dynamic field rendering for Specific section                          */
   /* ----------------------------------------------------------------------- */
   const renderSpecificFields = () => {
-    if (isSchemaLoading) {
+    if (isSchemaLoading || schemaIdentity !== requestedSchema) {
       return (
         <p className="text-sm text-gray-400">Caricamento campi specifici...</p>
       );
@@ -583,7 +584,7 @@ export default function ComparisonPanel({ item, showMessage }) {
       // uploads after revalidating the deleted Firestore document.
 
       // delete firestore doc
-      await deleteDoc(doc(db, 'items', item.id));
+      await catalogDeleteDoc(doc(db, 'items', item.id));
       await storageCleanup.flush();
       console.log('Item document deleted successfully from Firestore.');
       showMessage?.(`"${itemName}" eliminato con successo.`);
@@ -612,13 +613,22 @@ export default function ComparisonPanel({ item, showMessage }) {
         setAllowedUsersNames([]);
         return;
       }
+      setAllowedUsersNames([]);
       setAllowedUsersLoading(true);
       try {
-        const page = await getUserDirectoryPage();
-        const labelsByUid = new Map((page?.items || []).map((entry) => [
-          entry.id,
-          entry.label,
-        ]));
+        const labelsByUid = new Map();
+        let cursor = null;
+        const seen = new Set();
+        do {
+          const page = await getUserDirectoryPage({ cursor });
+          if (cancelled) return;
+          for (const entry of page?.items || []) labelsByUid.set(entry.id, entry.label);
+          if (allowedUserIds.every(uid => labelsByUid.has(uid)) || !page?.hasMore || !page.cursor) break;
+          const next = JSON.stringify(page.cursor);
+          if (seen.has(next)) throw new Error('Repeated directory cursor');
+          seen.add(next);
+          cursor = page.cursor;
+        } while (!cancelled);
         const names = allowedUserIds.map((uid) => labelsByUid.get(uid) || uid);
         if (!cancelled) setAllowedUsersNames(names);
       } catch (error) {
@@ -629,11 +639,12 @@ export default function ComparisonPanel({ item, showMessage }) {
     };
     fetchAllowedUsers();
     return () => { cancelled = true; };
-  }, [allowedUsersSignature, isAdmin, item?.visibility]);
+  }, [allowedUsersSignature, isAdmin, item?.visibility, itemIdentity]);
 
   /* ----------------------------------------------------------------------- */
   /*  Render                                                                 */
   /* ----------------------------------------------------------------------- */
+  if (!item) return <div data-testid="bazaar-detail-placeholder" className="h-full min-h-[22rem] bg-gray-900 p-6 text-slate-400"><h3>Item Detail</h3><p>Hover an item to inspect it. Click a tile to pin its details while you browse the Bazaar.</p></div>;
   return (
     <>
       {/* MAIN WRAPPER — now with the ​old​ full-panel image style */}
@@ -700,7 +711,7 @@ export default function ComparisonPanel({ item, showMessage }) {
         {/* ----------------------------------------------------------------- */}
         {/*  DELETE CONFIRMATION (on top of everything)                       */}
         {/* ----------------------------------------------------------------- */}
-        {showDeleteConfirmation && (
+        {stateIdentity === itemIdentity && showDeleteConfirmation && (
           <div className="absolute inset-0 flex items-center justify-center z-50 bg-black bg-opacity-80 p-4">
             <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 text-center">
               <p className="text-white mb-4">
@@ -743,7 +754,7 @@ export default function ComparisonPanel({ item, showMessage }) {
             {isAdmin && item.visibility === 'custom' && (
               <p>
                 <span className="font-semibold text-gray-100">Utenti Abilitati:</span>{' '}
-                {allowedUsersLoading ? 'Caricamento...' : (
+                {allowedUsersLoading || stateIdentity !== itemIdentity ? 'Caricamento...' : (
                   allowedUsersNames.length > 0 ? allowedUsersNames.join(', ') : 'Nessuno'
                 )}
               </p>
@@ -894,7 +905,7 @@ export default function ComparisonPanel({ item, showMessage }) {
                   .sort((a, b) => a[0].localeCompare(b[0]))
                   .map(([spellName, spellData]) => (
                   <SpellCard
-                    key={spellName}
+                    key={`${itemIdentity}:${spellName}`}
                     spellName={spellName}
                     spell={withTask07EmbeddedMedia(
                       item,
@@ -908,7 +919,7 @@ export default function ComparisonPanel({ item, showMessage }) {
           )}
         </div>
       </div>      {/* EDIT OVERLAY ------------------------------------------------------- */}
-      {showEditOverlay && (
+      {stateIdentity === itemIdentity && showEditOverlay && (
         <>
           {item?.item_type === 'armatura' ? (
             <AddArmaturaOverlay

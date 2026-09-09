@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  activateCatalogFixture,
   assertMeasurementTriggerSuppression,
   summarizeTriggerActivityText,
   waitForEmulators,
@@ -14,6 +15,32 @@ const {
 const playwrightConfig = require('./playwright.config');
 
 const invocation = (name) => `Beginning execution of "${name}"`;
+
+test('catalog page, detail and writer callables are foreground activity', () => {
+  const summary = summarizeTriggerActivityText([
+    invocation('europe-west8-task09CatalogPage'),
+    invocation('europe-west8-task09CatalogDetail'),
+    invocation('europe-west8-task09WriteCatalogItem'),
+  ].join('\n'));
+  assert.equal(summary.backgroundInvocations, 0);
+  assert.deepEqual(assertMeasurementTriggerSuppression(
+    {backgroundInvocations: 0}, summary
+  ), {expected: 0, observed: 0});
+});
+
+test('browser setup activates the seeded catalog using the bounded emulator operator', async () => {
+  let invocation;
+  await activateCatalogFixture(async (input) => {
+    invocation = input;
+    return {status: 0};
+  });
+  assert.match(invocation.args[0], /task09b-migrate\.js$/);
+  assert.equal(invocation.args[1], 'run');
+  assert.ok(invocation.timeoutMs > 0);
+  await assert.rejects(activateCatalogFixture(async () => ({
+    status: 1, stderr: 'projection incomplete',
+  })), /Catalog fixture activation failed.*projection incomplete/s);
+});
 
 test('seed trigger summary allows only bounded readiness activity', () => {
   const summary = summarizeTriggerActivityText([

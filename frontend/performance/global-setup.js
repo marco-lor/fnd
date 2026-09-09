@@ -20,6 +20,7 @@ const {
   PERFORMANCE_PROJECT_ID: projectId,
   assertPerformanceProject,
   configureOwnedPerformanceEnvironment,
+  frontendRoot,
   writeJson,
 } = require('../scripts/performance/common');
 
@@ -28,6 +29,7 @@ const STARTUP_TIMEOUT_MS = 240_000;
 const STARTUP_REQUEST_TIMEOUT_MS = 10_000;
 const STARTUP_INTERVAL_MS = 500;
 const FIXTURE_SEED_TIMEOUT_MS = 300_000;
+const CATALOG_ACTIVATION_TIMEOUT_MS = 120_000;
 const TASK07_CALLABLES_TIMEOUT_MS = 240_000;
 const SECURITY_RULES_TIMEOUT_MS = 120_000;
 const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
@@ -44,6 +46,9 @@ const NON_BACKGROUND_HTTP_FUNCTIONS = new Set([
   'europe-west8-task05CharacterCreation',
   'europe-west8-task05PrepareConsumable',
   'europe-west8-task05CommitConsumable',
+  'europe-west8-task09CatalogPage',
+  'europe-west8-task09CatalogDetail',
+  'europe-west8-task09WriteCatalogItem',
   'europe-west8-task07PrepareMediaUpload',
   'europe-west8-task07GetMediaStatus',
   'europe-west8-task07ResolveCharacterMedia',
@@ -68,6 +73,22 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-syncTask07MusicStreamFromSession',
   'europe-west8-task07ProcessMediaUpload',
 ]);
+
+const activateCatalogFixture = async (run = runBoundedChildProcess) => {
+  const result = await run({
+    command: process.execPath,
+    args: [path.join(frontendRoot, 'scripts', 'performance', 'task09b-migrate.js'), 'run'],
+    cwd: frontendRoot,
+    environment: process.env,
+    timeoutMs: CATALOG_ACTIVATION_TIMEOUT_MS,
+    label: 'Catalog fixture activation',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Catalog fixture activation failed.\n${result.stdout || ''}\n${result.stderr || ''}`);
+  }
+  process.stdout.write(result.stdout || '');
+  process.stderr.write(result.stderr || '');
+};
 
 const summarizeTriggerActivityText = (contents = '') => {
   const names = Array.from(contents.matchAll(/Beginning execution of "([^"]+)"/g), (match) => match[1]);
@@ -415,6 +436,11 @@ module.exports = async () => {
     triggersDisabled = true;
     report.measurementWindow.backgroundTriggersEnabled = false;
 
+    // Project the verified source fixture with triggers disabled, before any
+    // browser consumes the Task09 reader or Home's catalogMedia subscriptions.
+    stage = 'catalog-fixture-activation';
+    await activateCatalogFixture();
+
     stage = 'seed-trigger-accounting';
     report.triggerActivity = summarizeTriggerActivity(emulatorLogPath);
     report.measurementWindow.triggerActivityBaseline = report.triggerActivity;
@@ -506,6 +532,7 @@ module.exports = async () => {
 };
 
 module.exports.assertMeasurementTriggerSuppression = assertMeasurementTriggerSuppression;
+module.exports.activateCatalogFixture = activateCatalogFixture;
 module.exports.fetchStartupResponse = fetchStartupResponse;
 module.exports.summarizeTriggerActivity = summarizeTriggerActivity;
 module.exports.summarizeTriggerActivityText = summarizeTriggerActivityText;

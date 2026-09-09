@@ -4387,6 +4387,11 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       plan
     );
     await db.runTransaction(async (transaction) => {
+      const catalogControl = await transaction.get(db.doc('catalogControl/bazaar'));
+      if (entry.targetPath.startsWith('items/') && catalogControl.exists && ['active', 'building'].includes(catalogControl.get('state'))) {
+        throw new Error('Task09 catalog protocol is active: deactivate it before legacy media backfill/rollback.');
+      }
+
       let currentPlacementProof = null;
       let currentSourceFoeProof = null;
       let currentSourceFoeSnapshot = null;
@@ -4708,6 +4713,11 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       });
     const receiptRef = db.doc(`${RECEIPT_COLLECTION}/${entry.receiptId}`);
     await db.runTransaction(async (transaction) => {
+      const catalogControl = await transaction.get(db.doc('catalogControl/bazaar'));
+      if (entry.targetPath.startsWith('items/') && catalogControl.exists && ['active', 'building'].includes(catalogControl.get('state'))) {
+        throw new Error('Task09 catalog protocol is active: deactivate it before legacy media backfill/rollback.');
+      }
+
       const [receipt, manifest, target] = await transaction.getAll(
         receiptRef,
         db.doc(`media_assets/${entry.assetId}`),
@@ -4775,6 +4785,11 @@ const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
       db.doc(`media_assets/${entry.previousAssetId}`) :
       null;
     await db.runTransaction(async (transaction) => {
+      const catalogControl = await transaction.get(db.doc('catalogControl/bazaar'));
+      if (entry.targetPath.startsWith('items/') && catalogControl.exists && ['active', 'building'].includes(catalogControl.get('state'))) {
+        throw new Error('Task09 catalog protocol is active: deactivate it before legacy media backfill/rollback.');
+      }
+
       const snapshots = await transaction.getAll(
         receiptRef,
         manifestRef,

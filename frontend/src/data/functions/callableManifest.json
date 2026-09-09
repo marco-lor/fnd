@@ -262,6 +262,24 @@
       "region": "europe-west8",
       "owner": "progression",
       "compatibilityAliasOf": null
+    },
+    "task09CatalogPage": {
+      "functionId": "task09CatalogPage",
+      "region": "europe-west8",
+      "owner": "bazaar",
+      "compatibilityAliasOf": null
+    },
+    "task09CatalogDetail": {
+      "functionId": "task09CatalogDetail",
+      "region": "europe-west8",
+      "owner": "bazaar",
+      "compatibilityAliasOf": null
+    },
+    "task09WriteCatalogItem": {
+      "functionId": "task09WriteCatalogItem",
+      "region": "europe-west8",
+      "owner": "bazaar",
+      "compatibilityAliasOf": null
     }
   }
 }

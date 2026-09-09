@@ -1,4 +1,5 @@
 import React from 'react';
+import { MotionGlobalConfig } from 'framer-motion';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
@@ -1074,10 +1075,14 @@ test('placement mutation retry identity covers display, status, and vision field
 
 describe('GrigliataPage', () => {
   let firestore;
+  let previousSkipAnimations;
 
   beforeEach(() => {
     __resetRepositoryRuntimeForTests();
     jest.useFakeTimers();
+    // Assert final UI state without coupling exit animations to clock resets.
+    previousSkipAnimations = MotionGlobalConfig.skipAnimations;
+    MotionGlobalConfig.skipAnimations = true;
     Object.defineProperty(window, 'scrollTo', {
       writable: true,
       value: jest.fn(),
@@ -1260,6 +1265,7 @@ describe('GrigliataPage', () => {
   });
 
   afterEach(() => {
+    MotionGlobalConfig.skipAnimations = previousSkipAnimations;
     jest.clearAllTimers();
     jest.useRealTimers();
   });

@@ -1,7 +1,8 @@
+import { catalogSetDoc, catalogUpdateDoc, catalogDeleteDoc } from '../../../data/bazaarCatalogRepository';
 // file: ./frontend/src/components/bazaar/elements/addArmatura.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc } from "../../../performance/firestore";
+import { doc, getDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
     deleteLegacyStoragePath,
@@ -9,7 +10,6 @@ import {
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
 import MediaImage from "../../common/MediaImage";
-import { deleteDoc } from "../../../performance/firestore";
 import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
 import { persistCanonicalInventoryItem } from "../../../data/media/privateInventoryMediaWriter";
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
@@ -614,8 +614,8 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     ));
                 }
                 const persistCatalogParent = async () => {
-                    if (catalogIsExisting) await updateDoc(armaturaDocRef, finalArmaturaData);
-                    else await setDoc(armaturaDocRef, finalArmaturaData);
+                    if (catalogIsExisting) await catalogUpdateDoc(armaturaDocRef, finalArmaturaData);
+                    else await catalogSetDoc(armaturaDocRef, finalArmaturaData);
                     catalogWriteCommitted = true;
                     if (!editMode) pendingCatalogCreateRef.current = docId;
                 };
@@ -629,9 +629,9 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                             currentItem: catalogBefore || initialData || {},
                             prepareEntity: persistCatalogParent,
                             rollbackPreparedEntity: async () => {
-                                if (catalogBefore) await setDoc(armaturaDocRef, catalogBefore);
+                                if (catalogBefore) await catalogSetDoc(armaturaDocRef, catalogBefore);
                                 else {
-                                    await deleteDoc(armaturaDocRef);
+                                    await catalogDeleteDoc(armaturaDocRef);
                                     pendingCatalogCreateRef.current = null;
                                     catalogWriteCommitted = false;
                                 }

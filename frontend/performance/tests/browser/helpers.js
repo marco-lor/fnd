@@ -95,20 +95,20 @@ const BROWSER_ASSET_WARMUP_BATCH_SIZE = 4;
 const BROWSER_ASSET_WARM_PASS_TIMEOUT_MS = 30_000;
 const BROWSER_ASSET_VALIDATION_PASS_TIMEOUT_MS = 5_000;
 const BROWSER_ASSET_VALIDATION_TRANSIENT_RETRY_LIMIT = 1;
-const BUILD_REPORT_PATH = path.join(resultsDir, 'build-report.json');
+const BUILD_REPORT_PATH = path.join(resultsDir, process.env.FND_PERF_REACT_PROFILE === '1' ? 'profile-build-report.json' : 'build-report.json');
 const LIFECYCLE_STREAM_OPERATIONS = {
   'auth-transition': new Set(['Listen']),
   'connection-drain': new Set(['Listen', 'Write']),
   'route-cleanup': new Set(['Listen', 'Write']),
 };
 
-const createStaticAssetWarmupBatches = (buildReport, { batchSize = 6 } = {}) => {
+const createStaticAssetWarmupBatches = (buildReport, { batchSize = 6, profiling = false } = {}) => {
   if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 16) {
     throw new TypeError('Static asset warmup batchSize must be an integer from 1 through 16.');
   }
   if (
     buildReport?.schemaVersion !== 1
-    || buildReport?.buildMode !== 'performance'
+    || buildReport?.buildMode !== (profiling ? 'performance-react-profile' : 'performance')
     || buildReport?.projectId !== projectId
   ) {
     throw new Error(`Static asset warmup requires the ${projectId} performance build report.`);
@@ -448,7 +448,7 @@ const warmBrowserAssetDelivery = async ({
     }
     const batches = createStaticAssetWarmupBatches(
       buildReport || readJson(BUILD_REPORT_PATH),
-      { batchSize: BROWSER_ASSET_WARMUP_BATCH_SIZE }
+      { batchSize: BROWSER_ASSET_WARMUP_BATCH_SIZE, profiling: process.env.FND_PERF_REACT_PROFILE === '1' }
     );
     diagnostics.assetCount = batches.flat().length;
     const warmupUrl = `${origin}/__fnd_perf_browser_asset_warmup__`;

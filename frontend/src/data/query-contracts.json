@@ -15,35 +15,23 @@
       "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 1 }]
     },
     {
-      "id": "bazaar-items-manager-current",
-      "kind": "collection",
-      "queryKey": "bazaar.items.manager.subscribe.v1",
+      "id": "bazaar-catalog-revision",
+      "kind": "document",
+      "queryKey": "bazaar.catalog.revision.subscribe.v1",
       "ownerTask": "Task 09",
-      "currentScope": "All item documents for DM; unbounded and client filtered",
-      "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedName", "__name__"] },
-      "realtimePolicy": "Target first 50-row page only",
-      "activation": "deferred",
-      "sources": [{ "file": "components/bazaar/Bazaar.js", "occurrence": 1 }]
-    },
-    {
-      "id": "bazaar-items-player-current",
-      "kind": "collection",
-      "queryKey": "bazaar.items.player.subscribe.v1",
-      "ownerTask": "Task 09",
-      "currentScope": "OR query for public items or custom items containing current UID; unbounded",
-      "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedName", "__name__"] },
-      "realtimePolicy": "Target first 50-row page only",
-      "activation": "deferred",
-      "sources": [{ "file": "components/bazaar/Bazaar.js", "occurrence": 2 }]
+      "currentScope": "Single catalogControl/bazaar document; summary pages and detail use trusted callables",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "none", "fields": [] },
+      "realtimePolicy": "Mounted Bazaar route only; a revision change invalidates pages, facets and detail",
+      "activation": "active",
+      "sources": [{ "file": "data/bazaarCatalogRepository.js", "occurrence": 1 }]
     },
     {
       "id": "home-inventory-catalog-item-batches",
       "kind": "collection",
       "queryKey": "catalog.items-batch.subscribe.v1",
-      "ownerTask": "Task 05 / Task 07",
-      "currentScope": "Stable groups of at most 10 proven _task05.catalogItemId values displayed by Home inventory and equipment",
+      "ownerTask": "Task 05 / Task 07 / Task 09",
+      "currentScope": "Stable groups of at most 10 catalogMedia projections for proven _task05.catalogItemId values displayed by Home inventory and equipment",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
       "realtimePolicy": "Actor-scoped and ref-counted across Inventory and EquippedInventory; startup is limited to four physical listeners until each initial snapshot settles",
@@ -598,6 +586,10 @@
     }
   ],
   "repositoryQueries": [
+    { "id": "task09-catalog-revision-and-detail", "ownerTask": "Task 09", "activation": "active", "indexMode": "automatic" },
+    { "id": "task09-catalog-dm-page", "ownerTask": "Task 09", "activation": "active", "requiredIndexId": "catalog-generation-rank", "currentScope": "Active generation ordered by unique rank; default limit 50 with signed revision-bound startAfter cursor; advanced filters and facets scan all visible summaries" },
+    { "id": "task09-catalog-public-page", "ownerTask": "Task 09", "activation": "active", "requiredIndexId": "catalog-generation-visibility-rank", "currentScope": "Public visibility branch of the player OR query; same default page and advanced scan policy as the DM query" },
+    { "id": "task09-catalog-custom-page", "ownerTask": "Task 09", "activation": "active", "requiredIndexId": "catalog-generation-visibility-allowed-users-rank", "currentScope": "Custom visibility and allowed_users array-contains UID branch of the player OR query; same default page and advanced scan policy as the DM query" },
     { "id": "config-document-reads", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "codex-document-read-listener", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "user-directory-all-page", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
@@ -611,6 +603,36 @@
     { "id": "task05-techniques-updated-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-techniques-normalized-updated" }
   ],
   "activatedIndexSignatures": [
+    {
+      "id": "catalog-generation-rank",
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "generation", "order": "ASCENDING" },
+        { "fieldPath": "rank", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "id": "catalog-generation-visibility-rank",
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "generation", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" },
+        { "fieldPath": "rank", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "id": "catalog-generation-visibility-allowed-users-rank",
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "generation", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" },
+        { "fieldPath": "allowed_users", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "rank", "order": "ASCENDING" }
+      ]
+    },
     {
       "id": "items-visibility-allowed-users",
       "collectionGroup": "items",
