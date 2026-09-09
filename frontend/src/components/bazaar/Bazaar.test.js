@@ -12,6 +12,9 @@ import { createUserOperationId } from '../../data/userData/userDataCommands';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
 import ComparisonPanel from './elements/comparisonComponent';
 import { AddWeaponOverlay } from './elements/addWeapon';
+import { AddArmaturaOverlay } from './elements/addArmatura';
+import { AddAccessorioOverlay } from './elements/addAccessorio';
+import { AddConsumabileOverlay } from './elements/addConsumabile';
 
 // Exercise the production summary hook with the current server semantic source.
 jest.mock('../../data/bazaarCatalogRepository', () => {
@@ -207,10 +210,50 @@ describe('Bazaar layout', () => {
       await waitFor(() => expect(AddWeaponOverlay).toHaveBeenCalled());
       const props = AddWeaponOverlay.mock.calls.at(-1)[0];
       expect(props.editMode).toBe(itemType === 'weapon');
-      if (itemType === 'weapon') expect(props.initialData.id).toBe(item.id);
-      else expect(props.initialData).toBeNull();
+      expect(props.initialData).toEqual(itemType === 'weapon' ? expect.objectContaining({id: item.id}) : null);
     }
   );
+
+  test.each([
+    ['weapon', 'Modifica Arma', AddWeaponOverlay],
+    ['armatura', 'Modifica Armatura', AddArmaturaOverlay],
+    ['accessorio', 'Modifica Accessorio', AddAccessorioOverlay],
+    ['consumabile', 'Modifica Consumabile', AddConsumabileOverlay],
+  ])('open %s editor retains its item through revision/deletion and closes on access change', async (kind, label, Overlay) => {
+    const original = {id: 'stable-' + kind, item_type: kind, General: {Nome: 'Original name'}, Specific: {}, Parametri: {}};
+    const snapshot = rows => ({forEach: visit => rows.forEach(item => visit({id: item.id, data: () => item}))});
+    let publish;
+    onSnapshot.mockImplementation((_target, next) => {publish = next; next(snapshot([original])); return () => {};});
+    Overlay.mockImplementation(() => <div data-testid="open-catalog-editor" />);
+    try {
+      const {rerender} = render(<Bazaar />);
+      fireEvent.click(await screen.findByTestId('bazaar-item-card-' + original.id));
+      await screen.findByTestId('comparison-panel-content');
+      fireEvent.click(screen.getByRole('button', {name: label}));
+      await screen.findByTestId('open-catalog-editor');
+      const captured = Overlay.mock.calls.at(-1)[0].initialData;
+      Overlay.mockClear();
+      act(() => publish(snapshot([{...original, General: {Nome: 'Renamed externally'}}])));
+      await waitFor(() => expect(screen.getByTestId('comparison-panel-content')).toHaveTextContent('Renamed externally'));
+      act(() => publish(snapshot([])));
+      await screen.findByText('Oggetto non disponibile.');
+      expect(screen.getByTestId('open-catalog-editor')).toBeInTheDocument();
+      expect(Overlay).toHaveBeenCalled();
+      for (const [props] of Overlay.mock.calls) {
+        expect(props.editMode).toBe(true);
+        expect(props.initialData).toBe(captured);
+        expect(props.initialData.id).toBe(original.id);
+      }
+      Overlay.mockClear();
+      useAuthSession.mockReturnValue({repositoryAccessGeneration: 1});
+      rerender(<Bazaar />);
+      expect(screen.queryByTestId('open-catalog-editor')).not.toBeInTheDocument();
+      expect(Overlay).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByText('Caricamento catalogo...')).not.toBeInTheDocument());
+    } finally {
+      Overlay.mockImplementation(() => null);
+    }
+  });
 
   test('hover keeps the card list render count stable and filter persistence is debounced',async()=>{
     const probe=require('../../performance/PerformanceProfiler').usePerformanceRenderProbe;

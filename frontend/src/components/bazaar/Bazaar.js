@@ -235,10 +235,8 @@ function BazaarContent() {
   const [page, setPage] = useState(0);
   const [onlyAffordable, setOnlyAffordable] = useState(savedFilters.onlyAffordable);
 
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
-  const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
-  const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
+  const [editor, setEditor] = useState(null);
+  const activeEditor = editor?.scopeKey === catalogScopeKey ? editor : null;
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const {
@@ -287,10 +285,7 @@ function BazaarContent() {
     setPendingPurchaseRetryKey(null);
     setPendingPurchaseScopeKey(null);
     setPurchasingItemId(null);
-    setShowOverlay(false);
-    setShowArmaturaOverlay(false);
-    setShowAccessorioOverlay(false);
-    setShowConsumabileOverlay(false);
+    setEditor(null);
   }, [catalogScopeKey]);
 
   useEffect(() => {
@@ -483,22 +478,18 @@ function BazaarContent() {
       }
     }
   };
-  const handleAddWeaponClick = () => {
-    if (lockedItem && !panelItem) return;
-    setShowOverlay(true);
+  const openEditor = (kind) => {
+    if (!isAdmin) return;
+    const editSelection = lockedItem?._scopeKey === catalogScopeKey && lockedItem.item_type === kind;
+    if (editSelection && (!panelItem || panelItem.id !== lockedItem.id)) return;
+    // An open form owns its loaded detail and target ID until it closes.
+    // Revision refreshes may replace or clear the live comparison detail.
+    setEditor({kind, item: editSelection ? panelItem : null, scopeKey: catalogScopeKey});
   };
-  const handleAddArmaturaClick = () => {
-    if (lockedItem && !panelItem) return;
-    setShowArmaturaOverlay(true);
-  };
-  const handleAddAccessorioClick = () => {
-    if (lockedItem && !panelItem) return;
-    setShowAccessorioOverlay(true);
-  };
-  const handleAddConsumabileClick = () => {
-    if (lockedItem && !panelItem) return;
-    setShowConsumabileOverlay(true);
-  };
+  const handleAddWeaponClick = () => openEditor('weapon');
+  const handleAddArmaturaClick = () => openEditor('armatura');
+  const handleAddAccessorioClick = () => openEditor('accessorio');
+  const handleAddConsumabileClick = () => openEditor('consumabile');
 
   const selectedPanelItem = lockedItem?._scopeKey === catalogScopeKey ? lockedItem : hoveredItem?._scopeKey === catalogScopeKey ? hoveredItem : null;
   const detail = useBazaarDetail(selectedPanelItem, catalogScopeKey, catalog.revision, lockedItem ? 0 : 150);
@@ -638,45 +629,38 @@ function BazaarContent() {
         </div>
       </div>
 
-      {showOverlay && (
+      {activeEditor?.kind === 'weapon' && (
         <AddWeaponOverlay
-          onClose={(success) => {
-            setShowOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "weapon" ? panelItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "weapon")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
-      )}      {showArmaturaOverlay && (
+      )}
+      {activeEditor?.kind === 'armatura' && (
         <AddArmaturaOverlay
-          onClose={(success) => {
-            setShowArmaturaOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "armatura" ? panelItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "armatura")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
-      {showAccessorioOverlay && (
+      {activeEditor?.kind === 'accessorio' && (
         <AddAccessorioOverlay
-          onClose={(success) => {
-            setShowAccessorioOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "accessorio" ? panelItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
-      {showConsumabileOverlay && (
+      {activeEditor?.kind === 'consumabile' && (
         <AddConsumabileOverlay
-          onClose={(success) => {
-            setShowConsumabileOverlay(false);
-          }}
+          onClose={() => setEditor(null)}
           showMessage={displayConfirmation}
-          initialData={lockedItem && lockedItem.item_type === "consumabile" ? panelItem : null}
-          editMode={!!(lockedItem && lockedItem.item_type === "consumabile")}
+          initialData={activeEditor.item}
+          editMode={!!activeEditor.item}
         />
       )}
 
