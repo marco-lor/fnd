@@ -42,6 +42,9 @@ const LIVE_PROJECT_IDS = new Set(
 // it is an onRequest endpoint used by the Hosting runtime-config rewrite, not
 // an httpsCallable endpoint, and is audited separately from this manifest.
 const REQUIRED_CALLABLES = Object.freeze([
+  ...['task09CatalogPage', 'task09CatalogDetail', 'task09WriteCatalogItem'].map(logicalKey => Object.freeze({
+    logicalKey, owner: 'bazaar', compatibilityAliasOf: null,
+  })),
   Object.freeze({
     logicalKey: 'deleteUser',
     owner: 'admin',

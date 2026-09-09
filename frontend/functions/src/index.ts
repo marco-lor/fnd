@@ -186,3 +186,5 @@ export {
   syncTask07MusicStreamFromSession,
   syncTask07MusicStreamFromTrack,
 };
+
+export {task09CatalogPage, task09CatalogDetail, task09WriteCatalogItem} from './bazaarCatalog';

@@ -182,3 +182,18 @@ describe('Task 07 catalog item preparation', () => {
       ]);
     });
 });
+
+test('keyed legacy custom spells reopen and save without losing detail or binding', async () => {
+  const legacy = {descrizione: 'Legacy detail', costo: 3, task07MediaEntryId: 'legacy-entry'};
+  const currentItem = {General: {spells: {Shield: legacy, Linked: true}}, task07EmbeddedMedia: {
+    'legacy-entry': {targetKind: 'catalog-item-spell', media: {assetId: 'legacy-asset'}, task07MediaRevision: 1},
+  }};
+  const editor = task07CatalogEmbeddedSpellEditorState(currentItem);
+  expect(editor.linkedSpells).toEqual(['Linked']);
+  expect(editor.customSpells[0].spellData.Nome.trim()).toBe('Shield');
+  expect(editor.customSpells[0].spellData).toMatchObject({...legacy, media: {assetId: 'legacy-asset'}});
+  const prepared = await prepareTask07CatalogEmbeddedSpells({actorUid: 'dm-a', role: 'dm', itemId: 'item-a', currentItem, customSpells: editor.customSpells});
+  expect(prepared.spells.Shield).toEqual({...legacy, Nome: 'Shield'});
+  expect(prepared.operations).toEqual([]);
+  expect(legacy).not.toHaveProperty('Nome');
+});

@@ -105,6 +105,60 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "generation",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rank",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "generation",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rank",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "catalogSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "generation",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "allowed_users",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "rank",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

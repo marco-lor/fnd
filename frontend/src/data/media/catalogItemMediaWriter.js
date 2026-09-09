@@ -125,7 +125,7 @@ export const task07CatalogEmbeddedSpellEditorState = (item = {}) => {
       customSpells.push({
         spellData: withTask07EmbeddedMedia(
           item,
-          value,
+          {...value, Nome: typeof value.Nome === 'string' && value.Nome.trim() ? value.Nome : name},
           'catalog-item-spell'
         ),
         imageFile: null,

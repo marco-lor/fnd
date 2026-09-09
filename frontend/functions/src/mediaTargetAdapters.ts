@@ -1,3 +1,4 @@
+import {synchronizeCatalogMedia} from './bazaarCatalog';
 import * as admin from "firebase-admin";
 import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
@@ -1085,6 +1086,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
       patch: targetPatch,
       plan,
     });
+    await synchronizeCatalogMedia(transaction, input.db, referenceRef, target.data() || {}, targetPatch);
     if (plan.targetKind === "common-technique") {
       transaction.set(referenceRef, targetPatch, {merge: true});
     } else {

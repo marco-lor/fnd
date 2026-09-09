@@ -57,7 +57,7 @@ test('anonymous, player, DM, and webmaster rules match their intended boundaries
   const webmaster = environment.authenticatedContext('perf-webmaster').firestore();
 
   await assertFails(getDoc(doc(anonymous, 'users/perf-player')));
-  await assertSucceeds(getDoc(doc(anonymous, 'items/item-0000')));
+  await assertFails(getDoc(doc(anonymous, 'items/item-0000')));
   await assertSucceeds(getDoc(doc(player, 'users/perf-player')));
   await assertFails(getDoc(doc(player, 'users/perf-peer-2')));
   await assertFails(getDoc(doc(player, 'foes/foe-0000')));

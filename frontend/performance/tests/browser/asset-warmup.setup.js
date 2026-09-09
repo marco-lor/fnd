@@ -17,7 +17,7 @@ const WARMUP_BATCH_SIZE = 4;
 const WARM_PASS_TIMEOUT_MS = 30_000;
 const VALIDATION_PASS_TIMEOUT_MS = 5_000;
 const diagnosticsPath = path.join(resultsDir, 'asset-warmup-diagnostics.json');
-const buildReportPath = path.join(resultsDir, 'build-report.json');
+const buildReportPath = path.join(resultsDir, process.env.FND_PERF_REACT_PROFILE === '1' ? 'profile-build-report.json' : 'build-report.json');
 const buildPath = path.resolve(__dirname, '..', '..', '..', 'build');
 const buildStaticPath = path.join(buildPath, 'static');
 
@@ -59,6 +59,7 @@ test('warm and validate deterministic static asset delivery before browser measu
     }
     const batches = createStaticAssetWarmupBatches(readJson(buildReportPath), {
       batchSize: WARMUP_BATCH_SIZE,
+      profiling: process.env.FND_PERF_REACT_PROFILE === '1',
     });
     assertCurrentStaticInventory(batches);
     diagnostics.assetCount = batches.flat().length;

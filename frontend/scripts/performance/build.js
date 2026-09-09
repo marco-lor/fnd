@@ -17,14 +17,15 @@ const {
   writeJson,
 } = require('./common');
 const { sourceTreeIdentity: collectSourceTreeIdentity } = require('./task08-report');
+const { performanceBuildMode, pinnedWebChannelContract } = require('./build-mode');
+const mode = performanceBuildMode(process.argv.slice(2));
 
 const buildDir = path.join(frontendRoot, 'build');
 const requiredChunks = JSON.parse(fs.readFileSync(
   path.join(frontendRoot, 'performance', 'required-chunks.json'),
   'utf8'
 ));
-const PINNED_WEBCHANNEL_CALLBACK_SOURCE = 'function(){e()}';
-const PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE = 'setTimeout((function(){e()}),';
+const { callbackSource: PINNED_WEBCHANNEL_CALLBACK_SOURCE, executableCallsite: PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE, expectedCallbackOccurrences } = pinnedWebChannelContract(mode.profiling);
 const countOccurrences = (source, needle) => source.split(needle).length - 1;
 
 const performanceEnvironment = configureOwnedPerformanceEnvironment({
@@ -39,6 +40,7 @@ Object.assign(performanceEnvironment, {
   REACT_APP_FND_FIREBASE_STORAGE_BUCKET: PERFORMANCE_STORAGE_BUCKET,
   REACT_APP_FND_PERF: '1',
   REACT_APP_FND_PERF_PROJECT_ID: projectId,
+  REACT_APP_FND_PERF_REACT_PROFILE: mode.profiling ? '1' : '0',
 });
 
 
@@ -85,7 +87,7 @@ const chunkKind = (logicalName, classification) => {
 
 const build = childProcess.spawnSync(
   process.execPath,
-  [require.resolve('react-scripts/scripts/build')],
+  [require.resolve('react-scripts/scripts/build'), ...mode.craArguments],
   {
     cwd: frontendRoot,
     env: {
@@ -100,7 +102,7 @@ if (build.status !== 0) process.exit(build.status || 1);
 
 const statsBuild = childProcess.spawnSync(
   process.execPath,
-  [path.join(frontendRoot, 'scripts', 'performance', 'webpack-stats.js')],
+  [path.join(frontendRoot, 'scripts', 'performance', 'webpack-stats.js'), ...mode.craArguments],
   {
     cwd: frontendRoot,
     env: {
@@ -112,7 +114,7 @@ const statsBuild = childProcess.spawnSync(
 );
 if (statsBuild.status !== 0) process.exit(statsBuild.status || 1);
 
-const webpackStats = JSON.parse(fs.readFileSync(path.join(resultsDir, 'webpack-stats.json'), 'utf8'));
+const webpackStats = JSON.parse(fs.readFileSync(path.join(resultsDir, mode.statsFile), 'utf8'));
 const loginGroupNames = new Set(['main', 'app-shell', 'route-login']);
 const namedChunkGroups = Array.isArray(webpackStats.namedChunkGroups)
   ? webpackStats.namedChunkGroups
@@ -181,16 +183,17 @@ const pinnedWebChannelExecutableCallsiteCount = javascriptBuildSources.reduce(
   (total, source) => total + countOccurrences(source, PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE),
   0
 );
-if (pinnedWebChannelCallbackCount !== 2 || pinnedWebChannelExecutableCallsiteCount !== 1) {
+if (pinnedWebChannelCallbackCount !== expectedCallbackOccurrences || pinnedWebChannelExecutableCallsiteCount !== 1) {
   throw new Error(
     'Pinned Firestore WebChannel timer shape changed: expected exactly one executable '
-    + `${PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE} callsite and two total `
+    + `${PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE} callsite and ${expectedCallbackOccurrences} total `
     + `${PINNED_WEBCHANNEL_CALLBACK_SOURCE} occurrences, observed `
     + `${pinnedWebChannelExecutableCallsiteCount} and ${pinnedWebChannelCallbackCount}. `
     + 'Re-audit transport timer attribution before accepting performance cleanup results.'
   );
 }
 const pinnedWebChannelTransport = {
+  callbackSource: PINNED_WEBCHANNEL_CALLBACK_SOURCE,
   callbackOccurrences: pinnedWebChannelCallbackCount,
   executableCallsites: pinnedWebChannelExecutableCallsiteCount,
 };
@@ -209,7 +212,9 @@ const totals = assets.reduce((result, asset) => {
 const report = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
-  buildMode: 'performance',
+  buildMode: mode.buildMode,
+  reactProfiling: mode.profiling,
+  reactProfilingModules: flattenModules(webpackStats.modules || []).map(module => module.name || '').filter(name => /react-dom[\\/](?:profiling|cjs[\\/]react-dom\.profiling)/.test(name)),
   projectId,
   sourceTreeIdentity: collectSourceTreeIdentity(),
   sourceMapsPresent: walk(buildDir).some((filePath) => filePath.endsWith('.map')),
@@ -231,7 +236,7 @@ const report = {
     })),
   requiredChunks,
   webpackModuleEvidence: {
-    statsFile: 'webpack-stats.json',
+    statsFile: mode.statsFile,
     chunkCount: (webpackStats.chunks || []).length,
     moduleCount: flattenModules(webpackStats.modules || []).length,
     loginChunkIds: [...loginChunkIds],
@@ -241,7 +246,7 @@ const report = {
 };
 
 ensureDirectory(resultsDir);
-writeJson(path.join(resultsDir, 'build-report.json'), report);
+writeJson(path.join(resultsDir, mode.reportFile), report);
 
 for (const filePath of walk(buildDir)) {
   if (filePath.endsWith('.map') || path.basename(filePath) === 'asset-manifest.json') {
@@ -263,4 +268,4 @@ const verify = childProcess.spawnSync(
 );
 if (verify.status !== 0) process.exit(verify.status || 1);
 
-console.log(`Performance build report written to ${path.relative(frontendRoot, path.join(resultsDir, 'build-report.json'))}.`);
+console.log(`Performance build report written to ${path.relative(frontendRoot, path.join(resultsDir, mode.reportFile))}.`);

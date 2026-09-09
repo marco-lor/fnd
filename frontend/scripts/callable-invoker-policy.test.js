@@ -206,7 +206,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
 test('manifest selection is exact and owner-validated in every audit region', () => {
   const manifest = addRegionCallables(createManifest(), 'europe-west1');
   const selected = selectManagedCallables(manifest);
-  assert.equal(selected.length, 38);
+  assert.equal(selected.length, 41);
   assert.deepEqual(
     selected.map(({logicalKey}) => logicalKey),
     REQUIRED_CALLABLES.map(({logicalKey}) => logicalKey)
@@ -296,7 +296,7 @@ test('dry-run plan is deterministic and reports only the one repairable managed 
     region: REGION,
   });
   assert.equal(first.planFingerprint, second.planFingerprint);
-  assert.deepEqual(first.counts, {blocked: 0, ready: 37, repair: 1});
+  assert.deepEqual(first.counts, {blocked: 0, ready: 40, repair: 1});
   assert.equal(first.clean, false);
   assert.equal(first.entries.find(({functionId}) => (
     functionId === 'task05AdjustGold'
@@ -381,7 +381,7 @@ test('execution updates only planned drift, preserves unrelated IAM, and fully r
     unrelated
   );
   assert.equal(result.finalPlan.clean, true);
-  assert.deepEqual(result.finalPlan.counts, {blocked: 0, ready: 38, repair: 0});
+  assert.deepEqual(result.finalPlan.counts, {blocked: 0, ready: 41, repair: 0});
 });
 
 test('execution refuses stale IAM and verifies the write result', async () => {

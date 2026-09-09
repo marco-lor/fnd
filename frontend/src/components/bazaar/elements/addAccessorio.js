@@ -1,3 +1,4 @@
+import { catalogSetDoc, catalogUpdateDoc, catalogDeleteDoc } from '../../../data/bazaarCatalogRepository';
 // addAccessorio.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import VisibilitySelector from '../../common/VisibilitySelector';
@@ -6,7 +7,7 @@ import {
     getCommonTechniques,
     getSchema,
 } from '../../../data/configRepository';
-import { collection, doc, updateDoc, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
+import { collection, doc, onSnapshot, getDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
     deleteLegacyStoragePath,
@@ -14,7 +15,6 @@ import {
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
 import MediaImage from "../../common/MediaImage";
-import { deleteDoc } from "../../../performance/firestore";
 import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
 import { persistCanonicalInventoryItem } from "../../../data/media/privateInventoryMediaWriter";
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
@@ -582,8 +582,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     ));
                 }
                 const persistCatalogParent = async () => {
-                    if (catalogIsExisting) await updateDoc(accessorioDocRef, finalAccessorioData);
-                    else await setDoc(accessorioDocRef, finalAccessorioData);
+                    if (catalogIsExisting) await catalogUpdateDoc(accessorioDocRef, finalAccessorioData);
+                    else await catalogSetDoc(accessorioDocRef, finalAccessorioData);
                     catalogWriteCommitted = true;
                     if (!editMode) pendingCatalogCreateRef.current = docId;
                 };
@@ -597,9 +597,9 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                             currentItem: catalogBefore || initialData || {},
                             prepareEntity: persistCatalogParent,
                             rollbackPreparedEntity: async () => {
-                                if (catalogBefore) await setDoc(accessorioDocRef, catalogBefore);
+                                if (catalogBefore) await catalogSetDoc(accessorioDocRef, catalogBefore);
                                 else {
-                                    await deleteDoc(accessorioDocRef);
+                                    await catalogDeleteDoc(accessorioDocRef);
                                     pendingCatalogCreateRef.current = null;
                                     catalogWriteCommitted = false;
                                 }

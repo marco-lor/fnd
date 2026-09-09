@@ -13,7 +13,7 @@ import { normalizeCatalogItemMedia } from '../catalogItemMedia';
  *  - onClose(): close without action
  *  - isProcessing: boolean shows loading state
  */
-export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClose, isProcessing }) {
+export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClose, isProcessing, retryUncertain = false }) {
   const name = item?.General?.Nome || 'Oggetto';
   const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
   const affordable = userGold >= price;
@@ -59,7 +59,7 @@ export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClos
               </div>
               <div className="flex-grow flex flex-col">
                 <h3 className="text-lg font-semibold tracking-wide text-slate-100 mb-1 line-clamp-2">{name}</h3>
-                <p className="text-sm text-slate-400 mb-4">Confermi l'acquisto di questo oggetto?</p>
+                <p className="text-sm text-slate-400 mb-4">Confermi l'acquisto di questo oggetto? Verrà addebitato il prezzo attuale sul server, che può essere diverso da quello mostrato.</p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg bg-slate-800/60 border border-slate-600/50 p-2 flex flex-col">
                     <span className="text-[10px] uppercase tracking-wide text-slate-400">Prezzo</span>
@@ -74,7 +74,7 @@ export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClos
             </div>
             <div className="px-5 pb-5 flex items-center justify-end gap-3">
               <button onClick={onClose} disabled={isProcessing} className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-700/60 hover:bg-slate-600/70 text-slate-200 border border-slate-600/60 transition disabled:opacity-50">Annulla</button>
-              <button onClick={() => affordable && !isProcessing && onConfirm()} disabled={!affordable || isProcessing} className={`px-5 py-2 rounded-lg text-sm font-semibold border transition shadow ${!affordable ? 'bg-slate-600/50 text-slate-400 border-slate-600 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 text-white hover:brightness-110 border-indigo-400/40'} ${isProcessing ? 'opacity-70 cursor-wait' : ''}`}>{isProcessing ? 'Acquisto...' : 'Conferma'}</button>
+              <button onClick={() => (affordable || retryUncertain) && !isProcessing && onConfirm()} disabled={(!affordable && !retryUncertain) || isProcessing} className={`px-5 py-2 rounded-lg text-sm font-semibold border transition shadow ${!affordable ? 'bg-slate-600/50 text-slate-400 border-slate-600 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 text-white hover:brightness-110 border-indigo-400/40'} ${isProcessing ? 'opacity-70 cursor-wait' : ''}`}>{isProcessing ? 'Acquisto...' : retryUncertain ? 'Verifica acquisto precedente' : 'Conferma'}</button>
             </div>
           </motion.div>
         </motion.div>

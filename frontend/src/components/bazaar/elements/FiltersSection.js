@@ -3,56 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getParamDisplayName } from '../../common/paramMetadata';
 
-// Encapsulates all filter UI/logic (dropdown open state) separate from Bazaar core logic
-export default function FiltersSection({
-  slots,
-  hands,
-  tipos,
-  itemTypes,
-  specialParams,
-  combatParams,
-  baseParams,
-  selectedSlot,
-  selectedHands,
-  selectedTipo,
-  selectedItemType,
-  selectedSpecialParams,
-  selectedCombatParams,
-  selectedBaseParams,
-  onToggleSlot,
-  onToggleHands,
-  onToggleTipo,
-  onToggleItemType,
-  onToggleSpecialParam,
-  onToggleCombatParam,
-  onToggleBaseParam,
-  onlyAffordable,
-  setOnlyAffordable,
-  onResetFilters,
-  stickyTop = 0,
-}) {
-  const [dropdownOpen, setDropdownOpen] = useState({
-    itemType: false,
-    slot: false,
-    hands: false,
-    tipo: false,
-    specialParams: false,
-    combatParams: false,
-    baseParams: false,
-  });
-
-  const toggleDropdown = (key) => setDropdownOpen(prev => ({ ...prev, [key]: !prev[key] }));
-  const closeAllDropdowns = () => setDropdownOpen({ itemType: false, slot: false, hands: false, tipo: false, specialParams: false, combatParams: false, baseParams: false });
-
-  useEffect(() => {
-    const handleClickOutside = () => {
-      if (Object.values(dropdownOpen).some(v => v)) closeAllDropdowns();
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [dropdownOpen]);
-
-  const FilterDropdown = ({ label, options, selectedOptions, onToggle, dropdownKey, icon = null, colorScheme = 'blue', isSmall = false, formatOptionLabel = (option) => option }) => {
+const FilterDropdown = ({ dropdownOpen, toggleDropdown, closeAllDropdowns, optionsLoading, optionsError, label, options, selectedOptions, onToggle, dropdownKey, icon = null, colorScheme = 'blue', isSmall = false, formatOptionLabel = (option) => option }) => {
     const selectedFilters = selectedOptions.filter(opt => opt !== 'All');
     const unselectedOptions = options.filter(opt => !selectedOptions.includes(opt) && opt !== 'All');
     const isOpen = dropdownOpen[dropdownKey];
@@ -92,7 +43,7 @@ export default function FiltersSection({
             ))}
           </div>
         )}
-        {unselectedOptions.length > 0 && (
+        {(
           <div className="relative">
             <button
               onClick={() => toggleDropdown(dropdownKey)}
@@ -110,7 +61,9 @@ export default function FiltersSection({
                   transition={{ duration: 0.2 }}
                   className="bazaar-filter-scroll absolute top-full left-0 right-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-600 bg-gray-800 shadow-xl"
                 >
-                  {unselectedOptions.map(option => (
+                  {optionsLoading && <p role="status">Caricamento opzioni...</p>}
+                {optionsError && <p role="alert">Opzioni non disponibili. Riapri il filtro per riprovare.</p>}
+                {unselectedOptions.map(option => (
                     <button
                       key={option}
                       onClick={() => { onToggle(option); closeAllDropdowns(); }}
@@ -135,6 +88,60 @@ export default function FiltersSection({
       </div>
     );
   };
+
+// Encapsulates all filter UI/logic (dropdown open state) separate from Bazaar core logic
+export default function FiltersSection({
+  onOpenFilter = () => {},
+  optionsLoading = false,
+  optionsError = null,
+  slots,
+  hands,
+  tipos,
+  itemTypes,
+  specialParams,
+  combatParams,
+  baseParams,
+  selectedSlot,
+  selectedHands,
+  selectedTipo,
+  selectedItemType,
+  selectedSpecialParams,
+  selectedCombatParams,
+  selectedBaseParams,
+  onToggleSlot,
+  onToggleHands,
+  onToggleTipo,
+  onToggleItemType,
+  onToggleSpecialParam,
+  onToggleCombatParam,
+  onToggleBaseParam,
+  onlyAffordable,
+  setOnlyAffordable,
+  onResetFilters,
+  stickyTop = 0,
+}) {
+  const [dropdownOpen, setDropdownOpen] = useState({
+    itemType: false,
+    slot: false,
+    hands: false,
+    tipo: false,
+    specialParams: false,
+    combatParams: false,
+    baseParams: false,
+  });
+
+  const toggleDropdown = (key) => { if (!dropdownOpen[key]) onOpenFilter(); setDropdownOpen(prev => ({ ...prev, [key]: !prev[key] })); };
+  const closeAllDropdowns = () => setDropdownOpen({ itemType: false, slot: false, hands: false, tipo: false, specialParams: false, combatParams: false, baseParams: false });
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setDropdownOpen(previous => Object.values(previous).some(Boolean)
+        ? Object.fromEntries(Object.keys(previous).map(key => [key, false])) : previous);
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
+
 
   return (
     <div
@@ -178,17 +185,17 @@ export default function FiltersSection({
           </button>
         </div>
         <div className="mb-4">
-          <FilterDropdown label="Tipo Oggetto" options={itemTypes} selectedOptions={selectedItemType} onToggle={onToggleItemType} dropdownKey="itemType" colorScheme="blue" />
+          <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Tipo Oggetto" options={itemTypes} selectedOptions={selectedItemType} onToggle={onToggleItemType} dropdownKey="itemType" colorScheme="blue" />
         </div>
         <div className="mb-4">
-          <FilterDropdown label="Slot" options={slots} selectedOptions={selectedSlot} onToggle={onToggleSlot} dropdownKey="slot" colorScheme="blue" />
+          <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Slot" options={slots} selectedOptions={selectedSlot} onToggle={onToggleSlot} dropdownKey="slot" colorScheme="blue" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <FilterDropdown label="Mani" options={hands} selectedOptions={selectedHands} onToggle={onToggleHands} dropdownKey="hands" colorScheme="blue" isSmall />
+            <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Mani" options={hands} selectedOptions={selectedHands} onToggle={onToggleHands} dropdownKey="hands" colorScheme="blue" isSmall />
           </div>
           <div>
-            <FilterDropdown label="Tipo" options={tipos} selectedOptions={selectedTipo} onToggle={onToggleTipo} dropdownKey="tipo" colorScheme="blue" isSmall />
+            <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Tipo" options={tipos} selectedOptions={selectedTipo} onToggle={onToggleTipo} dropdownKey="tipo" colorScheme="blue" isSmall />
           </div>
         </div>
       </div>
@@ -201,6 +208,10 @@ export default function FiltersSection({
           Mostra solo gli oggetti che possiedono almeno uno dei parametri selezionati.
         </p>
         <FilterDropdown
+              dropdownOpen={dropdownOpen}
+              toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns}
+              optionsLoading={optionsLoading}
+              optionsError={optionsError}
           label="Parametri Speciali"
           options={specialParams}
           selectedOptions={selectedSpecialParams}
@@ -217,10 +228,10 @@ export default function FiltersSection({
           Ordinamento Parametri
         </h3>
         <div className="mb-4">
-          <FilterDropdown label="Combattimento" options={combatParams} selectedOptions={selectedCombatParams} onToggle={onToggleCombatParam} dropdownKey="combatParams" icon="⚔️" colorScheme="orange" />
+          <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Combattimento" options={combatParams} selectedOptions={selectedCombatParams} onToggle={onToggleCombatParam} dropdownKey="combatParams" icon="⚔️" colorScheme="orange" />
         </div>
         <div>
-          <FilterDropdown label="Base" options={baseParams} selectedOptions={selectedBaseParams} onToggle={onToggleBaseParam} dropdownKey="baseParams" icon="📊" colorScheme="green" />
+          <FilterDropdown dropdownOpen={dropdownOpen} toggleDropdown={toggleDropdown} closeAllDropdowns={closeAllDropdowns} optionsLoading={optionsLoading} optionsError={optionsError} label="Base" options={baseParams} selectedOptions={selectedBaseParams} onToggle={onToggleBaseParam} dropdownKey="baseParams" icon="📊" colorScheme="green" />
         </div>
       </div>
     </div>

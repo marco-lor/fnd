@@ -768,7 +768,7 @@ test('ordinary target edits preserve immutable Task 07 server fields', async () 
     for (const target of seededTargets) {
       const firestore = environment.authenticatedContext(target.uid).firestore();
       const targetRef = doc(firestore, target.path);
-      await assertSucceeds(updateDoc(targetRef, target.safePatch));
+      await (target.path.startsWith('items/') ? assertFails : assertSucceeds)(updateDoc(targetRef, target.safePatch));
       await assertFails(updateDoc(targetRef, {task07MediaRevision: 2}));
       await assertFails(updateDoc(targetRef, {
         videoMedia: {...canonicalMedia, assetId: assetId('9')},

@@ -1829,43 +1829,30 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
-    // Items
+    // Catalog writes are trusted atomic source + projection transactions.
+    match /catalogControl/bazaar {
+      allow read: if isActiveSignedIn();
+      allow write: if false;
+    }
+    // Same active-signed-in audience as Task07 global-catalog Storage media.
+    match /catalogMedia/{docId} {
+      allow read: if isActiveSignedIn();
+      allow write: if false;
+    }
+    match /catalogSummaries/{docId} {
+      allow read: if isActiveSignedIn()
+        && get(/databases/$(database)/documents/catalogControl/bazaar).data.state == "active"
+        && resource.data.generation == get(/databases/$(database)/documents/catalogControl/bazaar).data.generation
+        && (isDM() || resource.data.visibility == "all"
+          || (resource.data.visibility == "custom" && request.auth.uid in resource.data.allowed_users));
+      allow write: if false;
+    }
     match /items/{docId} {
-      allow read: if true;
-      allow create: if isDMOrWebmaster()
-        && hasNoTask07EmbeddedMedia(request.resource.data)
-        && hasValidOptionalTask07MediaReference(
-          request.resource.data,
-          "item",
-          null,
-          docId,
-          "global-catalog",
-          "items/" + docId
-        );
-      allow update: if isDMOrWebmaster()
-        && task07EmbeddedMediaUnchanged(
-          request.resource.data,
-          resource.data
-        )
-        && (
-          task07MediaAssetIdsUnchanged(
-            request.resource.data,
-            resource.data
-          )
-            ? task07MediaReferencesUnchanged(
-              request.resource.data,
-              resource.data
-            )
-            : hasValidOptionalTask07MediaReference(
-              request.resource.data,
-              "item",
-              null,
-              docId,
-              "global-catalog",
-              "items/" + docId
-            )
-        );
-      allow delete: if isDM() || isWebmaster();
+      allow read: if isActiveSignedIn() && (docId.matches('schema_.*')
+        || isDM() || resource.data.get("visibility", "none") == "all"
+        || (resource.data.get("visibility", "none") == "custom"
+          && request.auth.uid in resource.data.get("allowed_users", [])));
+      allow write: if docId.matches('schema_.*') && isDMOrWebmaster();
     }
 
     match /tecniche/{docId} {

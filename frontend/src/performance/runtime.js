@@ -3,7 +3,9 @@ import { XhrIo as FirestoreWebChannelXhrIo } from '@firebase/webchannel-wrapper/
 const PERFORMANCE_ENABLED = process.env.REACT_APP_FND_PERF === '1';
 const EVENT_SCHEMA_VERSION = 1;
 const MAX_EVENTS = 50000;
-const FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE = 'function(){e()}';
+// Both production modes are pinned to their separately audited build output.
+const FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE = process.env.REACT_APP_FND_PERF_REACT_PROFILE === '1'
+  ? 'function(){i()}' : 'function(){e()}';
 const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
 const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
 const SAFE_METADATA_KEYS = new Set([

@@ -1,6 +1,7 @@
+import { catalogSetDoc, catalogUpdateDoc, catalogDeleteDoc } from '../../../data/bazaarCatalogRepository';
 // addConsumabile.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
-import { collection, doc, updateDoc, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
+import { collection, doc, onSnapshot, getDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
     deleteLegacyStoragePath,
@@ -8,7 +9,6 @@ import {
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
 import MediaImage from "../../common/MediaImage";
-import { deleteDoc } from "../../../performance/firestore";
 import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
 import { persistCanonicalInventoryItem } from "../../../data/media/privateInventoryMediaWriter";
 import { createUserOperationId } from "../../../data/userData/userDataCommands";
@@ -588,8 +588,8 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                     ));
                 }
                 const persistCatalogParent = async () => {
-                    if (catalogIsExisting) await updateDoc(consumabileDocRef, finalConsumabileData);
-                    else await setDoc(consumabileDocRef, finalConsumabileData);
+                    if (catalogIsExisting) await catalogUpdateDoc(consumabileDocRef, finalConsumabileData);
+                    else await catalogSetDoc(consumabileDocRef, finalConsumabileData);
                     catalogWriteCommitted = true;
                     if (!editMode) pendingCatalogCreateRef.current = docId;
                 };
@@ -603,9 +603,9 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                             currentItem: catalogBefore || initialData || {},
                             prepareEntity: persistCatalogParent,
                             rollbackPreparedEntity: async () => {
-                                if (catalogBefore) await setDoc(consumabileDocRef, catalogBefore);
+                                if (catalogBefore) await catalogSetDoc(consumabileDocRef, catalogBefore);
                                 else {
-                                    await deleteDoc(consumabileDocRef);
+                                    await catalogDeleteDoc(consumabileDocRef);
                                     pendingCatalogCreateRef.current = null;
                                     catalogWriteCommitted = false;
                                 }
