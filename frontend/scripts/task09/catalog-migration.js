@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Staging only. One reviewed action per invocation; never restores backups.
+// Explicit main/production or devs/staging target. One reviewed action per invocation.
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -79,31 +79,31 @@ function codeIdentity() {
  for(const p of ['scripts/task09/catalog-migration.js','scripts/firebase-operator-target.js','scripts/firebase-environment.js','scripts/firebase-cli-admin-credential.js'])entries.push([p,crypto.createHash('sha256').update(fs.readFileSync(path.join(FRONTEND_ROOT,p))).digest('hex')]);
  return hash(entries);
 }
-async function connect() {
+async function connect(target) {
  const req=createRequire(path.join(FRONTEND_ROOT,'functions/package.json'));
  const {initializeApp,deleteApp}=req('firebase-admin/app');const {getFirestore}=req('firebase-admin/firestore');
  const previous=process.env.GOOGLE_APPLICATION_CREDENTIALS;
  const tempRoot=fs.realpathSync(os.tmpdir());
- const adc=await createFirebaseCliAdcFile({projectId:'fatin-test',cwd:FRONTEND_ROOT,tempDirectory:tempRoot});
+ const adc=await createFirebaseCliAdcFile({projectId:target.projectId,cwd:FRONTEND_ROOT,tempDirectory:tempRoot});
  const rel=path.relative(tempRoot,path.resolve(adc.filePath));
  if(rel.startsWith('..')||path.isAbsolute(rel))throw Error('Invalid temporary credential location.');
  let app;
  const close=async()=>{try{if(app)await deleteApp(app);}finally{if(previous===undefined)delete process.env.GOOGLE_APPLICATION_CREDENTIALS;else process.env.GOOGLE_APPLICATION_CREDENTIALS=previous;adc.cleanup();}};
- try{process.env.GOOGLE_APPLICATION_CREDENTIALS=adc.filePath;app=initializeApp({projectId:'fatin-test',storageBucket:'fatin-test.firebasestorage.app'},'task09-staging-'+process.pid);return {db:getFirestore(app),close};}catch(e){await close();throw e;}
+ try{process.env.GOOGLE_APPLICATION_CREDENTIALS=adc.filePath;app=initializeApp({projectId:target.projectId,storageBucket:target.storageBucket},'task09-'+target.name+'-'+process.pid);return {db:getFirestore(app),close};}catch(e){await close();throw e;}
 }
 function guard(o,env,branch) {
- if(o.environmentName!=='staging')throw Error('This operator is staging-only.');
+ if(!['staging','production'].includes(o.environmentName))throw Error('Explicit staging or production environment required.');
  if(Object.keys(env).some(k=>/EMULATOR|FIREBASE_CONFIG/.test(k)&&env[k]))throw Error('Ambiguous emulator or Firebase configuration rejected.');
- for(const [key,value] of Object.entries({FND_GIT_BRANCH:'devs',GITHUB_HEAD_REF:'devs',GITHUB_REF_NAME:'devs',BRANCH_NAME:'devs',GCLOUD_PROJECT:'fatin-test',GOOGLE_CLOUD_PROJECT:'fatin-test',FND_FIREBASE_ENVIRONMENT:'staging',FND_FIREBASE_PROJECT_ID:'fatin-test',FND_FIREBASE_HOSTING_SITE:'fatin-test',FND_FIREBASE_STORAGE_BUCKET:'fatin-test.firebasestorage.app'}))if(env[key]&&env[key]!==value)throw Error('Ambiguous Firebase environment rejected.');
- if(branch!=='devs')throw Error('Staging operator requires actual devs branch.');
- resolveOperatorTarget({options:o,environment:{FND_GIT_BRANCH:branch},cwd:FRONTEND_ROOT});
+ const target=resolveOperatorTarget({options:o,environment:{FND_GIT_BRANCH:branch},cwd:FRONTEND_ROOT});
+ for(const [key,value] of Object.entries({FND_GIT_BRANCH:target.branchName,GITHUB_HEAD_REF:target.branchName,GITHUB_REF_NAME:target.branchName,BRANCH_NAME:target.branchName,GCLOUD_PROJECT:target.projectId,GOOGLE_CLOUD_PROJECT:target.projectId,FND_FIREBASE_ENVIRONMENT:target.name,FND_FIREBASE_PROJECT_ID:target.projectId,FND_FIREBASE_HOSTING_SITE:target.hostingSite,FND_FIREBASE_STORAGE_BUCKET:target.storageBucket}))if(env[key]&&env[key]!==value)throw Error('Ambiguous Firebase environment rejected.');
  if(!['inspect','apply'].includes(o.mode)||!ACTIONS.includes(o.action))throw Error('Use inspect or apply with an explicit begin, step, activate or rollback action.');
- if(o.mode==='apply'&&(o.confirmTarget!=='fatin-test'||!o.plan||!/^[a-f0-9]{64}$/.test(o.reviewedPlanHash||'')))throw Error('Apply requires target confirmation, plan and reviewed plan hash.');
+ if(o.mode==='apply'&&(o.confirmTarget!==target.projectId||!o.plan||!/^[a-f0-9]{64}$/.test(o.reviewedPlanHash||'')))throw Error('Apply requires target confirmation, plan and reviewed plan hash.');
+ return target;
 }
 async function run(o, injected={}) {
  const env=injected.environment||process.env;
  const branch=injected.branch??execFileSync('git',['-c',GIT_SAFE,'rev-parse','--abbrev-ref','HEAD'],{cwd:FRONTEND_ROOT,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();
- guard(o,env,branch);
+ const target=guard(o,env,branch);
  const runtime=injected.runtime||runtimeIdentity();if(!runtime.node.startsWith('22.')||!runtime.icu)throw Error('Node 22 and ICU identity required.');
  const checkPath=injected.validatePath||validatePath, write=injected.writeExclusive||writeExclusive;
  const output=checkPath(o.output);const backup=o.mode==='apply'?checkPath(o.backup):null;
@@ -116,20 +116,20 @@ async function run(o, injected={}) {
   const planPath=checkPath(o.plan);if(planPath===output||planPath===backup)throw Error('Separate plan/backup/report paths required.');
   plan=(injected.readJson||(p=>JSON.parse(fs.readFileSync(p,'utf8'))))(planPath);
   const {planHash,...body}=plan||{};
-  if(planHash!==o.reviewedPlanHash||hash(body)!==planHash||plan.action!==o.action||plan.codeHash!==codeHash||hash(plan.runtime)!==hash(runtime)||plan.target!=='fatin-test'||plan.schemaVersion!==1)throw Error('Reviewed plan mismatch.');
+  if(planHash!==o.reviewedPlanHash||hash(body)!==planHash||plan.action!==o.action||plan.codeHash!==codeHash||hash(plan.runtime)!==hash(runtime)||plan.target!==target.projectId||plan.schemaVersion!==1)throw Error('Reviewed plan mismatch.');
  }
  const core=injected.core||require('../../functions/lib/bazaarCatalogCore');
  const migrate=injected.migrate||require('../../functions/lib/bazaarCatalog').migrateCatalog;
  const snapshot=injected.snapshot||readSnapshot;
- const connection=await (injected.connect||connect)();const {db}=connection;
+ const connection=await (injected.connect||connect)(target);const {db}=connection;
  try {
   const before=await db.runTransaction(tx=>snapshot(db,tx),{readOnly:true});const beforeReport=summary(before,core);
   if(before.control?.state==='building'&&before.control.icu!==runtime.icu)throw Error('Building generation ICU differs; review rollback/rebuild.');
   if(o.mode==='inspect') {
-   const body={schemaVersion:1,target:'fatin-test',action:o.action,runtime,codeHash,...beforeReport};const result={...body,planHash:hash(body)};write(output,result);return result;
+   const body={schemaVersion:1,target:target.projectId,action:o.action,runtime,codeHash,...beforeReport};const result={...body,planHash:hash(body)};write(output,result);return result;
   }
   if(beforeReport.stateHash!==plan.stateHash)throw Error('Reviewed source or projection changed; inspect again.');
-  write(backup,{schemaVersion:1,target:'fatin-test',action:o.action,planHash:plan.planHash,runtime,codeHash,stateHash:beforeReport.stateHash,snapshot:encode(before)});
+  write(backup,{schemaVersion:1,target:target.projectId,action:o.action,planHash:plan.planHash,runtime,codeHash,stateHash:beforeReport.stateHash,snapshot:encode(before)});
   let phase='transaction';
   try {
    const guardedDb=Object.create(db);
@@ -144,10 +144,10 @@ async function run(o, injected={}) {
    const businessUnchanged=after.businessHash===beforeReport.businessHash&&after.sourceCount===beforeReport.sourceCount;
    if(!businessUnchanged)throw Error('Source business fields changed.');
    if(o.action==='activate'&&(after.control?.state!=='active'||after.control?.icu!==runtime.icu||after.control?.generation!==beforeReport.control?.generation||!after.summaryComplete||!after.mediaComplete))throw Error('Activation verification failed.');
-   const report={status:'verified',action:o.action,target:'fatin-test',planHash:plan.planHash,runtime,codeHash,before:beforeReport,after,businessUnchanged};write(output,report);return report;
+   const report={status:'verified',action:o.action,target:target.projectId,planHash:plan.planHash,runtime,codeHash,before:beforeReport,after,businessUnchanged};write(output,report);return report;
   } catch(e) {
    // Preserve exact remote state for an explicit fresh inspect/resume. Never print SDK errors.
-   try{write(output,{status:'failed',phase,action:o.action,target:'fatin-test',planHash:plan.planHash,runtime,codeHash,before:beforeReport,error:safeFailure(e),recovery:'Backup retained. Inspect before retry; outcome may be committed.'});}catch(_reportError){}
+   try{write(output,{status:'failed',phase,action:o.action,target:target.projectId,planHash:plan.planHash,runtime,codeHash,before:beforeReport,error:safeFailure(e),recovery:'Backup retained. Inspect before retry; outcome may be committed.'});}catch(_reportError){}
    throw Error('Migration failed; backup retained. Inspect current state before retry.');
   }
  }finally{await connection.close();}
@@ -158,5 +158,5 @@ function parse(argv) {
  for(let i=0;i<argv.length;i++){const key=names[argv[i]];if(!key||seen.has(key)||!argv[i+1]||argv[i+1].startsWith('--'))throw Error('Invalid or duplicate argument.');seen.add(key);o[key]=argv[++i];}
  if(o.mode==='apply'&&!seen.has('action'))throw Error('Apply requires explicit action.');return o;
 }
-if(require.main===module)Promise.resolve().then(()=>run(parse(process.argv.slice(2)))).then(result=>console.log(JSON.stringify(result))).catch(()=>{console.error('Staging catalog operator failed. Check target, reviewed plan, retained artifacts and current state; SDK details suppressed.');process.exitCode=1;});
+if(require.main===module)Promise.resolve().then(()=>run(parse(process.argv.slice(2)))).then(result=>console.log(JSON.stringify(result))).catch(()=>{console.error('Catalog operator failed. Check target, reviewed plan, retained artifacts and current state; SDK details suppressed.');process.exitCode=1;});
 module.exports={run,parse,hash,encode,readSnapshot,businessHash,validatePath,summary};

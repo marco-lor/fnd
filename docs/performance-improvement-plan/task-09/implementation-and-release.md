@@ -7,7 +7,7 @@ The default Bazaar loads 50 catalog summaries at a time and fetches full detail 
 - Trusted catalog page/detail/write callables, deterministic ranks, cursor/revision fencing, visibility checks, projection indexes and guarded source/summary/media updates.
 - Four editors and deletion use trusted catalog writes. Task07 media lifecycle updates retain catalog projections; acquired inventory snapshots remain independent of catalog changes.
 - Shared bounded detail cache, delayed hover reads, immediate pinning, stable comparison panel, memoized cards/filters and debounced search/persistence.
-- Resumable catalog migration with reviewed plans, state/code/runtime checks and exclusive backups before writes. The live operator is staging-only; the separate performance operator is emulator-only.
+- Resumable catalog migration with reviewed plans, state/code/runtime checks and exclusive backups before writes. The live operator binds production to main/fatins and staging to devs/fatin-test; the separate performance operator is emulator-only.
 
 ## Verification and known limits
 
@@ -52,6 +52,21 @@ Repeat inspect/review/apply for step with unique filenames until the projected c
 
 Backups include private catalog cursor data: retain them locally under ignored performance-results, never print or commit them. On failure retain artifacts and inspect actual state before retry; a post-commit error can mean the mutation succeeded. Rollback only marks the catalog inactive; it does not restore backups or source documents.
 
-## Production boundary
+## Production migration and rollout
 
-Production was not deployed. This implementation requires catalog projection activation before the new reader is usable. The supplied live migration operator rejects production, so a reviewed production rollout/migration path is still required before production release. Merging or deploying Hosting alone is not a complete rollout.
+The new reader requires catalog projection activation. Production migration uses only existing fatins data. It adds catalogVersion metadata to valid source items, derives summaries/media records, cleans orphan media projections and activates catalogControl/bazaar. It does not alter item business fields or owned inventory. Catalog and catalog-media writes are fenced during building. Rollback marks the catalog inactive and requires serving the previous frontend; it does not restore data.
+
+Run from frontend on the actual main branch with Node 22 and the reviewed Node/ICU identity. The operator rejects mixed project/site/bucket values, conflicting environment variables, emulator configuration, staging plans and reused artifacts before writing. Each apply requires an exact target confirmation, fresh plan hash and exclusive local backup.
+
+1. Take and validate a fresh recursive fatins Firestore backup; retain the previous Hosting release and backend/rules configuration for recovery.
+2. Run npm run fb:deploy:task09:functions and npm run fb:deploy:task09:rules. These deploy the three catalog callables, four catalog/media integrations and Firestore rules/indexes. Wait for catalog indexes to reach READY.
+3. Inspect the production source using the command below; review counts, control, code/runtime identity and hashes. Apply that exact begin plan with a unique backup/report path.
+4. Repeat fresh inspect/review/apply for step until all items are projected (up to 150 per step), then for activate. Require unchanged source business hash, complete summary/media projections and matching generation/ICU.
+5. Verify deployed page/detail callables and visibility, then run npm run fb:deploy:hosting. Verify the deployed bundle and authenticated Bazaar flow. The numerical performance gates above remain separate.
+
+```powershell
+npm.cmd run catalog:migrate -- --mode inspect --action begin --output performance-results/task09-production/begin-plan.json
+npm.cmd run catalog:migrate -- --mode apply --action begin --confirm-target fatins --plan performance-results/task09-production/begin-plan.json --reviewed-plan-hash REVIEWED_SHA256 --backup performance-results/task09-production/begin-backup.json --output performance-results/task09-production/begin-report.json
+```
+
+Never copy staging catalog data or reuse staging fingerprints. Retain private backups under ignored local paths. After any failure inspect current state before retry; the transaction may already have committed.
