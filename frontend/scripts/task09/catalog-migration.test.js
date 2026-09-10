@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {run, hash, encode, readSnapshot} = require('./catalog-migration');
 const target = {environmentName:'staging', projectId:'fatin-test', hostingSite:'fatin-test', storageBucket:'fatin-test.firebasestorage.app'};
+const production = {environmentName:'production', projectId:'fatins', hostingSite:'fatins', storageBucket:'fatins.firebasestorage.app'};
 const options = {...target, mode:'inspect', action:'begin', output:'plan.json'};
 function harness() {
   const events=[]; const files={};
@@ -27,6 +28,31 @@ test('apply requires explicit action, target confirmation and reviewed hash befo
  for(const patch of [{confirmTarget:undefined},{action:undefined},{reviewedPlanHash:'b'.repeat(64)}]){
   const h=harness();const apply=await planned(h);h.events.length=0;
   await assert.rejects(run({...apply,...patch},h.deps));assert.deepEqual(h.events,[]);
+ }
+});
+
+test('production inspect and apply bind credentials, plans, backups and reports to fatins on main',async()=>{
+ const h=harness();h.deps.branch='main';const connect=h.deps.connect;
+ h.deps.connect=async selection=>{assert.equal(selection.projectId,'fatins');assert.equal(selection.storageBucket,production.storageBucket);return connect();};
+ const p=await run({...options,...production},h.deps);assert.equal(p.target,'fatins');assert.equal(h.events.includes('mutation'),false);
+ const result=await run({...options,...production,mode:'apply',confirmTarget:'fatins',plan:'plan.json',reviewedPlanHash:p.planHash,backup:'backup.json',output:'report.json'},h.deps);
+ assert.equal(result.target,'fatins');assert.equal(result.businessUnchanged,true);assert.equal(h.files['backup.json'].target,'fatins');
+ assert.ok(h.events.indexOf('write:backup.json')<h.events.indexOf('mutation'));
+});
+
+test('production rejects mismatched targets, spoofed branches and ambient project overrides before credentials',async()=>{
+ for(const [patch,env,branch] of [[{}, {},'devs'],[{projectId:'fatin-test'},{},'main'],[{hostingSite:'fatin-test'},{},'main'],[{storageBucket:target.storageBucket},{},'main'],[{}, {FND_GIT_BRANCH:'main'},'devs'],[{}, {GCLOUD_PROJECT:'fatin-test'},'main'],[{}, {FND_FIREBASE_ENVIRONMENT:'staging'},'main'],[{}, {FIRESTORE_EMULATOR_HOST:'localhost:8080'},'main']]){
+  const h=harness();h.deps.environment=env;h.deps.branch=branch;
+  await assert.rejects(run({...options,...production,...patch},h.deps));assert.deepEqual(h.events,[]);
+ }
+});
+
+test('production rejects staging plans and wrong target confirmations before credentials',async()=>{
+ for(const wrong of ['plan','confirmation']) {
+  const h=harness();const stagingPlan=await run(options,h.deps);h.deps.branch='main';
+  const productionPlan=await run({...options,...production,output:'production-plan.json'},h.deps);h.events.length=0;
+  await assert.rejects(run({...options,...production,mode:'apply',confirmTarget:wrong==='confirmation'?'fatin-test':'fatins',plan:wrong==='plan'?'plan.json':'production-plan.json',reviewedPlanHash:wrong==='plan'?stagingPlan.planHash:productionPlan.planHash,backup:'backup.json',output:'report.json'},h.deps));
+  assert.deepEqual(h.events,[]);
  }
 });
 test('inspect never mutates and exposes no catalog or private payload',async()=>{
@@ -87,7 +113,7 @@ test('existing report fails before credentials and mutation',async()=>{
 });
 
 // Real migration library; Firestore is an in-memory transaction mock, never connected.
-test('real migrateCatalog begin, interrupted-step resume, activate and rollback preserve business fields',async()=>{
+for (const migrationTarget of [target, production]) test(`${migrationTarget.environmentName}: real migrateCatalog begin, interrupted-step resume, activate and rollback preserve business fields`,async()=>{
  const core=require('../../functions/lib/bazaarCatalogCore');
  const {migrateCatalog}=require('../../functions/lib/bazaarCatalog');
  const docs=new Map();
@@ -105,7 +131,8 @@ test('real migrateCatalog begin, interrupted-step resume, activate and rollback 
   const result=await fn(tx);writes.forEach(f=>f());return result;
  }};
  const h=harness();h.deps.core=core;h.deps.migrate=migrateCatalog;h.deps.snapshot=readSnapshot;h.deps.connect=async()=>({db,close:async()=>{}});h.deps.runtime={node:process.versions.node,icu:process.versions.icu};
- async function act(action,index){const p=await run({...options,action,output:'plan'+index+'.json'},h.deps);return run({...options,mode:'apply',action,confirmTarget:'fatin-test',plan:'plan'+index+'.json',reviewedPlanHash:p.planHash,backup:'backup'+index+'.json',output:'report'+index+'.json'},h.deps);}
+ h.deps.branch=migrationTarget.environmentName==='production'?'main':'devs';
+ async function act(action,index){const p=await run({...options,...migrationTarget,action,output:'plan'+index+'.json'},h.deps);return run({...options,...migrationTarget,mode:'apply',action,confirmTarget:migrationTarget.projectId,plan:'plan'+index+'.json',reviewedPlanHash:p.planHash,backup:'backup'+index+'.json',output:'report'+index+'.json'},h.deps);}
  const begin=await act('begin',0);assert.equal(begin.after.control.state,'building');
  const first=await act('step',1);assert.equal(first.after.control.offset,150);
  // Separate invocation/review resumes at persisted offset without restarting generation.

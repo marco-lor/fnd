@@ -63,6 +63,7 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
+      - run: npm --prefix .. run catalog:test
 
   task07-pr-gate:
     if: github.event_name == 'pull_request'
