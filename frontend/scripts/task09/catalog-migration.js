@@ -71,12 +71,33 @@ function writeExclusive(p,v) {
  const fd=fs.openSync(p,'wx',0o600);
  try {fs.writeFileSync(fd,JSON.stringify(v,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
 }
-function codeIdentity() {
+function codeIdentity({root=FRONTEND_ROOT,fsImpl=fs}={}) {
+ const canonicalRoot=fsImpl.realpathSync(root);
  const entries=[];
+ const checkedPath=p=>{
+  const full=path.join(canonicalRoot,p);
+  if(fsImpl.realpathSync(full)!==full)throw Error('Code identity cannot follow links outside the reviewed source path.');
+  return full;
+ };
+ const record=(p,full)=>entries.push([p,crypto.createHash('sha256').update(fsImpl.readFileSync(full)).digest('hex')]);
  for(const base of ['functions/src','functions/lib']) {
-  const walk=dir=>{for(const e of fs.readdirSync(path.join(FRONTEND_ROOT,dir),{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))) {const p=dir+'/'+e.name;if(e.isDirectory())walk(p);else if(e.isFile())entries.push([p,crypto.createHash('sha256').update(fs.readFileSync(path.join(FRONTEND_ROOT,p))).digest('hex')]);}};walk(base);
+  const walk=dir=>{
+   for(const e of fsImpl.readdirSync(checkedPath(dir),{withFileTypes:true}).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)) {
+    const p=dir+'/'+e.name,full=checkedPath(p);
+    // OneDrive can report cloud placeholders as links in Dirent. stat resolves
+    // their real file type without allowing an actual symbolic-link target.
+    const stat=fsImpl.statSync(full);
+    if(stat.isDirectory())walk(p);
+    else if(stat.isFile())record(p,full);
+    else throw Error('Unsupported entry in reviewed code tree.');
+   }
+  };walk(base);
  }
- for(const p of ['scripts/task09/catalog-migration.js','scripts/firebase-operator-target.js','scripts/firebase-environment.js','scripts/firebase-cli-admin-credential.js'])entries.push([p,crypto.createHash('sha256').update(fs.readFileSync(path.join(FRONTEND_ROOT,p))).digest('hex')]);
+ for(const p of ['scripts/task09/catalog-migration.js','scripts/firebase-operator-target.js','scripts/firebase-environment.js','scripts/firebase-cli-admin-credential.js']) {
+  const full=checkedPath(p);
+  if(!fsImpl.statSync(full).isFile())throw Error('Reviewed operator dependency is not a file.');
+  record(p,full);
+ }
  return hash(entries);
 }
 async function connect(target) {
@@ -159,4 +180,4 @@ function parse(argv) {
  if(o.mode==='apply'&&!seen.has('action'))throw Error('Apply requires explicit action.');return o;
 }
 if(require.main===module)Promise.resolve().then(()=>run(parse(process.argv.slice(2)))).then(result=>console.log(JSON.stringify(result))).catch(()=>{console.error('Catalog operator failed. Check target, reviewed plan, retained artifacts and current state; SDK details suppressed.');process.exitCode=1;});
-module.exports={run,parse,hash,encode,readSnapshot,businessHash,validatePath,summary};
+module.exports={run,parse,hash,encode,readSnapshot,businessHash,validatePath,summary,codeIdentity};

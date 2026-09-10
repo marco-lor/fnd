@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const {run, hash, encode, readSnapshot} = require('./catalog-migration');
 const target = {environmentName:'staging', projectId:'fatin-test', hostingSite:'fatin-test', storageBucket:'fatin-test.firebasestorage.app'};
 const production = {environmentName:'production', projectId:'fatins', hostingSite:'fatins', storageBucket:'fatins.firebasestorage.app'};
@@ -110,6 +111,29 @@ test('building generation ICU mismatch refuses mutation',async()=>{
 test('existing report fails before credentials and mutation',async()=>{
  const h=harness();const a=await planned(h);h.files['report.json']={existing:true};h.events.length=0;
  await assert.rejects(run(a,h.deps),/already exists/);assert.deepEqual(h.events,[]);assert.equal(h.files['backup.json'],undefined);
+});
+
+function fingerprintFixture({placeholder=false,escape=false}={}) {
+ const root=path.resolve('fixture');let runtime='compiled version 1';
+ const filePath=path.join(root,'functions/lib/catalog.js');
+ const fsImpl={
+  readdirSync:dir=>dir.endsWith(path.join('functions','lib'))?[{name:'catalog.js',isFile:()=>!placeholder,isDirectory:()=>false}]:[],
+  statSync:()=>({isFile:()=>true,isDirectory:()=>false}),
+  realpathSync:p=>escape&&p===filePath?path.resolve('outside/catalog.js'):p,
+  readFileSync:p=>Buffer.from(p===filePath?runtime:'fixed source'),
+ };
+ return {root,fsImpl,changeRuntime:()=>{runtime='compiled version 2';}};
+}
+
+test('code identity includes OneDrive cloud files and is stable across placeholder hydration',()=>{
+ const {codeIdentity}=require('./catalog-migration');const normal=fingerprintFixture();const cloud=fingerprintFixture({placeholder:true});
+ const first=codeIdentity(cloud);assert.equal(first,codeIdentity(normal));
+ cloud.changeRuntime();assert.notEqual(codeIdentity(cloud),first);
+});
+
+test('code identity rejects links escaping the reviewed source root',()=>{
+ const {codeIdentity}=require('./catalog-migration');
+ assert.throws(()=>codeIdentity(fingerprintFixture({placeholder:true,escape:true})),/outside|link|root/i);
 });
 
 // Real migration library; Firestore is an in-memory transaction mock, never connected.
