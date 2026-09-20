@@ -37,21 +37,16 @@ import {
     usePersonalTechniques,
     useProgression,
 } from '../../../data/userData/userDataHooks';
-import { getUserDirectoryPage } from '../../../data/userDirectoryRepository';
-import { computeValue } from '../../common/computeFormula';
-import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
+
+import { EditorParameterTable, EditorAddSpellButton as AddSpellButton, editorFormReducer, useEditorFormActions } from './editorForm';
 import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
-import VisibilitySelector from '../../common/VisibilitySelector';
-import {
-    getCommonSpells,
-    getCommonTechniques,
-    getSchema,
-} from '../../../data/configRepository';
+import { EditorVisibilitySelector as VisibilitySelector, EditorConfigurationStatus, useEditorConfiguration } from './editorData';
 
 export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
-    const [schema, setSchema] = useState(null);
+    const configuration = useEditorConfiguration('schema_weapon');
+    const { schema, spellSchema, loading: isSchemaLoading } = configuration;
     const [weaponFormData, setWeaponFormData] = useState({
         General: {},
         Specific: {},
@@ -66,7 +61,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     );
     const imagePreviewUrl = imageEditor.src;
     const [isLoading, setIsLoading] = useState(false);
-    const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
     const { user, userData: authUserData } = useContext(AuthContext);
     const role = authUserData?.role || null;
@@ -76,7 +70,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const task07MediaOperationOwner = useTask07MediaOperationOwner();
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
     const [userName, setUserName] = useState("");
-    const [spellSchema, setSpellSchema] = useState(null);
 
     const [tecnicheList, setTecnicheList] = useState([]);
     const [ridTecnicheList, setRidTecnicheList] = useState([]);
@@ -88,17 +81,14 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const [customSpells, setCustomSpells] = useState([]);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
 
-    const [users, setUsers] = useState([]);
     const [visibility, setVisibility] = useState('all');
     const [allowedUsers, setAllowedUsers] = useState([]);
 
     // Refs to manage initialization logic
-    const prevInitialDataIdRef = useRef(null);
-    const formInitializedForCurrentItem = useRef(false);
+    const initializedFormIdentity = useRef(null);
     const pendingCatalogCreateRef = useRef(null);
     const completedEmbeddedOperationsRef = useRef(new Set());
     const completedRootUploadRef = useRef(null);
-
 
     const addTecnica = useCallback(() => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]), []);
     const removeTecnica = useCallback(index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index)), []);
@@ -108,26 +98,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const removeWeaponSpellLink = useCallback(index => setWeaponSpellsList(prev => prev.filter((_, i) => i !== index)), []);
 
     // Replaced legacy multi-select with new component handler
-    const handleVisibilityChange = (newVisibility, newAllowed) => {
+    const handleVisibilityChange = useCallback((newVisibility, newAllowed) => {
         setVisibility(newVisibility);
         setAllowedUsers(newAllowed);
-    };
-
-    useEffect(() => {
-        const fetchUsers = async () => {
-            try {
-                const page = await getUserDirectoryPage();
-                const list = (page?.items || []).map((entry) => ({
-                    id: entry.id,
-                    characterId: entry.label,
-                    role: entry.role,
-                }));
-                setUsers(list);
-            } catch (err) {
-                console.error('Error fetching users:', err);
-            }
-        };
-        fetchUsers();
     }, []);
 
     useEffect(() => {
@@ -207,18 +180,11 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 Object.entries(currentItemData.General.ridCostoSpellSingola).map(([spell, val]) => ({ selectedSpell: spell, ridValue: String(val) })) : []
             );
 
-            // *** MODIFIED SPELL INITIALIZATION LOGIC ***
-            // Only set customSpells and weaponSpellsList from currentItemData if the item ID has changed
-            // or if formInitializedForCurrentItem.current was false (meaning it's the first init for this item).
-            // This check is now primarily handled by the calling useEffect.
-            // Here, we assume if currentItemData is provided, we are setting based on it,
-            // but the calling useEffect prevents this from overwriting local changes.
             const embeddedEditorState = task07CatalogEmbeddedSpellEditorState(
                 currentItemData
             );
             setWeaponSpellsList(embeddedEditorState.linkedSpells);
             setCustomSpells(embeddedEditorState.customSpells);
-
 
             setImageFile(null);
             setImageRemoved(false);
@@ -240,80 +206,37 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
     }, [editMode]); // Removed customSpells.length, parent useEffect controls re-init
 
+    // Initialize once per draft identity, independently of configuration refreshes.
     useEffect(() => {
-        setIsSchemaLoading(true);
-        const fetchWeaponSchema = async () => {
-            try {
-                const schemaData = await getSchema('schema_weapon');
-                if (schemaData) {
-                    setSchema(schemaData);
-                } else {
-                    console.error("Weapon schema (schema_weapon) not found!");
-                    if (showMessage) showMessage("Errore: Schema arma non trovato.", "error");
-                }
-            } catch (error) {
-                console.error("Error fetching weapon schema:", error);
-                if (showMessage) showMessage("Errore nel caricamento dello schema.", "error");
-            } finally {
-                setIsSchemaLoading(false);
-            }
-        };
-        fetchWeaponSchema();
-    }, [showMessage]);
-
-    // *** REVISED useEffect FOR INITIALIZATION ***
-    useEffect(() => {
-        if (schema) {
-            if (editMode && initialData) {
-                // If the item ID changes, or if form hasn't been initialized for the current item ID
-                if (initialData.id !== prevInitialDataIdRef.current || !formInitializedForCurrentItem.current) {
-                    console.log("Initializing FormData for item (edit mode):", initialData.General?.Nome, "ID:", initialData.id);
-                    initializeFormData(schema, initialData);
-                    prevInitialDataIdRef.current = initialData.id;
-                    formInitializedForCurrentItem.current = true;
-                } else {
-                    console.log("Skipping re-initialization for already loaded item:", initialData.General?.Nome);
-                }
-            } else if (!editMode) { // Creating a new item
-                if (!formInitializedForCurrentItem.current) {
-                    console.log("Initializing FormData for NEW weapon.");
-                    initializeFormData(schema, null); // Pass null for new item
-                    prevInitialDataIdRef.current = null; // No ID for new item yet
-                    formInitializedForCurrentItem.current = true;
-                }
-            }
-        }
-    }, [schema, initialData, editMode, initializeFormData]);
-
-    // Reset initialization flag if component instance changes (e.g. overlay is closed and reopened)
-    // This effect runs on mount and when editMode changes.
-    useEffect(() => {
-        formInitializedForCurrentItem.current = false;
-        // When the overlay is shown (component mounts) or mode changes,
-        // we want to allow initialization.
-    }, [editMode]); // Also implicitly runs on mount
+        if (!schema || (editMode && !initialData)) return;
+        // A refreshed schema changes available fields, not the user's draft.
+        // Only an intentional item/mode/account change starts a new draft.
+        const identity = JSON.stringify([
+            user?.uid, editMode, inventoryEditMode, inventoryUserId, inventoryItemId,
+            editMode ? (initialData?.id ?? initialData?.General?.Nome ?? inventoryItemIndex) : null,
+        ]);
+        if (initializedFormIdentity.current === identity) return;
+        initializeFormData(schema, editMode ? initialData : null);
+        initializedFormIdentity.current = identity;
+    }, [schema, editMode, initialData, initializeFormData, user?.uid, inventoryEditMode, inventoryUserId, inventoryItemId, inventoryItemIndex]);
 
     useEffect(() => {
         if (!user) return;
-        const fetchData = async () => {
+        const deriveData = () => {
             try {
                 setUserParams(progression?.Parametri || { Base: {}, Combattimento: {} });
                 setUserName(authUserData?.characterId || user.email || "Unknown User");
 
-                const spellSchemaData = await getSchema('schema_spell');
-                if (spellSchemaData) setSpellSchema(spellSchemaData);
-                else console.error("Spell schema not found!");
-
-                const commonSpells = await getCommonSpells() || {};
+                const commonSpells = configuration.commonSpells || {};
                 const userSpellNames = Object.entries(personalSpells || {}).map(([key, value]) => (
                     value?.name || value?.Nome || key
                 ));
 
                 const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
                 const currentCustomSpellNames = customSpells.map(cs => cs.spellData.Nome.trim());
-                setSpellsList([...new Set([...Object.keys(commonSpells), ...userSpellNames, ...initialSpellNamesFromData, ...currentCustomSpellNames])].sort());
+                setSpellsList([...new Set([...Object.keys(commonSpells), ...userSpellNames, ...initialSpellNamesFromData, ...Object.keys(initialData?.General?.ridCostoSpellSingola ?? initialData?.ridCostoSpellSingola ?? {}), ...currentCustomSpellNames])].sort());
 
-                const commonTecniche = await getCommonTechniques({ legacyFirst: true }) || {};
+                const commonTecniche = configuration.commonTechniques || {};
                 const userTechniqueNames = Object.entries(personalTechniques || {}).map(([key, value]) => (
                     value?.name || value?.Nome || key
                 ));
@@ -324,8 +247,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 console.error('Error fetching initial data for overlay:', error);
             }
         };
-        fetchData();
-    }, [authUserData?.characterId, customSpells, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, personalSpells, personalTechniques, progression, user]);
+        deriveData();
+    }, [configuration.commonSpells, configuration.commonTechniques, authUserData?.characterId, customSpells, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, initialData?.General?.ridCostoSpellSingola, initialData?.ridCostoSpellSingola, initialData?.ridCostoTecSingola, personalSpells, personalTechniques, progression, user]);
 
     const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);
@@ -383,29 +306,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         setCustomSpells(prev => prev.filter((_, i) => i !== index));
     }, []);
 
-    const handleNestedChange = (path, value) => {
-        setWeaponFormData(prev => {
-            const keys = path.split('.');
-            let current = prev;
-            for (let i = 0; i < keys.length - 1; i++) {
-                if (!current[keys[i]]) current[keys[i]] = {}; // Ensure path exists
-                current = current[keys[i]];
-            }
-            current[keys[keys.length - 1]] = value;
-            return { ...prev };
-        });
-    };
-
-    const handleParamChange = (paramCategory, paramField, level, value) => {
-        setWeaponFormData(prev => {
-            const newState = JSON.parse(JSON.stringify(prev));
-            if (!newState.Parametri) newState.Parametri = { Base: {}, Combattimento: {}, Special: {} };
-            if (!newState.Parametri[paramCategory]) newState.Parametri[paramCategory] = {};
-            if (!newState.Parametri[paramCategory][paramField]) newState.Parametri[paramCategory][paramField] = {};
-            newState.Parametri[paramCategory][paramField][level] = value;
-            return newState;
-        });
-    };
+    const { change: handleNestedChange, changeParameter: handleParamChange } = useEditorFormActions(setWeaponFormData);
 
     const handleSaveWeapon = async () => {
         setIsLoading(true);
@@ -552,7 +453,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                  delete finalWeaponData.Parametri;
             }
 
-
             // If editing a user's inventory copy, update the user doc instead of the global items collection
             if (inventoryEditMode) {
                 const targetId = inventoryItemId
@@ -599,11 +499,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
                 onClose(true);
             } else {
-                if (imageRemoved) {
-                    await task07MediaOperationOwner.run(() => (
-                        retireTask07CatalogItemImage(catalogBefore)
-                    ));
-                }
                 const persistCatalogParent = async () => {
                     if (catalogIsExisting) {
                         await catalogUpdateDoc(weaponDocRef, finalWeaponData);
@@ -654,6 +549,11 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     await persistCatalogParent();
                     if (showMessage) showMessage(`Arma "${weaponName}" creata!`, "success");
                 }
+                if (imageRemoved) {
+                    await task07MediaOperationOwner.run(() => (
+                        retireTask07CatalogItemImage(catalogBefore)
+                    ));
+                }
                 if (embeddedSpellPlan.operations.length > 0) {
                     await task07MediaOperationOwner.run((signal) => (
                         runTask07CatalogEmbeddedMediaOperations({
@@ -699,7 +599,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 <VisibilitySelector
                     visibility={visibility}
                     allowedUsers={allowedUsers}
-                    users={users}
                     onChange={handleVisibilityChange}
                     className="mb-6"
                 />
@@ -859,73 +758,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             return <div className="text-orange-400 p-4 text-center">Struttura parametri nello schema incompleta.</div>;
         }
 
-        const levels = ["1", "4", "7", "10"];
-        const specialFields = Object.keys(schema.Parametri.Special || {});
-        const baseParamFields = Object.keys(schema.Parametri.Base || {});
-        const combatParamFields = Object.keys(schema.Parametri.Combattimento || {});
 
-        const renderTable = (title, fields, paramCategory) => {
-            const schemaCategory = schema.Parametri?.[paramCategory];
-            if (!schemaCategory || fields.length === 0) return null;
-
-            return (
-                <div className="w-full bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm border border-gray-700/50">
-                    <h3 className="text-white mb-3 font-medium">{title}</h3>
-                    <div className="overflow-x-auto">
-                        <table className="w-full min-w-[300px] text-white text-sm">
-                            <thead>
-                                <tr>
-                                    <th className="bg-gray-700/50 px-2 py-2 rounded-tl-lg text-left font-semibold">Param</th>
-                                    {levels.map((lvl, i) => (
-                                        <th key={lvl} className={`bg-gray-700/50 px-2 py-2 ${i === levels.length - 1 ? 'rounded-tr-lg' : ''} text-center font-semibold`}>
-                                            Lvl {lvl}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {fields.map((field, i) => {
-                                    const isLastRow = i === fields.length - 1;
-                                    const rowData = weaponFormData.Parametri?.[paramCategory]?.[field];
-                                    return (
-                                        <tr key={`${paramCategory}-${field}`}>
-                                            <td className={`bg-gray-700/30 px-2 py-1.5 ${isLastRow ? 'rounded-bl-lg' : ''} text-left`}>{field}</td>
-                                            {levels.map((lvl, j) => {
-                                                const value = (rowData && rowData[lvl] !== undefined) ? rowData[lvl] : '';
-                                                const isComputableParam = (paramCategory === 'Base' || paramCategory === 'Combattimento');
-                                                const computed = isComputableParam && value && userParams ? computeValue(value, userParams) : null;
-                                                return (
-                                                    <td key={lvl} className={`bg-gray-700/30 px-1 py-1 ${isLastRow && j === levels.length - 1 ? 'rounded-br-lg' : ''}`}>
-                                                        <div className="flex items-center justify-center">
-                                                            <input
-                                                                type="text"
-                                                                value={value}
-                                                                onChange={(e) => handleParamChange(paramCategory, field, lvl, e.target.value)}
-                                                                className="w-16 p-1 rounded-md bg-gray-600/70 text-white text-center focus:outline-none focus:ring-1 focus:ring-blue-500/50 border border-gray-500/50"
-                                                                placeholder="-"
-                                                            />
-                                                            {computed !== null && !isNaN(computed) && (
-                                                                <span className="ml-1 text-gray-400 text-xs">({computed})</span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                )
-                                            })}
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            );
-        };
 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-                {renderTable("Parametri Speciali", specialFields, "Special")}
-                {renderTable("Parametri Base", baseParamFields, "Base")}
-                {renderTable("Parametri Combattimento", combatParamFields, "Combattimento")}
+                <EditorParameterTable title="Parametri Speciali" schemaCategory={schema.Parametri.Special} paramCategory="Special" values={weaponFormData.Parametri?.Special} userParams={userParams} onChange={handleParamChange} />
+                <EditorParameterTable title="Parametri Base" schemaCategory={schema.Parametri.Base} paramCategory="Base" values={weaponFormData.Parametri?.Base} userParams={userParams} onChange={handleParamChange} />
+                <EditorParameterTable title="Parametri Combattimento" schemaCategory={schema.Parametri.Combattimento} paramCategory="Combattimento" values={weaponFormData.Parametri?.Combattimento} userParams={userParams} onChange={handleParamChange} />
             </div>
         );
     };
@@ -943,7 +782,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                 <select
                                     value={item.selectedTec}
                                     onChange={e => {
-                                        const newList = [...ridTecnicheList]; newList[idx].selectedTec = e.target.value; setRidTecnicheList(newList);
+                                        const value = e.target.value;
+                                        setRidTecnicheList(previous => editorFormReducer(previous, {path: [idx, 'selectedTec'], value}));
                                     }}
                                     className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 >
@@ -953,7 +793,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                 <input
                                     type="number" value={item.ridValue}
                                     onChange={e => {
-                                        const newList = [...ridTecnicheList]; newList[idx].ridValue = e.target.value; setRidTecnicheList(newList);
+                                        const value = e.target.value;
+                                        setRidTecnicheList(previous => editorFormReducer(previous, {path: [idx, 'ridValue'], value}));
                                     }}
                                     placeholder="Valore"
                                     className="w-24 p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
@@ -974,7 +815,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                 <select
                                     value={item.selectedSpell}
                                     onChange={e => {
-                                        const newList = [...ridSpellList]; newList[idx].selectedSpell = e.target.value; setRidSpellList(newList);
+                                        const value = e.target.value;
+                                        setRidSpellList(previous => editorFormReducer(previous, {path: [idx, 'selectedSpell'], value}));
                                     }}
                                     className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 >
@@ -984,7 +826,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                 <input
                                     type="number" value={item.ridValue}
                                     onChange={e => {
-                                        const newList = [...ridSpellList]; newList[idx].ridValue = e.target.value; setRidSpellList(newList);
+                                        const value = e.target.value;
+                                        setRidSpellList(previous => editorFormReducer(previous, {path: [idx, 'ridValue'], value}));
                                     }}
                                     placeholder="Valore"
                                     className="w-24 p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
@@ -1070,8 +913,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 onClose={() => onClose(false)}
                 onSave={handleSaveWeapon}
                 saveButtonText={editMode ? "Salva Modifiche" : "Crea Arma"}
-                isLoading={isLoading || isSchemaLoading}
+                isLoading={isLoading || isSchemaLoading || !schema}
             >
+                <EditorConfigurationStatus configuration={configuration} />
                 {isSchemaLoading ? (
                     <div className="text-white p-4 text-center">Caricamento Dati...</div>
                 ) : !schema ? (

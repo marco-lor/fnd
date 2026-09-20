@@ -8,13 +8,7 @@ import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
 import { useProgression } from '../../../data/userData/userDataHooks';
 import { getUserDirectoryPage } from '../../../data/userDirectoryRepository';
-import {
-  AddAccessorioOverlay,
-  AddArmaturaOverlay,
-  AddConsumabileOverlay,
-  AddWeaponOverlay,
-  prefetchBazaarEditor,
-} from '../lazyBazaarEditors';
+import { prefetchBazaarEditor } from '../lazyBazaarEditors';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook } from "react-icons/gi";
 import { getSchema, getVarie } from '../../../data/configRepository';
@@ -391,7 +385,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   );
 };
 
-export default function ComparisonPanel({ item, showMessage, scopeKey }) {
+export default function ComparisonPanel({ item, showMessage, scopeKey, onEdit }) {
   const { user, userData: authUserData } = useContext(AuthContext);
   const panelScope = scopeKey || `${user?.uid || 'anonymous'}:${authUserData?.role || 'unknown'}`;
   const itemIdentity = `${panelScope}:${item?.id || ''}`;
@@ -408,7 +402,6 @@ export default function ComparisonPanel({ item, showMessage, scopeKey }) {
   /*  Local state                                                            */
   /* ----------------------------------------------------------------------- */
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [imageError, setImageError]  = useState(false);
   const [schema, setSchema] = useState(null);
   const [isSchemaLoading, setIsSchemaLoading] = useState(false);
@@ -425,7 +418,6 @@ export default function ComparisonPanel({ item, showMessage, scopeKey }) {
   useEffect(() => {
     setStateIdentity(itemIdentity);
     setShowDeleteConfirmation(false);
-    setShowEditOverlay(false);
     setImageError(false);
     setAllowedUsersNames([]);
     setAllowedUsersLoading(false);
@@ -594,8 +586,7 @@ export default function ComparisonPanel({ item, showMessage, scopeKey }) {
     }
   };
 
-  const handleEditClick       = () => setShowEditOverlay(true);
-  const handleCloseEditOverlay = () => setShowEditOverlay(false);
+  const handleEditClick = () => onEdit?.(item);
 
   const isAdmin = authUserData?.role === 'webmaster' || authUserData?.role === 'dm';
   const allowedUsersSignature = JSON.stringify(
@@ -918,40 +909,7 @@ export default function ComparisonPanel({ item, showMessage, scopeKey }) {
             </div>
           )}
         </div>
-      </div>      {/* EDIT OVERLAY ------------------------------------------------------- */}
-      {stateIdentity === itemIdentity && showEditOverlay && (
-        <>
-          {item?.item_type === 'armatura' ? (
-            <AddArmaturaOverlay
-              onClose={handleCloseEditOverlay}
-              showMessage={showMessage || console.log}
-              initialData={item}
-              editMode={true}
-            />
-          ) : item?.item_type === 'accessorio' ? (
-            <AddAccessorioOverlay
-              onClose={handleCloseEditOverlay}
-              showMessage={showMessage || console.log}
-              initialData={item}
-              editMode={true}
-            />
-          ) : item?.item_type === 'consumabile' ? (
-            <AddConsumabileOverlay
-              onClose={handleCloseEditOverlay}
-              showMessage={showMessage || console.log}
-              initialData={item}
-              editMode={true}
-            />
-          ) : (
-            <AddWeaponOverlay
-              onClose={handleCloseEditOverlay}
-              showMessage={showMessage || console.log}
-              initialData={item}
-              editMode={true}
-            />
-          )}
-        </>
-      )}
+      </div>
     </>
   );
 }

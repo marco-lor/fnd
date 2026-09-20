@@ -174,6 +174,7 @@ test('required Home and Bazaar acceptance routes use V2 user data boundaries', (
   const paramTables = read('src/components/home/elements/paramTables.js');
   const comparison = read('src/components/bazaar/elements/comparisonComponent.js');
   const addWeapon = read('src/components/bazaar/elements/addWeapon.js');
+  const editorData = read('src/components/bazaar/elements/editorData.js');
 
   assert.equal(findDirectAccessesInSource(paramTables).length, 0);
   assert.match(paramTables, /useProgression\(user\?\.uid\)/);
@@ -192,7 +193,16 @@ test('required Home and Bazaar acceptance routes use V2 user data boundaries', (
   assert.match(addWeapon, /useProgression\(user\?\.uid\)/);
   assert.match(addWeapon, /usePersonalSpells\(user\?\.uid\)/);
   assert.match(addWeapon, /usePersonalTechniques\(user\?\.uid\)/);
-  assert.match(addWeapon, /getUserDirectoryPage\(\)/);
+  // The adapter delegates directory ownership; both sides retain the V2 boundary.
+  assert.match(addWeapon, /import\s*\{[^}]*EditorVisibilitySelector\s+as\s+VisibilitySelector[^}]*\}\s*from\s*['"]\.\/editorData['"]/);
+  assert.match(addWeapon, /<VisibilitySelector\b/);
+  assert.doesNotMatch(addWeapon, /getUserDirectoryPage/);
+  assert.equal(findDirectAccessesInSource(editorData).length, 0);
+  assert.match(editorData, /import\s*\{\s*getUserDirectoryPage\s*\}\s*from\s*['"]\.\.\/\.\.\/\.\.\/data\/userDirectoryRepository['"]/);
+  assert.match(editorData, /export function EditorVisibilitySelector\(props\)/);
+  assert.match(editorData, /await getUserDirectoryPage\(\{\s*cursor\s*\}\)/);
+  assert.doesNotMatch(editorData, /from\s*['"][^'"]*(?:firebase\/firestore|performance\/firestore|firebaseConfig)['"]/);
+
 });
 
 test('normal UI command flows depend only on canonical Task 05 commands', () => {

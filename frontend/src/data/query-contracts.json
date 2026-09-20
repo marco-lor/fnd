@@ -39,36 +39,6 @@
       "sources": [{ "file": "data/catalogItemRepository.js", "occurrence": 1 }]
     },
     {
-      "id": "bazaar-editor-techniques-current",
-      "kind": "collection",
-      "queryKey": "bazaar.techniques.subscribe.v1",
-      "ownerTask": "Task 09",
-      "currentScope": "Complete techniques collection in accessory and consumable editors",
-      "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedName", "__name__"] },
-      "realtimePolicy": "Active editor window only",
-      "activation": "deferred",
-      "sources": [
-        { "file": "components/bazaar/elements/addAccessorio.js", "occurrence": 1 },
-        { "file": "components/bazaar/elements/addConsumabile.js", "occurrence": 1 }
-      ]
-    },
-    {
-      "id": "bazaar-editor-spells-current",
-      "kind": "collection",
-      "queryKey": "bazaar.spells.subscribe.v1",
-      "ownerTask": "Task 09",
-      "currentScope": "Complete spells collection in accessory and consumable editors",
-      "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedName", "__name__"] },
-      "realtimePolicy": "Active editor window only",
-      "activation": "deferred",
-      "sources": [
-        { "file": "components/bazaar/elements/addAccessorio.js", "occurrence": 2 },
-        { "file": "components/bazaar/elements/addConsumabile.js", "occurrence": 2 }
-      ]
-    },
-    {
       "id": "combat-add-foes-current",
       "kind": "collection",
       "queryKey": "combat.foes.subscribe.v1",
