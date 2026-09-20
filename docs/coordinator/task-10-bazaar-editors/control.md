@@ -1,9 +1,9 @@
 # Control — Task 10
 
-- Stage/mode: implementation accepted; E / coordinator publication of devs into main. Stages A–D passed.
+- Stage/mode: complete / A–E accepted. PR #42 is open from devs into main and attached to this task; GitHub checks started and remain separate from the passed local/staging gates.
 - Pause: clear. User explicitly authorizes committing, pushing and creating the PR into main, following accepted staging deployment/manual tests. Merge and production release are outside this request.
 - Shared resources: all developers/processes quiescent; coordinator owns build/tests, docs, staging release and IAB tab 1. Preserve unrelated data; retain QA fixtures.
-- Workspace: permanent C:\Users\Marco\OneDrive\git_projects\fnd-devs, branch devs, implementation base 6f080dbd9bd3f6380242fa0ea66894620d9ad958. Refreshed origin/main and origin/devs match that base; no open PR exists at publication intake. Coordinator owns Git/PR mutations.
+- Workspace: permanent C:\Users\Marco\OneDrive\git_projects\fnd-devs, branch devs, implementation base 6f080dbd9bd3f6380242fa0ea66894620d9ad958. Reviewed implementation committed/pushed as 565628341b52d5a229b0439afddfa3c29fe57db8. Coordinator owns Git/PR mutations; no developer lease remains.
 - Source review, measurement values, release identity, rollback reference and live interaction scope: see plan.md.
 - Manual fixtures: four fresh QA10 20260920 R2 catalog items, prices 201/202/203/204, final Forza level1 61/71/81/91. Four-level values, type-specific fields, custom spell cost 8, reductions 2/3 and visibility MarcoDM + MarcoTEST persisted. Search/add/remove, Cancel and saved edits passed for all four.
 - Images: original failing panel-pencil path and all four R2 blue→orange replacements passed after full reload. R2 weapon removal passed; its image is absent, other three orange images remain. No fresh console errors. Optional network interruption/duplicate retry was not manually simulated: no browser offline control; automated failure/retry coverage passed.
