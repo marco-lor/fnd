@@ -490,6 +490,12 @@ function BazaarContent() {
   const handleAddArmaturaClick = () => openEditor('armatura');
   const handleAddAccessorioClick = () => openEditor('accessorio');
   const handleAddConsumabileClick = () => openEditor('consumabile');
+  const handleEditPanelItem = (item) => {
+    if (!isAdmin || !item || !BAZAAR_EDITOR_DESCRIPTORS[item.item_type]) return;
+    // Both entry points share an editor snapshot, independent of live detail
+    // refreshes caused by preparing the catalog parent for a media upload.
+    setEditor({kind: item.item_type, item, scopeKey: catalogScopeKey});
+  };
 
   const selectedPanelItem = lockedItem?._scopeKey === catalogScopeKey ? lockedItem : hoveredItem?._scopeKey === catalogScopeKey ? hoveredItem : null;
   const detail = useBazaarDetail(selectedPanelItem, catalogScopeKey, catalog.revision, lockedItem ? 0 : 150);
@@ -623,7 +629,7 @@ function BazaarContent() {
           <div className="overflow-hidden rounded-2xl shadow-2xl">
             <div className="xl:h-[var(--bazaar-comparison-panel-height)]">
               {detail.error && <p role="alert">Oggetto non disponibile.</p>}
-              <ComparisonPanel item={panelItem} scopeKey={catalogScopeKey} showMessage={displayConfirmation} />
+              <ComparisonPanel item={panelItem} scopeKey={catalogScopeKey} showMessage={displayConfirmation} onEdit={handleEditPanelItem} />
             </div>
           </div>
         </div>

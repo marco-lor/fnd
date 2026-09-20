@@ -6,6 +6,7 @@ import {
   getTask07MediaControlDocument,
   getVarie,
   invalidateConfig,
+  subscribeConfigInvalidation,
 } from './configRepository';
 import {
   __resetRepositoryRuntimeForTests,
@@ -208,4 +209,23 @@ describe('configRepository', () => {
     );
     expect(invalidateConfig('task07_media')).toBe(true);
   });
+});
+
+test('config invalidation notifies after eviction, including empty caches, and unsubscribes', async () => {
+  __resetRepositoryRuntimeForTests();
+  getDoc.mockResolvedValue(snapshot({Spell: {}}));
+  const refreshed = [];
+  const observer = jest.fn(documentId => {
+    if (documentId === 'spells_common') refreshed.push(getCommonSpells());
+  });
+  const unsubscribe = subscribeConfigInvalidation(observer);
+  expect(invalidateConfig('spells_common')).toBe(false);
+  await Promise.all(refreshed);
+  expect(invalidateConfig('spells_common')).toBe(true);
+  await Promise.all(refreshed);
+  expect(observer).toHaveBeenCalledTimes(2);
+  unsubscribe();
+  invalidateConfig('spells_common');
+  expect(observer).toHaveBeenCalledTimes(2);
+  expect(() => invalidateConfig('unsupported')).toThrow();
 });

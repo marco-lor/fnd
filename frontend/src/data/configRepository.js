@@ -158,7 +158,7 @@ export const getTask07MediaControlDocument = () => getConfigCached({
   ),
 });
 
-export const invalidateConfig = (documentId) => {
+const invalidateConfigCache = (documentId) => {
   if (CONFIG_SCHEMA_ID_SET.has(documentId)) {
     return invalidate(`${INSTANCE_KEYS.schemaPrefix}${documentId}`);
   }
@@ -183,4 +183,16 @@ export const invalidateConfig = (documentId) => {
     throw new TypeError(`Unsupported shared config document: ${String(documentId)}`);
   }
   return invalidate(instanceKey);
+};
+
+// Explicit writes/invalidation refresh mounted consumers without collection listeners.
+const configInvalidationObservers = new Set();
+export const subscribeConfigInvalidation = (observer) => {
+  configInvalidationObservers.add(observer);
+  return () => configInvalidationObservers.delete(observer);
+};
+export const invalidateConfig = (documentId) => {
+  const invalidated = invalidateConfigCache(documentId);
+  for (const observer of configInvalidationObservers) observer(documentId);
+  return invalidated;
 };
