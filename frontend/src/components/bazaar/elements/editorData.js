@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext, useAuthSession } from '../../../AuthContext';
-import { getSchema, getCommonSpells, getCommonTechniques, subscribeConfigInvalidation } from '../../../data/configRepository';
+import { getSchema, getCommonSpells, getCommonTechniques, invalidateConfig, subscribeConfigInvalidation } from '../../../data/configRepository';
 import { getUserDirectoryPage } from '../../../data/userDirectoryRepository';
 import VisibilitySelector from '../../common/VisibilitySelector';
 
@@ -18,7 +18,12 @@ export function useEditorConfiguration(schemaId) {
     const scope = useEditorScope();
     const [revision, setRevision] = useState(0);
     const [state, setState] = useState(null);
-    const retry = () => setRevision(value => value + 1);
+    const retry = () => {
+        // Missing schemas are cached as null. Invalidation also notifies mounted
+        // consumers to reload while retaining the common-data caches.
+        invalidateConfig(schemaId);
+        invalidateConfig('schema_spell');
+    };
     useEffect(() => subscribeConfigInvalidation(documentId => {
         if ([schemaId, 'schema_spell', 'spells_common', 'tecniche_common', 'utils'].includes(documentId)) {
             setRevision(value => value + 1);

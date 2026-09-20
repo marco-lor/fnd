@@ -87,6 +87,30 @@ test('configuration loads once, refreshes only explicitly invalidated data and p
  view.unmount(); const reopened = render(wrap(<ConfigProbe/>)); await flush(); expect(getDoc).toHaveBeenCalledTimes(5); expect(reopened.getByText('UpdatedSpell')).toBeTruthy();
 });
 
+test.each(['schema_weapon', 'schema_spell'])('configuration retry recovers a cached missing %s and reuses common data', async missingId => {
+ const readDocument = getDoc.getMockImplementation();
+ let missing = true;
+ getDoc.mockImplementation(target => target.id === missingId && missing
+  ? Promise.resolve({exists: () => false})
+  : readDocument(target));
+ const view = render(wrap(<ConfigProbe/>)); await flush();
+ expect(view.getByRole('alert')).toBeTruthy();
+ expect(getDoc).toHaveBeenCalledTimes(4);
+ missing = false;
+ fireEvent.click(view.getByText('Riprova')); await flush();
+ expect(view.queryByRole('alert')).toBeNull();
+ expect(view.getByText('current-config')).toBeTruthy();
+ expect(getDoc.mock.calls.filter(([target]) => target.id === missingId)).toHaveLength(2);
+ expect(getDoc.mock.calls.filter(([target]) => target.id === 'spells_common')).toHaveLength(1);
+ expect(getDoc.mock.calls.filter(([target]) => target.id === 'utils')).toHaveLength(1);
+ const recoveredReads = getDoc.mock.calls.length;
+ view.unmount();
+ const reopened = render(wrap(<ConfigProbe/>)); await flush();
+ expect(reopened.queryByRole('alert')).toBeNull();
+ expect(reopened.getByText('current-config')).toBeTruthy();
+ expect(getDoc).toHaveBeenCalledTimes(recoveredReads);
+});
+
 test('configuration retries failures and fences stale actor/access results', async () => {
  let now = 1000; jest.spyOn(Date, 'now').mockImplementation(() => now);
  getDoc.mockRejectedValueOnce(new Error('offline'));

@@ -158,11 +158,21 @@ test.each(types)('configuration refresh preserves unsaved create form: %s', asyn
  fireEvent.change(view.container.querySelector('input[type="file"]'), {target: {files: [file]}});
  fireEvent.click(view.getByText('fixture-add-spell')); await flush();
  fireEvent.click(view.getByText('fixture-create-spell')); await flush();
+ const reductions = () => ['Riduzioni Costo Tecniche Singole', 'Riduzioni Costo Spell Singole']
+  .map(label => view.getByText(label).parentElement);
+ fireEvent.click(view.getByText('+ Aggiungi Riduzione Tecnica'));
+ fireEvent.click(view.getByText('+ Aggiungi Riduzione Spell'));
+ fireEvent.change(reductions()[0].querySelector('select'), {target: {value: 'Technique'}});
+ fireEvent.change(reductions()[0].querySelector('input'), {target: {value: '5'}});
+ fireEvent.change(reductions()[1].querySelector('select'), {target: {value: 'Local spell'}});
+ fireEvent.change(reductions()[1].querySelector('input'), {target: {value: '6'}});
  const assertDraft = () => {
   expect(nameField().value).toBe('Unsaved draft');
   expect(nestedField().value).toBe('42');
   expect(view.container.textContent).toContain('Local spell');
   expect(useObjectUrl.mock.calls.slice(-1)[0][0]).toBe(file);
+  expect(reductions().map(section => section.querySelector('select').value)).toEqual(['Technique', 'Local spell']);
+  expect(reductions().map(section => section.querySelector('input').value)).toEqual(['5', '6']);
  };
  for (const documentId of ['spells_common', `schema_${name.toLowerCase()}`, 'schema_spell']) {
   act(() => config.invalidateConfig(documentId)); await flush(); assertDraft();
@@ -173,6 +183,20 @@ test.each(types)('configuration refresh preserves unsaved create form: %s', asyn
  act(() => config.invalidateConfig('spells_common')); await flush();
  expect(view.getByRole('alert')).toBeTruthy();
  now += 500; fireEvent.click(view.getByText('Riprova')); await flush(); assertDraft();
+ // A missing schema is a cached successful null, so restoring Firestore alone
+ // must still recover through the editor's retry action without losing the draft.
+ const readDocument = getDoc.getMockImplementation();
+ for (const missingId of [`schema_${name.toLowerCase()}`, 'schema_spell']) {
+  getDoc.mockImplementation(target => target.id === missingId
+   ? Promise.resolve({exists: () => false})
+   : readDocument(target));
+  act(() => config.invalidateConfig(missingId)); await flush();
+  expect(view.getByRole('alert')).toBeTruthy();
+  getDoc.mockImplementation(readDocument);
+  fireEvent.click(view.getByText('Riprova')); await flush();
+  expect(view.queryByRole('alert')).toBeNull();
+  assertDraft();
+ }
  // The same actor's authoritative access generation refreshes repositories.
  setRepositoryActor('actor'); mockAccessGeneration++;
  view.rerender(child()); await flush(); assertDraft();
