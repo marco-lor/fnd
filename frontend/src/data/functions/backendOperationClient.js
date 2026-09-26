@@ -75,6 +75,7 @@ export const waitForBackendOperation = async (
     statusCallable = getBackendOperationStatus,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    onProgress,
   } = {}
 ) => {
   if (!OPERATION_ID_PATTERN.test(String(operationId || ''))) {
@@ -89,6 +90,7 @@ export const waitForBackendOperation = async (
     if (signal?.aborted) {
       throw new DOMException('The operation status request was aborted.', 'AbortError');
     }
+    if (operation) onProgress?.(operation);
     if (operation?.status === 'completed') return operation;
     if (TERMINAL_FAILURE_STATUSES.has(operation?.status)) {
       throw new BackendOperationError(

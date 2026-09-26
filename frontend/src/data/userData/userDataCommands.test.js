@@ -106,6 +106,13 @@ describe('Task 05 user commands', () => {
       value: -3,
     });
   });
+  test('opts into bounded Admin pages without changing the legacy default', async () => {
+    await getAdminUsersPage();
+    expect(mockCallable).toHaveBeenLastCalledWith({limit: 100});
+    const cursor = {normalizedLabel: 'name', uid: 'user-1', search: 'na'};
+    await getAdminUsersPage({schemaVersion: 2, search: 'na', cursor});
+    expect(mockCallable).toHaveBeenLastCalledWith({schemaVersion: 2, limit: 10, search: 'na', cursor});
+  });
 
   test('records callable attempts and outcomes without exposing operation or user IDs', async () => {
     await updateResource({

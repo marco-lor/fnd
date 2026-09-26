@@ -26,6 +26,7 @@ import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeTokenV2";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
 import {syncUserDirectory} from "./syncUserDirectory";
+import {syncManagerUserSummary, syncManagerUserSummaryShell} from "./managerUserSummary";
 import {
   deleteEncounterV2,
   deleteNpcV2,
@@ -122,6 +123,8 @@ export {
   updateGrigliataCustomTokenTemplate,
   clientFirebaseConfig,
   syncUserDirectory,
+  syncManagerUserSummary,
+  syncManagerUserSummaryShell,
   setAllParameterLocks,
   deleteNpcV2,
   deleteEncounterV2,

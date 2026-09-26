@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import DelInventoryItemOverlay from "../../buttons/delInventoryItem";
 import DelVarieItemUnitsOverlay from "../../buttons/delVarieItemUnits";
 // DM utility overlay to grant bazaar items for free (no gold deduction)
-import AddBazaarItemOverlay from "../overlays/AddBazaarItemOverlay"; // new overlay to grant existing bazaar items
+import { AddBazaarItemOverlay } from "../../lazyPlayerInfoOverlays";
 
 const deriveInventoryId = (entry, index) => {
   if (!entry) return `item-${index}`;
@@ -151,7 +151,7 @@ const PlayerInfoInventoryRow = ({
               const isVarie = (item.type || "").toLowerCase() === "varie";
               const displayName = isVarie ? item.name : item.displayName || item.name;
               const key = `${item.id}-${isVarie ? "v" : "n"}-${index}`;
-              const canEdit = item.stable && (itemsDocs?.[item.catalogId]?.item_type || isVarie);
+              const canEdit = item.stable && (["weapon", "armatura", "accessorio", "consumabile", "varie"].includes(item.type) || itemsDocs?.[item.catalogId]?.item_type || isVarie);
               return (
                 <li key={key} className="flex items-center justify-between text-sm">
                   <span className="truncate mr-2">

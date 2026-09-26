@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -27,6 +27,8 @@ const levelUpUser = getCallable("levelUpUser");
 
 const DMDashboard = () => {
   const { user, userData } = useAuth();
+  const role = userData?.role;
+  const [directorySearch, setDirectorySearch] = useState("");
   const [directoryPageIndex, setDirectoryPageIndex] = useState(0);
   const [directoryPageCursors, setDirectoryPageCursors] = useState([null]);
   const directoryCursor = directoryPageCursors[directoryPageIndex] || null;
@@ -34,17 +36,19 @@ const DMDashboard = () => {
     users,
     loading,
     error: userDataError,
+    retry: retryUserData,
     hasMore = false,
     nextCursor = null,
   } = useManagerUserData(userData?.role === "dm", {
     cursor: directoryCursor,
+    search: directorySearch,
   });
   const [actionError, setError] = useState(null);
   const error = actionError || userDataError?.message || null;
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
-  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [selectedUserIds, setSelectedUserIds] = useState(() => new Set());
   const [actionDialog, setActionDialog] = useState(null);
   const [actionDialogValue, setActionDialogValue] = useState("1");
   const [actionDialogError, setActionDialogError] = useState(null);
@@ -58,21 +62,21 @@ const DMDashboard = () => {
   });
 
   useEffect(() => {
-    if (!userData) return; // Still loading user data
+    if (!role) return; // Still loading user data
 
-    if (userData.role !== "dm") {
+    if (role !== "dm") {
       console.log("Access denied: User is not a DM");
       navigate("/home");
       return undefined;
     }
     return undefined;
-  }, [userData, navigate]);
+  }, [role, navigate]);
 
   // Ensure player selection state stays in sync with the current users list.
   // New users are auto-selected; removed users are cleaned out.
   useEffect(() => {
     if (!users.length) {
-      setSelectedUserIds([]);
+      setSelectedUserIds(new Set());
       knownUserIdsRef.current = [];
       hasLoadedUsersRef.current = false;
       return;
@@ -92,7 +96,7 @@ const DMDashboard = () => {
 
   const toggleUserSelection = (userId) => {
     setSelectedUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+      prev.has(userId) ? new Set([...prev].filter((id) => id !== userId)) : new Set([...prev, userId])
     );
   };
 
@@ -124,7 +128,7 @@ const DMDashboard = () => {
   );
 
   const executeLevelUpAll = async () => {
-    if (userData.role !== "dm") {
+    if (role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
       return;
     }
@@ -155,7 +159,7 @@ const DMDashboard = () => {
   };
 
   const executeLevelUpOne = async (targetUserId) => {
-    if (userData.role !== "dm") {
+    if (role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
       return;
     }
@@ -185,7 +189,7 @@ const DMDashboard = () => {
 
   // Add combat tokens to a specific user
   const executeCombatTokenUpdate = async (targetUserId, amount) => {
-    if (userData.role !== "dm") {
+    if (role !== "dm") {
       setError("Permission denied: Only DMs can modify tokens");
       return;
     }
@@ -197,20 +201,10 @@ const DMDashboard = () => {
       if (!targetUser) {
         throw new Error("The selected user is no longer available.");
       }
-      const current = Number(targetUser?.stats?.combatTokensAvailable) || 0;
-      const next = current + amount;
       await updateProgression({
         userId: targetUserId,
-        patch: {
-          stats: { combatTokensAvailable: next },
-        },
-        retryKey: [
-          "dm-combat-tokens",
-          targetUserId,
-          current,
-          amount,
-          next,
-        ].join(":"),
+        combatTokenDelta: amount,
+        retryKey: `dm-combat-tokens:${targetUserId}:${amount}`,
       });
       setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
   // Realtime listener will update UI automatically
@@ -223,11 +217,11 @@ const DMDashboard = () => {
     }
   };
 
-  const openActionDialog = (kind, targetUserId = null) => {
+  const openActionDialog = useCallback((kind, targetUserId = null) => {
     setActionDialogError(null);
     setActionDialogValue("1");
     setActionDialog({ kind, targetUserId });
-  };
+  }, []);
 
   const closeActionDialog = () => {
     if (busy) return;
@@ -236,8 +230,8 @@ const DMDashboard = () => {
   };
 
   const handleLevelUpAll = () => openActionDialog("level-up-all");
-  const handleLevelUpOne = (targetUserId) => openActionDialog("level-up-one", targetUserId);
-  const handleAddCombatTokens = (targetUserId) => openActionDialog("combat-tokens", targetUserId);
+  const handleLevelUpOne = useCallback((targetUserId) => openActionDialog("level-up-one", targetUserId), [openActionDialog]);
+  const handleAddCombatTokens = useCallback((targetUserId) => openActionDialog("combat-tokens", targetUserId), [openActionDialog]);
 
   const confirmActionDialog = async () => {
     if (!actionDialog || busy) return;
@@ -366,6 +360,10 @@ const DMDashboard = () => {
         </div>
 
         {/* Welcome blurb */}
+        {userDataError && <div role="alert" className="mb-4 rounded border border-red-700 p-3 text-red-200">
+          <p>{userDataError.message}</p>
+          <button type="button" onClick={retryUserData} className="mt-2 rounded border px-3 py-1">Retry player data</button>
+        </div>}
         <div className="bg-gray-800/90 border border-slate-700/60 rounded-lg p-4">
           <p className="text-slate-200 text-sm">
             Welcome to the DM Dashboard. This area is only accessible to users with the DM role.
@@ -378,6 +376,11 @@ const DMDashboard = () => {
             <>
               <div className="mb-4">
                 <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">Seleziona giocatori da mostrare</div>
+                <label className="mb-3 block text-xs text-slate-300">Cerca giocatore per nome
+                  <input aria-label="Cerca giocatore per nome" value={directorySearch}
+                    onChange={(event) => { setDirectorySearch(event.target.value); setDirectoryPageIndex(0); setDirectoryPageCursors([null]); }}
+                    className="ml-2 rounded border border-slate-600 bg-slate-900 px-2 py-1" />
+                </label>
                 <div className="mb-3 flex items-center gap-2" aria-label="Player directory pagination">
                   <button
                     type="button"
@@ -399,20 +402,20 @@ const DMDashboard = () => {
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
                   <button
-                    onClick={() => setSelectedUserIds(users.map((u) => u.id))}
+                    onClick={() => setSelectedUserIds(new Set(users.map((u) => u.id)))}
                     className="rounded-full border border-emerald-400/70 bg-emerald-800/60 px-3 py-1 text-[11px] font-semibold text-emerald-50 transition hover:bg-emerald-700/70"
                   >
                     Seleziona tutti
                   </button>
                   <button
-                    onClick={() => setSelectedUserIds([])}
+                    onClick={() => setSelectedUserIds(new Set())}
                     className="rounded-full border border-rose-400/70 bg-rose-800/60 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:bg-rose-700/70"
                   >
                     Deseleziona tutti
                   </button>
                   <span className="mx-2 h-5 w-px bg-slate-700/70" />
                   {users.map((user) => {
-                    const isSelected = selectedUserIds.includes(user.id);
+                    const isSelected = selectedUserIds.has(user.id);
                     const label = user.characterId || user.label || user.email;
                     return (
                       <button
@@ -433,9 +436,9 @@ const DMDashboard = () => {
                 </div>
               </div>
 
-              {selectedUserIds.length > 0 ? (
+              {selectedUserIds.size > 0 ? (
                 <PlayerInfo 
-                  users={users.filter((u) => selectedUserIds.includes(u.id))}
+                  users={users.filter((u) => selectedUserIds.has(u.id))}
                   loading={loading}
                   error={error}
                   variant="card"

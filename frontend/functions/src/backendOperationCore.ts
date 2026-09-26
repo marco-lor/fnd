@@ -20,6 +20,7 @@ export const BACKEND_OPERATION_KINDS = [
   "level-up-all",
   "set-parameter-locks",
   "delete-npc",
+  "delete-user",
   "delete-encounter",
   "delete-grigliata-custom-token",
   "duplicate-foe",

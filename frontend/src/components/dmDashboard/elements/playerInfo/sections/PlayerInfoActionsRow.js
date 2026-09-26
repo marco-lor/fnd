@@ -1,9 +1,10 @@
 import React from "react";
-import { AddTecnicaButton } from "../../buttons/addTecnicaPersonale";
-import { AddSpellButton } from "../../buttons/addSpell";
-import AddLinguaPersonale from "../../buttons/addLinguaPersonale";
-import AddConoscenzaPersonale from "../../buttons/addConoscenzaPersonale";
-import AddProfessionePersonale from "../../buttons/addProfessionePersonale";
+const ActionButton = ({ onClick, className, children }) => <button type="button" onClick={onClick} className={className || "rounded bg-indigo-800 px-2 py-1 text-xs text-white"}>{children}</button>;
+const AddTecnicaButton = (props) => <ActionButton {...props}>+ Tecnica</ActionButton>;
+const AddSpellButton = (props) => <ActionButton {...props}>+ Spell</ActionButton>;
+const AddLinguaPersonale = (props) => <ActionButton {...props}>+ Lingua</ActionButton>;
+const AddConoscenzaPersonale = (props) => <ActionButton {...props}>+ Conoscenza</ActionButton>;
+const AddProfessionePersonale = (props) => <ActionButton {...props}>+ Professione</ActionButton>;
 
 const PlayerInfoActionsRow = ({
   users,

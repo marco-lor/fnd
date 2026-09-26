@@ -30,7 +30,7 @@ test('active-caller guard rejects missing and tombstoned profiles', () => {
 });
 
 test('privileged V2 mutation entry points apply the active-caller guard', () => {
-  for (const name of ['userDataCommands.ts', 'deleteUser.ts']) {
+  for (const name of ['userDataCommands.ts', 'userDeletionOperation.ts', 'updateUserRole.ts']) {
     const contents = source(name);
     assert.match(
       contents,
@@ -39,4 +39,5 @@ test('privileged V2 mutation entry points apply the active-caller guard', () => 
     );
     assert.match(contents, /assertActiveCaller\(/, name);
   }
+  assert.match(source('deleteUser.ts'), /await claimUserDeletion\(/);
 });

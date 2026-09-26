@@ -1829,6 +1829,16 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Server-owned card/lock projection. Never expose this via the public shell.
+    match /manager_user_summaries/{userId} {
+      allow get: if isActiveSignedIn() && (isDM() || isWebmaster())
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.role in ["player", "players"]
+        && (!('deletionState' in get(/databases/$(database)/documents/users/$(userId)).data)
+          || get(/databases/$(database)/documents/users/$(userId)).data.deletionState != "pending");
+      allow list, create, update, delete: if false;
+    }
+
     // Catalog writes are trusted atomic source + projection transactions.
     match /catalogControl/bazaar {
       allow read: if isActiveSignedIn();

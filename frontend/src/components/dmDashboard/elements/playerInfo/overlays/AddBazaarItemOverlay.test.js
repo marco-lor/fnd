@@ -1,0 +1,27 @@
+import React from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import AddBazaarItemOverlay from './AddBazaarItemOverlay';
+import { useBazaarCatalog, useBazaarDetail } from '../../../../../data/useBazaarCatalog';
+import { mutateInventory } from '../../../../../data/userData/userDataCommands';
+jest.mock('../../../../../AuthContext', () => ({useAuth: () => ({user: {uid: 'dm'}, userData: {role: 'dm'}}), useAuthSession: () => ({repositoryAccessGeneration: 7})}));
+jest.mock('../../../../../data/useBazaarCatalog', () => ({useBazaarCatalog: jest.fn(), useBazaarDetail: jest.fn()}));
+jest.mock('../../../../../data/userData/userDataCommands', () => ({mutateInventory: jest.fn(), createUserOperationId: () => 'intent-1', isDefinitiveUserDataCommandError: () => false}));
+test('paged summaries load on open and full detail only after selection, with searchable paging', async () => {
+  const loadMore = jest.fn();
+  const row = {id: 'item-a', General: {Nome: 'Spada', prezzo: 5}};
+  useBazaarCatalog.mockReturnValue({rows: [row], revision: 4, cursor: 'next', loadMore});
+  useBazaarDetail.mockImplementation((item) => ({item}));
+  mutateInventory.mockResolvedValue({});
+  render(<AddBazaarItemOverlay userId="player-a" onClose={() => {}} />);
+  expect(useBazaarCatalog).toHaveBeenCalledWith('dm:7:dm', 'dm', {searchTerm: ''});
+  expect(useBazaarDetail).toHaveBeenLastCalledWith(null, 'dm:7:dm', 4);
+  expect(screen.getByRole('button', {name: 'Conferma'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', {name: 'Altri oggetti'}));
+  expect(loadMore).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByPlaceholderText('Cerca nome...'), {target: {value: 'Spada'}});
+  await waitFor(() => expect(useBazaarCatalog).toHaveBeenLastCalledWith('dm:7:dm', 'dm', {searchTerm: 'Spada'}));
+  fireEvent.click(screen.getByRole('button', {name: 'Spada 5g'}));
+  expect(useBazaarDetail).toHaveBeenLastCalledWith(row, 'dm:7:dm', 4);
+  fireEvent.click(screen.getByRole('button', {name: 'Conferma'}));
+  await waitFor(() => expect(mutateInventory).toHaveBeenCalledWith(expect.objectContaining({action: 'grant', userId: 'player-a', itemId: 'item-a', quantity: 1})));
+});

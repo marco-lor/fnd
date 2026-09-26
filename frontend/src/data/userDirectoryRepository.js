@@ -88,6 +88,7 @@ export const __buildUserDirectoryQuery = ({
   role = null,
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
+  search = '',
   firestore = db,
 } = {}) => {
   return buildUserDirectoryQuery({
@@ -95,6 +96,7 @@ export const __buildUserDirectoryQuery = ({
     role,
     cursor,
     pageSize,
+    search,
     sdk: {
       collection,
       documentId,
@@ -107,8 +109,8 @@ export const __buildUserDirectoryQuery = ({
   });
 };
 
-const privatePageInstanceKey = ({ role, cursor, pageSize }) => (
-  `directory:users:page:${role || 'all'}:${pageSize}:${cursor ? JSON.stringify(cursor) : 'first'}`
+const privatePageInstanceKey = ({ role, cursor, pageSize, search = '' }) => (
+  `directory:users:page:${role || 'all'}:${pageSize}:${search}:${cursor ? JSON.stringify(cursor) : 'first'}`
 );
 
 const normalizePageSnapshot = (snapshot, queryKey, pageSize = USER_DIRECTORY_PAGE_SIZE) => {
@@ -134,10 +136,12 @@ export const getUserDirectoryPage = ({
   role = null,
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
+  search = '',
 } = {}) => {
-  const built = __buildUserDirectoryQuery({ role, cursor, pageSize });
+  const built = __buildUserDirectoryQuery({ role, cursor, pageSize, search });
   const instanceKey = privatePageInstanceKey({
     role: built.role,
+    search: built.search,
     cursor,
     pageSize,
   });
@@ -160,13 +164,15 @@ export const subscribeUserDirectoryPage = (observer, {
   role = null,
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
+  search = '',
 } = {}) => {
-  const built = __buildUserDirectoryQuery({ role, cursor, pageSize });
+  const built = __buildUserDirectoryQuery({ role, cursor, pageSize, search });
   let structuralResult = null;
   return subscribeShared({
     metricKey: METRIC_KEYS.subscribe,
     instanceKey: privatePageInstanceKey({
       role: built.role,
+      search: built.search,
       cursor,
       pageSize,
     }).replace(':page:', ':subscribe:'),

@@ -1,11 +1,10 @@
 // frontend/src/components/dmDashboard/elements/playerInfo.js
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
-import { collection, getDocs } from "../../../performance/firestore";
 import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
 
-import { db } from "../../firebaseConfig";
+import { useManagerUserDetail, MANAGER_MAX_EXPANDED } from "../../../data/userData/managerUserData";
 
 import {
   AddConoscenzaPersonaleOverlay,
@@ -47,8 +46,8 @@ import ManagerActionDialog, { parseIntegerInput } from "./ManagerActionDialog";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
-const PlayerInfo = ({
-  users,
+const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
+  user: summary, expanded, onToggle, expansionDisabled,
   loading,
   error,
   variant = "table",
@@ -56,12 +55,14 @@ const PlayerInfo = ({
   onAddTokens,
   busy = false,
   canEditVitals = false,
-}) => {
+}) {
+  const detail = useManagerUserDetail(summary, expanded);
+  const users = useMemo(() => [detail.user], [detail.user]);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showEditConoscenzaOverlay, setShowEditConoscenzaOverlay] = useState(false);
   const [showEditProfessioneOverlay, setShowEditProfessioneOverlay] = useState(false);
-  const [catalog, setCatalog] = useState({});
-  const [itemsDocs, setItemsDocs] = useState({});
+  const catalog = {};
+  const itemsDocs = {};
   const [showEditItemOverlay, setShowEditItemOverlay] = useState(false);
   const [editItemData, setEditItemData] = useState(null);
   const [selectedEditItemId, setSelectedEditItemId] = useState(null);
@@ -94,37 +95,12 @@ const PlayerInfo = ({
   const [goldAdjustments, setGoldAdjustments] = useState({});
   const [goldUpdating, setGoldUpdating] = useState({});
   const [goldOverlay, setGoldOverlay] = useState(null);
-  const [cardExpanded, setCardExpanded] = useState({});
+  const [mutationError, setMutationError] = useState(null);
   const [vitalDialog, setVitalDialog] = useState(null);
   const [vitalDialogError, setVitalDialogError] = useState(null);
   const [vitalDialogBusy, setVitalDialogBusy] = useState(false);
 
   const refreshUserData = useCallback(() => Promise.resolve(), []);
-
-  const fetchItemsCatalog = useCallback(async () => {
-    try {
-      const snap = await getDocs(collection(db, "items"));
-      const names = {};
-      const docs = {};
-      snap.forEach((snapshotDoc) => {
-        const data = snapshotDoc.data();
-        names[snapshotDoc.id] = data?.General?.Nome || data?.name || snapshotDoc.id;
-        docs[snapshotDoc.id] = { id: snapshotDoc.id, ...data };
-      });
-      setCatalog(names);
-      setItemsDocs(docs);
-    } catch (error) {
-      console.warn("Failed to load item catalog", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchItemsCatalog();
-  }, [fetchItemsCatalog]);
-
-  const toggleCardExpanded = useCallback((userId) => {
-    setCardExpanded((prev) => ({ ...prev, [userId]: !prev[userId] }));
-  }, []);
 
   const openGoldOverlay = (userId, direction) => {
     if (!userId || goldUpdating[userId]) return;
@@ -147,28 +123,22 @@ const PlayerInfo = ({
     const amount = Math.abs(parseInt(rawValue, 10));
     if (!userId || Number.isNaN(amount) || amount === 0) return;
     try {
+      setMutationError(null);
       setGoldUpdating((prev) => ({ ...prev, [userId]: true }));
       const currentUser = users.find((entry) => entry.id === userId);
       if (!currentUser) throw new Error("The selected user is no longer available.");
-      const currentGold = Number(currentUser?.stats?.gold) || 0;
       const delta = direction > 0 ? amount : -amount;
-      const nextGold = currentGold + delta;
       await adjustGold({
         userId,
         delta,
-        retryKey: [
-          "dm-gold",
-          userId,
-          currentGold,
-          delta,
-          nextGold,
-        ].join(":"),
+        retryKey: `dm-gold:${userId}:${delta}`,
       });
       setGoldAdjustments((prev) => ({ ...prev, [userId]: "" }));
       setGoldOverlay(null);
       await refreshUserData();
     } catch (err) {
       console.error("Failed to update gold", err);
+      setMutationError(err.message || "Failed to update gold. Try again.");
     } finally {
       setGoldUpdating((prev) => {
         const next = { ...prev };
@@ -310,7 +280,6 @@ const PlayerInfo = ({
   const handleInventoryOverlayClose = async (ok) => {
     resetInventoryEditState();
     if (ok) {
-      await fetchItemsCatalog();
       await refreshUserData();
     }
   };
@@ -325,15 +294,13 @@ const PlayerInfo = ({
     if (!canEditVitals) return;
     const u = users.find((x) => x.id === userId);
     if (!u) return;
-    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const newVal = Math.max(0, cur + delta);
     try {
       await updateResource({
         userId,
         resource: vital,
-        mode: "set",
-        value: newVal,
-        retryKey: ["dm-vital-delta", userId, vital, cur, delta, newVal].join(":"),
+        mode: "delta",
+        value: delta,
+        retryKey: ["dm-vital-delta", userId, vital, delta].join(":"),
       });
     } catch (e) {
       console.error("adjustVitalDelta failed", e);
@@ -429,13 +396,12 @@ const PlayerInfo = ({
           ].join(":"),
         });
       } else {
-        const nextCurrent = Math.max(0, cur + n);
         await updateResource({
           userId: vitalDialog.userId,
           resource: vitalDialog.vital,
-          mode: "set",
-          value: nextCurrent,
-          retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, cur, n, nextCurrent].join(":"),
+          mode: "delta",
+          value: n,
+          retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, n].join(":"),
         });
       }
       setVitalDialog(null);
@@ -557,94 +523,19 @@ const PlayerInfo = ({
     );
   };
 
-  const renderTableLayout = () => (
-    <div className="rounded-lg border border-slate-700/60 shadow-sm overflow-x-auto">
-      <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
-        <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
-          <tr className="text-slate-100">
-            <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Category</th>
-            {users.map((user) => (
-              <th
-                key={user.id}
-                className="border border-gray-600 px-4 py-3 text-center min-w-[11rem] text-base font-bold tracking-tight text-slate-50 bg-gray-700/70"
-              >
-                {user.characterId || user.email}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <PlayerInfoActionsRow
-            users={users}
-            onAddTecnica={handleAddTecnicaClick}
-            onAddSpell={handleAddSpellClick}
-            onAddLingua={handleAddLinguaClick}
-            onAddConoscenza={handleAddConoscenzaClick}
-            onAddProfessione={handleAddProfessioneClick}
-            sleekBtnClass={sleekButtonClass}
-          />
-          <PlayerInfoTecnicheRow
-            users={users}
-            iconEditClass={iconEditClass}
-            iconDeleteClass={iconDeleteClass}
-            onEditTecnica={handleEditTecnicaClick}
-            onDeleteTecnica={handleDeleteTecnicaClick}
-          />
-          <PlayerInfoSpellsRow
-            users={users}
-            iconEditClass={iconEditClass}
-            iconDeleteClass={iconDeleteClass}
-            onEditSpell={handleEditSpellClick}
-            onDeleteSpell={handleDeleteSpellClick}
-          />
-          <PlayerInfoConoscenzeRow
-            users={users}
-            iconEditClass={iconEditClass}
-            iconDeleteClass={iconDeleteClass}
-            onEditConoscenza={handleEditConoscenzaClick}
-            onDeleteConoscenza={handleDeleteConoscenzaClick}
-          />
-          <PlayerInfoProfessioniRow
-            users={users}
-            iconEditClass={iconEditClass}
-            iconDeleteClass={iconDeleteClass}
-            onEditProfessione={handleEditProfessioneClick}
-            onDeleteProfessione={handleDeleteProfessioneClick}
-          />
-          <PlayerInfoLingueRow
-            users={users}
-            iconDeleteClass={iconDeleteClass}
-            onDeleteLingua={handleDeleteLinguaClick}
-          />
-          <PlayerInfoInventoryRow
-            users={users}
-            catalog={catalog}
-            itemsDocs={itemsDocs}
-            iconEditClass={iconEditClass}
-            onEditInventoryItem={handleEditInventoryItem}
-            onOpenGoldOverlay={openGoldOverlay}
-            goldUpdating={goldUpdating}
-            onAddVarie={handleAddVarieForUser}
-          />
-          <PlayerInfoDiceRollsRow users={users} />
-        </tbody>
-      </table>
-    </div>
-  );
-
   const renderCardLayout = () => (
-    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+    <div className="h-full">
       {users.map((user) => {
         const baseAvail = Number(user?.stats?.basePointsAvailable) || 0;
         const baseSpent = Number(user?.stats?.basePointsSpent) || 0;
         const combatAvail = Number(user?.stats?.combatTokensAvailable) || 0;
         const combatSpent = Number(user?.stats?.combatTokensSpent) || 0;
-        const isExpanded = !!cardExpanded[user.id];
+        const isExpanded = expanded;
         return (
           <div key={user.id} className="rounded-lg border border-slate-700/60 bg-gray-800/90 p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-lg font-bold text-slate-50 tracking-tight">{user.characterId || user.email}</div>
+                <div className="text-lg font-bold text-slate-50 tracking-tight">{user.characterId || user.label || user.email}</div>
                 <div className="text-xs text-slate-400">Lv {user?.stats?.level || 1}</div>
               </div>
               <div className="flex gap-2">
@@ -689,7 +580,10 @@ const PlayerInfo = ({
 
               <button
                 type="button"
-                onClick={() => toggleCardExpanded(user.id)}
+                onClick={() => onToggle(user.id)}
+                disabled={!expanded && expansionDisabled}
+                aria-expanded={expanded}
+                aria-label={expanded ? "Comprimi" : "Espandi"}
                 className="inline-flex items-center gap-2 rounded-full bg-indigo-900/50 px-3 py-1 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-800"
               >
                 {isExpanded ? (
@@ -705,7 +599,12 @@ const PlayerInfo = ({
                 )}
               </button>
 
-              {isExpanded && (
+              {isExpanded && detail.loading && <p role="status">Loading player details...</p>}
+              {isExpanded && detail.error && <div role="alert">
+                <p>{detail.error.message}</p>
+                <button type="button" onClick={detail.retry}>Retry player details</button>
+              </div>}
+              {isExpanded && !detail.loading && !detail.error && (
                 <div className="space-y-5">
                   <PlayerInfoActionsRow
                     variant="card"
@@ -776,14 +675,15 @@ const PlayerInfo = ({
     </div>
   );
 
-  const content = variant === "card" ? renderCardLayout() : renderTableLayout();
+  const content = renderCardLayout();
 
   return (
     <div className={variant === "card" ? "mt-4" : "mt-8"}>
       {variant !== "card" && <h2 className="mb-3 text-slate-100 text-xl font-semibold tracking-tight">Player Info</h2>}
       {content}
+      {mutationError && <p role="alert">{mutationError}</p>}
 
-      {goldOverlay && <GoldAdjustmentOverlay
+      {expanded && goldOverlay && <GoldAdjustmentOverlay
         visible={!!goldOverlay}
         direction={goldOverlay?.direction || 1}
         userLabel={activeGoldLabel}
@@ -844,7 +744,7 @@ const PlayerInfo = ({
         );
       })()}
 
-      {showTecnicaOverlay && selectedUserId && (
+      {expanded && showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -855,7 +755,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showEditTecnicaOverlay && selectedUserId && selectedTecnica && (
+      {expanded && showEditTecnicaOverlay && selectedUserId && selectedTecnica && (
         <EditTecnicaPersonale
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -869,7 +769,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showDeleteTecnicaOverlay && selectedUserId && selectedTecnica && (
+      {expanded && showDeleteTecnicaOverlay && selectedUserId && selectedTecnica && (
         <DelTecnicaPersonale
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -884,7 +784,7 @@ const PlayerInfo = ({
         />
       )}
 
-      {showSpellOverlay && selectedUserId && (
+      {expanded && showSpellOverlay && selectedUserId && (
         <AddSpellOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -895,7 +795,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showEditSpellOverlay && selectedUserId && selectedSpell && (
+      {expanded && showEditSpellOverlay && selectedUserId && selectedSpell && (
         <EditSpellOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -909,7 +809,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showDeleteSpellOverlay && selectedUserId && selectedSpell && (
+      {expanded && showDeleteSpellOverlay && selectedUserId && selectedSpell && (
         <DelSpellOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -924,7 +824,7 @@ const PlayerInfo = ({
         />
       )}
 
-      {showLinguaOverlay && selectedUserId && (
+      {expanded && showLinguaOverlay && selectedUserId && (
         <AddLinguaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -936,7 +836,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showDeleteLinguaOverlay && selectedUserId && selectedLingua && (
+      {expanded && showDeleteLinguaOverlay && selectedUserId && selectedLingua && (
         <DelLinguaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -951,7 +851,7 @@ const PlayerInfo = ({
         />
       )}
 
-      {showConoscenzaOverlay && selectedUserId && (
+      {expanded && showConoscenzaOverlay && selectedUserId && (
         <AddConoscenzaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -963,7 +863,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showDeleteConoscenzaOverlay && selectedUserId && selectedConoscenza && (
+      {expanded && showDeleteConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <DelConoscenzaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -977,7 +877,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showEditConoscenzaOverlay && selectedUserId && selectedConoscenza && (
+      {expanded && showEditConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <EditConoscenzaPersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -992,7 +892,7 @@ const PlayerInfo = ({
         />
       )}
 
-      {showProfessioneOverlay && selectedUserId && (
+      {expanded && showProfessioneOverlay && selectedUserId && (
         <AddProfessionePersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -1004,7 +904,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showDeleteProfessioneOverlay && selectedUserId && selectedProfessione && (
+      {expanded && showDeleteProfessioneOverlay && selectedUserId && selectedProfessione && (
         <DelProfessionePersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -1018,7 +918,7 @@ const PlayerInfo = ({
           }}
         />
       )}
-      {showEditProfessioneOverlay && selectedUserId && selectedProfessione && (
+      {expanded && showEditProfessioneOverlay && selectedUserId && selectedProfessione && (
         <EditProfessionePersonaleOverlay
           userId={selectedUserId}
           userLabel={selectedUserLabel}
@@ -1033,7 +933,7 @@ const PlayerInfo = ({
         />
       )}
 
-      {showEditItemOverlay && editItemData && (
+      {expanded && showEditItemOverlay && editItemData && (
         <>
           {(editItemData?.type || editItemData?.item_type || "").toLowerCase() === "varie" ? (
             <EditVarieItemOverlay
@@ -1091,7 +991,7 @@ const PlayerInfo = ({
         </>
       )}
 
-      {showAddVarieOverlay && addVarieUserId && (
+      {expanded && showAddVarieOverlay && addVarieUserId && (
         <AddVarieItemOverlay
           userId={addVarieUserId}
             onClose={handleAddVarieClose}
@@ -1099,6 +999,34 @@ const PlayerInfo = ({
       )}
     </div>
   );
-};
+});
 
+const PlayerInfo = ({ users, loading, error, ...props }) => {
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const userIds = users.map((user) => user.id).join('|');
+  useEffect(() => {
+    const visible = new Set(userIds.split('|'));
+    setExpandedIds((previous) => {
+      const next = new Set([...previous].filter((uid) => visible.has(uid)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [userIds]);
+  const toggle = useCallback((uid) => setExpandedIds((previous) => {
+    const next = new Set(previous);
+    if (next.has(uid)) next.delete(uid);
+    else if (next.size < MANAGER_MAX_EXPANDED) next.add(uid);
+    return next;
+  }), []);
+  if (loading) return <p role="status">Loading user data...</p>;
+  if (error) return <p role="alert">{error.message || error}</p>;
+  if (!users.length) return <p>No users found.</p>;
+  return <div>
+    <p className="mt-2 text-xs text-slate-400">Espandi fino a {MANAGER_MAX_EXPANDED} giocatori contemporaneamente.</p>
+    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      {users.map((user) => <ManagerPlayerCard key={user.id} user={user}
+        {...props} variant="card" expanded={expandedIds.has(user.id)} onToggle={toggle}
+        expansionDisabled={expandedIds.size >= MANAGER_MAX_EXPANDED} />)}
+    </div>
+  </div>;
+};
 export default PlayerInfo;

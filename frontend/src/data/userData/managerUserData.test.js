@@ -1,10 +1,11 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { USER_DATA_DOMAINS } from './domainSchema';
-import { composeManagerUser, useManagerUserData } from './managerUserData';
+import { composeManagerUser, useManagerUserData, useManagerUserDetail } from './managerUserData';
 import {
   getUserDirectoryPage,
   subscribeUserDirectoryPage,
 } from '../userDirectoryRepository';
+import { subscribeManagerSummary } from './managerSummaryRepository';
 import { subscribeUserDomain } from './userDataRepository';
 
 jest.mock('../../AuthContext', () => ({
@@ -17,11 +18,27 @@ jest.mock('../userDirectoryRepository', () => ({
   subscribeUserDirectoryPage: jest.fn(),
 }));
 
+jest.mock('./managerSummaryRepository', () => ({ subscribeManagerSummary: jest.fn() }));
 jest.mock('./userDataRepository', () => ({
   subscribeUserDomain: jest.fn(),
 }));
 
 describe('composeManagerUser', () => {
+  beforeEach(() => jest.clearAllMocks());
+  test('a missing summary remains an actionable error after later directory publications', async () => {
+    subscribeUserDirectoryPage.mockImplementation((observer) => {
+      observer.next({items: [{id: 'missing', label: 'Missing'}]});
+      return jest.fn();
+    });
+    subscribeManagerSummary.mockImplementation((_uid, observer) => {
+      observer.error(new Error('Run the summary backfill.'));
+      return jest.fn();
+    });
+    const {result} = renderHook(() => useManagerUserData(true));
+    await waitFor(() => expect(result.current.error?.message).toMatch(/backfill/));
+    expect(result.current.loading).toBe(false);
+    expect(subscribeUserDomain).not.toHaveBeenCalled();
+  });
   test('composes the legacy-shaped dashboard view from canonical domains', () => {
     const user = composeManagerUser(
       {
@@ -87,65 +104,105 @@ describe('composeManagerUser', () => {
     expect(user.tecniche.Parata._task05ContentId).toBe('tech-1');
   });
 
-  test('keeps each manager page and its domain subscriptions explicitly bounded', async () => {
-    const cursor = {
-      version: 1,
-      queryKey: 'directory.users.by-role.player.page.v1',
-      sortValues: ['performance hero 1'],
-      documentId: 'player-1',
-    };
-    const nextCursor = {
-      version: 1,
-      queryKey: 'directory.users.by-role.player.page.v1',
-      sortValues: ['performance hero 10'],
-      documentId: 'player-10',
-    };
-    getUserDirectoryPage.mockResolvedValue({
-      items: [{
-        id: 'player-10',
-        role: 'player',
-        label: 'Performance Hero 10',
-        characterId: 'Performance Hero 10',
-      }],
-      cursor: nextCursor,
-      hasMore: true,
+  test('one bounded directory subscription, compact summaries and stable rows', async () => {
+    const entries = [{id: 'a', label: 'Alba'}, {id: 'b', label: 'Bora'}];
+    const directoryStop = jest.fn();
+    const observers = {};
+    const stops = [];
+    subscribeUserDirectoryPage.mockImplementation((observer) => {
+      observer.next({items: entries, hasMore: true, cursor: {version: 1}});
+      return directoryStop;
     });
-    const unsubscribeDirectory = jest.fn();
-    subscribeUserDirectoryPage.mockReturnValue(unsubscribeDirectory);
-    const domainUnsubscribes = [];
-    subscribeUserDomain.mockImplementation((_uid, domain, observer) => {
-      const unsubscribe = jest.fn();
-      domainUnsubscribes.push(unsubscribe);
-      observer.next(domain === USER_DATA_DOMAINS.INVENTORY ? [] : {});
-      return unsubscribe;
+    subscribeManagerSummary.mockImplementation((uid, observer) => {
+      observers[uid] = observer;
+      observer.next({stats: {level: 1}, settings: {}});
+      const stop = jest.fn(); stops.push(stop); return stop;
     });
-
-    const {result, unmount} = renderHook(() => useManagerUserData(true, {
-      cursor,
-      pageSize: 10,
-    }));
-
+    const {result, unmount} = renderHook(() => useManagerUserData(true, {search: 'al', pageSize: 10}));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(getUserDirectoryPage).toHaveBeenCalledWith({
-      role: 'player',
-      cursor,
-      pageSize: 10,
-    });
-    expect(subscribeUserDirectoryPage).toHaveBeenCalledWith(
-      expect.objectContaining({next: expect.any(Function), error: expect.any(Function)}),
-      {role: 'player', cursor, pageSize: 10}
-    );
-    expect(subscribeUserDomain).toHaveBeenCalledTimes(8);
-    expect(result.current).toEqual(expect.objectContaining({
-      hasMore: true,
-      nextCursor,
-      pageSize: 10,
-    }));
+    expect(getUserDirectoryPage).not.toHaveBeenCalled();
+    expect(subscribeUserDomain).not.toHaveBeenCalled();
+    expect(subscribeUserDirectoryPage).toHaveBeenCalledWith(expect.any(Object), {role: 'player', search: 'al', pageSize: 10, cursor: null});
+    const original = result.current.users;
+    act(() => observers.a.next({stats: {level: 2}, settings: {}}));
+    expect(result.current.users[0]).not.toBe(original[0]);
+    expect(result.current.users[1]).toBe(original[1]);
+    const unchanged = result.current.users;
+    act(() => observers.a.next({stats: {level: 2}, settings: {}}));
+    expect(result.current.users).toBe(unchanged);
+    unmount(); expect(directoryStop).toHaveBeenCalledTimes(1);
+    stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
+  });
 
-    unmount();
-    expect(unsubscribeDirectory).toHaveBeenCalledTimes(1);
-    domainUnsubscribes.forEach((unsubscribe) => {
-      expect(unsubscribe).toHaveBeenCalledTimes(1);
+  test('errors belong to their UID; unrelated successes cannot hide them and removal clears them', () => {
+    let directory;
+    const observers = {};
+    const stops = {};
+    const entries = ['a', 'b', 'c'].map((id) => ({id, label: id}));
+    subscribeUserDirectoryPage.mockImplementation((observer) => { directory = observer; observer.next({items: entries}); return jest.fn(); });
+    subscribeManagerSummary.mockImplementation((uid, observer) => { observers[uid] = observer; stops[uid] = jest.fn(); return stops[uid]; });
+    const {result} = renderHook(() => useManagerUserData(true));
+    act(() => { observers.a.error(new Error('a missing')); observers.b.error(new Error('b denied')); });
+    act(() => observers.c.next({stats: {}, settings: {}}));
+    expect(result.current.error.message).toBe('a missing');
+    act(() => observers.a.next({stats: {}, settings: {}}));
+    expect(result.current.error.message).toBe('b denied');
+    const stableA = result.current.users.find((user) => user.id === 'a');
+    act(() => directory.next({items: [entries[0], entries[2]]}));
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.users[0]).toBe(stableA);
+    expect(stops.b).toHaveBeenCalledTimes(1);
+    act(() => observers.b.error(new Error('late removed error')));
+    expect(result.current.error).toBeNull();
+  });
+
+  test('retry restarts only failed summary owners and separately recovers the directory', () => {
+    const directories = [];
+    const observers = {};
+    const stops = [];
+    subscribeUserDirectoryPage.mockImplementation((observer) => { directories.push(observer); observer.next({items: [{id: 'a'}, {id: 'b'}]}); return jest.fn(); });
+    subscribeManagerSummary.mockImplementation((uid, observer) => {
+      observers[uid] = observer; observer.next({stats: {}, settings: {}});
+      const stop = jest.fn(); stops.push(stop); return stop;
     });
+    const {result} = renderHook(() => useManagerUserData(true));
+    const stableB = result.current.users[1];
+    const staleA = observers.a;
+    act(() => observers.a.error(new Error('terminal a')));
+    act(() => result.current.retry());
+    expect(subscribeManagerSummary).toHaveBeenCalledTimes(3);
+    expect(subscribeUserDirectoryPage).toHaveBeenCalledTimes(1);
+    expect(stops[0]).toHaveBeenCalledTimes(1);
+    expect(stops[1]).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.users[1]).toBe(stableB);
+    act(() => staleA.error(new Error('stale attempt')));
+    expect(result.current.error).toBeNull();
+    act(() => directories[0].error(new Error('directory failed')));
+    act(() => observers.b.next({stats: {level: 2}, settings: {}}));
+    expect(result.current.error.message).toBe('directory failed');
+    act(() => result.current.retry());
+    expect(subscribeUserDirectoryPage).toHaveBeenCalledTimes(2);
+    expect(subscribeManagerSummary).toHaveBeenCalledTimes(3);
+    expect(result.current.error).toBeNull();
+  });
+
+  test('one detail error survives other domain successes until that domain recovers or retries', () => {
+    const observers = {};
+    const stops = [];
+    subscribeUserDomain.mockImplementation((_uid, domain, observer) => { observers[domain] = observer; const stop = jest.fn(); stops.push(stop); return stop; });
+    const {result, unmount} = renderHook(() => useManagerUserDetail({id: 'a'}, true));
+    act(() => observers.inventory.error(new Error('inventory denied')));
+    act(() => { observers.profileContent.next({}); observers.spells.next({}); observers.techniques.next({}); });
+    expect(result.current.error.message).toBe('inventory denied');
+    expect(result.current.loading).toBe(false);
+    act(() => result.current.retry());
+    expect(subscribeUserDomain).toHaveBeenCalledTimes(8);
+    stops.slice(0, 4).forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
+    act(() => { observers.profileContent.next({}); observers.spells.next({}); observers.techniques.next({}); observers.inventory.next([]); });
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    unmount(); stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
   });
 });

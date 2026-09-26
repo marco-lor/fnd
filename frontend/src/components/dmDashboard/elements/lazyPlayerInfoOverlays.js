@@ -8,6 +8,7 @@ const descriptor = (chunkName, importer, exportName = 'default') => createModule
 });
 
 const descriptors = {
+  grantBazaar: descriptor('feature-dm-bazaar-grant', () => import(/* webpackChunkName: "feature-dm-bazaar-grant" */ './playerInfo/overlays/AddBazaarItemOverlay')),
   addTecnica: descriptor('feature-dm-technique-editors', () => import(/* webpackChunkName: "feature-dm-technique-editors" */ './buttons/addTecnicaPersonale'), 'AddTecnicaPersonaleOverlay'),
   editTecnica: descriptor('feature-dm-technique-editors', () => import(/* webpackChunkName: "feature-dm-technique-editors" */ './buttons/editTecnicaPersonale'), 'EditTecnicaPersonale'),
   delTecnica: descriptor('feature-dm-technique-editors', () => import(/* webpackChunkName: "feature-dm-technique-editors" */ './buttons/delTecnicaPersonale'), 'DelTecnicaPersonale'),
@@ -54,3 +55,5 @@ export const GoldAdjustmentOverlay = lazyOverlay('gold', 'gold adjustment');
 export const EditVarieItemOverlay = lazyOverlay('editVarie', 'miscellaneous item editor');
 export const AddVarieItemOverlay = lazyOverlay('addVarie', 'miscellaneous item editor');
 
+
+export const AddBazaarItemOverlay = lazyOverlay('grantBazaar', 'Bazaar');

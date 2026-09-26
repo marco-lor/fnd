@@ -1,4 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useDeferredValue } from 'react';
+import { useAuth, useAuthSession } from '../../../../../AuthContext';
+import { useBazaarCatalog, useBazaarDetail } from '../../../../../data/useBazaarCatalog';
 import {
   createUserOperationId,
   isDefinitiveUserDataCommandError,
@@ -7,7 +9,7 @@ import {
 
 // DM-only grant of an existing catalog item. The catalog ID is only a source;
 // Task 05 creates one or more distinct V2 inventory instances for the target.
-const AddBazaarItemOverlay = ({ userId, itemsDocs, onClose }) => {
+const AddBazaarItemOverlay = ({ userId, onClose }) => {
   const [filter, setFilter] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [quantity, setQuantity] = useState('1');
@@ -21,27 +23,15 @@ const AddBazaarItemOverlay = ({ userId, itemsDocs, onClose }) => {
     if (typeof onClose === 'function') onClose(ok);
   };
 
-  const allItems = useMemo(() => {
-    if (!itemsDocs || typeof itemsDocs !== 'object') return [];
-    return Object.keys(itemsDocs).map((id) => ({ id, ...itemsDocs[id] }))
-      .filter((item) => item && (item.General?.Nome || item.name))
-      .sort((a, b) => (
-        a.General?.Nome || a.name || ''
-      ).localeCompare(b.General?.Nome || b.name || ''));
-  }, [itemsDocs]);
-
-  const filtered = useMemo(() => {
-    const value = filter.trim().toLowerCase();
-    if (!value) return allItems;
-    return allItems.filter((item) => (
-      item.General?.Nome || item.name || ''
-    ).toLowerCase().includes(value));
-  }, [allItems, filter]);
-
-  const selectedItem = useMemo(
-    () => allItems.find((item) => item.id === selectedId) || null,
-    [allItems, selectedId]
-  );
+  const { user, userData } = useAuth();
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
+  const scopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}:${userData?.role || ''}`;
+  const deferredFilter = useDeferredValue(filter);
+  const catalog = useBazaarCatalog(scopeKey, user?.uid, { searchTerm: deferredFilter });
+  const filtered = catalog.rows;
+  const selectedSummary = useMemo(() => filtered.find((item) => item.id === selectedId) || null, [filtered, selectedId]);
+  const detail = useBazaarDetail(selectedSummary, scopeKey, catalog.revision);
+  const selectedItem = detail.item;
 
   const grantItems = async () => {
     if (!userId || !selectedItem) return;
@@ -108,7 +98,7 @@ const AddBazaarItemOverlay = ({ userId, itemsDocs, onClose }) => {
                     </button>
                   );
                 })}
-                {!filtered.length && <div className="px-3 py-4 text-xs text-slate-400">Nessun oggetto</div>}
+                {!catalog.loading && !filtered.length && <div className="px-3 py-4 text-xs text-slate-400">Nessun oggetto</div>}
               </div>
             </div>
             <div className="border border-slate-700/50 rounded-md p-3 text-xs text-slate-200 bg-slate-800/40 min-h-[12rem]">
@@ -123,6 +113,10 @@ const AddBazaarItemOverlay = ({ userId, itemsDocs, onClose }) => {
               ) : <div className="text-slate-400">Seleziona un oggetto a sinistra.</div>}
             </div>
           </div>
+          {catalog.loading && <p role="status">Caricamento catalogo...</p>}
+          {catalog.cursor && <button disabled={catalog.loading} onClick={catalog.loadMore}>Altri oggetti</button>}
+          {catalog.error && <div role="alert">{catalog.error}<button onClick={catalog.retry}>Riprova</button></div>}
+          {detail.error && <p role="alert">{detail.error}</p>}
           {error && <div className="text-xs text-red-400">{error}</div>}
           {successMsg && <div className="text-xs text-emerald-400">{successMsg}</div>}
         </div>

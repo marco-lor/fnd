@@ -7,7 +7,7 @@ import {
   collectOwnedMediaPaths,
 } from "./userOwnedMediaCleanup";
 import {isValidFirestoreDocumentId} from "./userDataV2";
-import {assertActiveCaller} from "./callerAuthorization";
+import {claimUserDeletion, drainDeletionWork} from "./userDeletionOperation";
 
 // Do NOT call admin.initializeApp() here; it is already done in index.ts.
 
@@ -15,11 +15,9 @@ import {assertActiveCaller} from "./callerAuthorization";
  * Callable Cloud Function to delete a user and their Firestore document.
  * Only users with the "webmaster" role may delete other users.
  */
-export const deleteUser = onCall(
-  {region: "europe-west8"},
-  async (
-    request: CallableRequest<{ userId: string }>
-  ): Promise<{ success: boolean; message: string }> => {
+export const deleteUserHandler = async (
+    request: CallableRequest<{ userId?: string; operationId?: string }>
+  ): Promise<Record<string, unknown>> => {
     const {auth, data} = request;
 
     // 1. Authentication
@@ -32,7 +30,7 @@ export const deleteUser = onCall(
     const requestingUserUid = auth.uid;
 
     // 2. Validate argument
-    const userToDeleteUid = typeof data.userId === "string"
+    const userToDeleteUid = typeof data?.userId === "string"
       ? data.userId.trim()
       : "";
     if (!isValidFirestoreDocumentId(userToDeleteUid)) {
@@ -43,7 +41,6 @@ export const deleteUser = onCall(
     }
 
     const db = admin.firestore();
-    const jobRef = db.doc(`user_deletion_jobs/${userToDeleteUid}`);
     const targetUserRef = db.doc(`users/${userToDeleteUid}`);
     const migrationArchiveRef = db.doc(
       `migration_state/user-data-v2/archives/${userToDeleteUid}`
@@ -52,75 +49,36 @@ export const deleteUser = onCall(
       "migration_state/user-data-v2/root_compaction_archives/" +
       userToDeleteUid
     );
-    let authorizedPendingJob = false;
+    let runner: Awaited<ReturnType<typeof claimUserDeletion>> | null = null;
+    let completedSteps = 0;
 
     try {
-      // 3. Authorize and publish the durable deletion fence atomically. A role
-      // change must conflict with this transaction instead of allowing a stale
-      // pre-transaction role read to authorize a destructive operation.
-      const reqUserRef = db.doc(`users/${requestingUserUid}`);
-      const initialization = await db.runTransaction(async (transaction) => {
-        const [requester, currentTarget, existingJob] =
-          await Promise.all([
-            transaction.get(reqUserRef),
-            transaction.get(targetUserRef),
-            transaction.get(jobRef),
-          ]);
-        assertActiveCaller(
-          requester,
-          "Requesting user not found.",
-          "Requesting user is pending deletion."
-        );
-        if (requester.get("role") !== "webmaster") {
-          throw new HttpsError(
-            "permission-denied",
-            "Only webmasters can delete users."
-          );
-        }
-        if (existingJob.get("stage") === "completed") return "completed";
-        const existingCreatedAt = existingJob.get("createdAt");
-        transaction.set(jobRef, {
-          schemaVersion: 2,
-          targetUid: userToDeleteUid,
-          requestedBy: requestingUserUid,
-          stage: "pending",
-          attempts: admin.firestore.FieldValue.increment(1),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          createdAt: existingJob.exists && existingCreatedAt
-            ? existingCreatedAt
-            : admin.firestore.FieldValue.serverTimestamp(),
-        }, {merge: true});
-        if (currentTarget.exists) {
-          transaction.update(targetUserRef, {
-            deletionState: "pending",
-            deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
-            deletionRequestedBy: requestingUserUid,
-          });
-        }
-        return "pending";
-      });
-      if (initialization === "completed") {
-        return {success: true, message: "User successfully deleted."};
+      runner = await claimUserDeletion(
+        db, requestingUserUid, userToDeleteUid, data?.operationId
+      );
+      if (!runner.run) {
+        return runner.operation ? {operation: runner.operation,
+          success: runner.operation.status === "completed",
+          message: "User deletion status."} :
+          {success: true, message: "User successfully deleted."};
       }
-      authorizedPendingJob = true;
-
+      await runner.assertLease();
+      const step = runner.step;
       // 4. Disable sign-in and revoke refresh tokens immediately after the
       // Firestore tombstone. Rules also consult the tombstone, because already
       // issued ID tokens can outlive this Auth-side operation.
       try {
-        await admin.auth().updateUser(userToDeleteUid, {disabled: true});
-        await admin.auth().revokeRefreshTokens(userToDeleteUid);
+        await step(() => admin.auth().updateUser(userToDeleteUid, {disabled: true}));
+        await step(() => admin.auth().revokeRefreshTokens(userToDeleteUid));
       } catch (authErr: any) {
         if (authErr?.code !== "auth/user-not-found") throw authErr;
       }
-      await jobRef.set({
-        stage: "auth-disabled",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
+      await runner.progress("auth-disabled", ++completedSteps);
+      await runner.assertLease();
 
       // 5. Remove only canonical user-owned media and a verified legacy
       // profile image. Shared catalog media is never addressed here.
-      const fencedTargetUserSnap = await targetUserRef.get();
+      const fencedTargetUserSnap = await step(() => targetUserRef.get());
       const legacyOwnedPaths = new Set<string>();
       if (fencedTargetUserSnap.exists) {
         const rootData = fencedTargetUserSnap.data() ?? {};
@@ -136,11 +94,11 @@ export const deleteUser = onCall(
           scope === "profile" ? "profile" : "legacy-root"
         ).forEach((path) => legacyOwnedPaths.add(path)));
       }
-      const descendantMedia = await Promise.all([
+      const descendantMedia = await step(() => drainDeletionWork([
         targetUserRef.collection("inventory").get(),
         targetUserRef.collection("spells").get(),
         targetUserRef.collection("tecniche").get(),
-      ]);
+      ]));
       (["inventory", "spells", "tecniche"] as const).forEach(
         (scope, collectionIndex) => descendantMedia[collectionIndex].docs
           .forEach((snapshot) => collectOwnedMediaPaths(
@@ -153,10 +111,10 @@ export const deleteUser = onCall(
       // Task 05 archives live outside users/{uid}. Inspect both generations
       // before deleting them, including media removed from authoritative V2.
       const [compactionArchiveFields, migrationArchiveDomains] =
-        await Promise.all([
+        await step(() => drainDeletionWork([
           compactionArchiveRef.collection("root_fields").get(),
           migrationArchiveRef.collection("domains").get(),
-        ]);
+        ]));
       collectArchivedOwnedMediaPaths(userToDeleteUid, {
         rootFields: compactionArchiveFields.docs.map((snapshot) => ({
           field: snapshot.get("field"),
@@ -169,27 +127,26 @@ export const deleteUser = onCall(
       }).forEach((path) => legacyOwnedPaths.add(path));
       const bucket = admin.storage().bucket();
       const deleteAndVerifyOwnedMedia = async (): Promise<void> => {
-        await bucket.deleteFiles({prefix: `users/${userToDeleteUid}/`});
-        await Promise.all([...legacyOwnedPaths].map((path) => (
+        await step(() => bucket.deleteFiles({prefix: `users/${userToDeleteUid}/`}));
+        await step(() => drainDeletionWork([...legacyOwnedPaths].map((path) => (
           bucket.file(path).delete({ignoreNotFound: true})
-        )));
-        const [remainingOwnedFiles] = await bucket.getFiles({
+        ))));
+        const [remainingOwnedFiles] = await step(() => bucket.getFiles({
           prefix: `users/${userToDeleteUid}/`,
           maxResults: 1,
-        });
-        const legacyExists = await Promise.all([...legacyOwnedPaths].map(
+        }));
+        const legacyExists = await step(() => drainDeletionWork([...legacyOwnedPaths].map(
           async (path) => (await bucket.file(path).exists())[0]
-        ));
+        )));
         if (remainingOwnedFiles.length || legacyExists.some(Boolean)) {
           throw new Error("owned-media-cleanup-not-verified");
         }
       };
       await deleteAndVerifyOwnedMedia();
-      await jobRef.set({
-        stage: "media-verified",
+      await runner.progress("media-verified", ++completedSteps, {
         mediaDeletionVerified: true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
+      });
+      await runner.assertLease();
 
       // 6. Recursive deletion includes every current and future user
       // subcollection. The public directory projection is removed explicitly
@@ -198,30 +155,33 @@ export const deleteUser = onCall(
       // outside users/{uid}; they share the deletion fence and must not outlive
       // an account deletion.
       const directoryRef = db.doc(`user_directory/${userToDeleteUid}`);
+      const managerSummaryRef = db.doc(`manager_user_summaries/${userToDeleteUid}`);
       const migrationArchiveRefs = [
         migrationArchiveRef,
         compactionArchiveRef,
       ];
       const deleteAndVerifyFirestore = async (): Promise<void> => {
-        await Promise.all([
+        await step(() => drainDeletionWork([
           db.recursiveDelete(targetUserRef),
           ...migrationArchiveRefs.map((archiveRef) => (
             db.recursiveDelete(archiveRef)
           )),
-        ]);
-        await directoryRef.delete();
+        ]));
+        await step(() => directoryRef.delete());
+        await step(() => managerSummaryRef.delete());
         const [remainingUser, remainingDirectory, ...remainingArchives] =
-          await db.getAll(
+          await step(() => db.getAll(
             targetUserRef,
             directoryRef,
+            managerSummaryRef,
             ...migrationArchiveRefs
-          );
-        const remainingCollections = await Promise.all([
+          ));
+        const remainingCollections = await step(() => drainDeletionWork([
           targetUserRef.listCollections(),
           ...migrationArchiveRefs.map((archiveRef) => (
             archiveRef.listCollections()
           )),
-        ]);
+        ]));
         if (
           remainingUser.exists ||
           remainingDirectory.exists ||
@@ -232,45 +192,38 @@ export const deleteUser = onCall(
         }
       };
       await deleteAndVerifyFirestore();
-      await jobRef.set({
-        stage: "firestore-verified",
+      await runner.progress("firestore-verified", ++completedSteps, {
         firestoreDeletionVerified: true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
+      });
+      await runner.assertLease();
 
       // 7. Delete the Auth record only after the first verified cleanup.
       try {
-        await admin.auth().deleteUser(userToDeleteUid);
+        await step(() => admin.auth().deleteUser(userToDeleteUid));
       } catch (authErr: any) {
         if (authErr?.code !== "auth/user-not-found") throw authErr;
       }
 
+      await runner.progress("auth-deleted", ++completedSteps);
+      await runner.assertLease();
       // 8. Perform one final destructive sweep and verification after Auth
       // removal. The durable job tombstone remains present throughout, so
       // rules reject root recreation and every owner write while this runs.
       await deleteAndVerifyOwnedMedia();
       await deleteAndVerifyFirestore();
-      await jobRef.set({
-        stage: "completed",
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
-
-      return {success: true, message: "User successfully deleted."};
+      await runner.progress("completed", ++completedSteps);
+      const operation = await runner.view();
+      return {success: true, message: "User successfully deleted.",
+        ...(operation ? {operation} : {})};
     } catch (err: any) {
       console.error("Error deleting user:", err);
       if (err instanceof HttpsError && err.code === "unavailable") {
         throw err;
       }
-      if (authorizedPendingJob) {
-        await db.runTransaction(async (transaction) => {
-          const job = await transaction.get(jobRef);
-          if (!job.exists || job.get("stage") === "completed") return;
-          transaction.set(jobRef, {
-            stage: "failed",
-            lastErrorCode: typeof err?.code === "string" ? err.code : "internal",
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }, {merge: true});
+      if (runner?.run) {
+        await runner.progress("failed", completedSteps, {
+          lastErrorCode: typeof err?.code === "string" ? err.code : "internal",
+          errorClass: "deletion-incomplete",
         }).catch(() => undefined);
       }
       // eslint-disable-next-line max-len
@@ -285,5 +238,7 @@ export const deleteUser = onCall(
         {originalError: err.message}
       );
     }
-  }
+};
+export const deleteUser = onCall(
+  {region: "europe-west8", timeoutSeconds: 60}, deleteUserHandler
 );
