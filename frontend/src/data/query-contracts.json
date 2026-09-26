@@ -15,6 +15,18 @@
       "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 1 }]
     },
     {
+      "id": "dm-manager-summary-document",
+      "kind": "document",
+      "queryKey": "users.manager-summary.subscribe.v1",
+      "ownerTask": "Task 11",
+      "currentScope": "Single manager_user_summaries/{uid} private projection containing only Dashboard card stats and table locks; no heavy detail domains",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "none", "fields": [] },
+      "realtimePolicy": "Ref-counted per visible directory-page UID; at most 10 Dashboard summary listeners, released on page removal, unmount or access reset",
+      "activation": "active",
+      "sources": [{ "file": "data/userData/managerSummaryRepository.js", "occurrence": 1 }]
+    },
+    {
       "id": "bazaar-catalog-revision",
       "kind": "document",
       "queryKey": "bazaar.catalog.revision.subscribe.v1",
@@ -139,10 +151,10 @@
       "kind": "collection",
       "queryKey": "dm.dice-history.subscribe.v1",
       "ownerTask": "Task 11 deferred cleanup",
-      "currentScope": "20 newest dice rolls for each active user",
+      "currentScope": "20 newest dice rolls per visible expanded Dashboard player; at most three expanded users",
       "targetOrdering": [{ "field": "createdAt", "direction": "DESCENDING" }, { "field": "__name__", "direction": "DESCENDING" }],
       "cursor": { "version": 1, "status": "deferred", "fields": ["createdAt", "__name__"] },
-      "realtimePolicy": "Open player-info row only, 20 rows",
+      "realtimePolicy": "Expanded player-info row only, 20 rolls per UID; zero dice listeners after collapse or unmount",
       "activation": "deferred",
       "sources": [{ "file": "components/dmDashboard/elements/playerInfo/sections/PlayerInfoDiceRollsRow.js", "occurrence": 1 }]
     },
@@ -523,10 +535,10 @@
       "kind": "collection",
       "queryKey": "users.content.subscribe.v2",
       "ownerTask": "Task 05",
-      "currentScope": "Complete inventory plus complete normalized personal spell or technique collection for the active user",
+      "currentScope": "Complete inventory plus complete normalized personal spell or technique collection per requested UID; Dashboard requests details only for at most three visible expanded players",
       "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
       "cursor": { "version": 1, "status": "compatibility-full", "fields": ["normalizedName", "__name__"] },
-      "realtimePolicy": "One ref-counted listener per collection; personal content remains complete until the UI exposes load-more",
+      "realtimePolicy": "One ref-counted listener per UID and collection; Dashboard detail ownership ends on collapse or unmount; personal content remains complete until the UI exposes load-more",
       "activation": "active",
       "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 2 }]
     },
@@ -547,10 +559,10 @@
       "kind": "collection",
       "queryKey": "directory.users.page.v1",
       "ownerTask": "Task 04",
-      "currentScope": "First 50 private projection rows, optionally exact-role filtered",
+      "currentScope": "Cursor-selected private label/role projection page of 1 to 50 rows (Dashboard uses 10), optionally exact-role filtered and normalized-label prefix searched",
       "targetOrdering": [{ "field": "normalizedLabel", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
       "cursor": { "version": 1, "status": "active", "fields": ["normalizedLabel", "__name__"] },
-      "realtimePolicy": "Shared first page only",
+      "realtimePolicy": "Shared selected page; query/cache identity binds role, normalized search, page size and cursor",
       "activation": "active",
       "sources": [{ "file": "data/userDirectoryRepository.js", "occurrence": 1 }]
     }
@@ -564,6 +576,7 @@
     { "id": "codex-document-read-listener", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "user-directory-all-page", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "user-directory-role-page", "ownerTask": "Task 04", "activation": "active", "requiredIndexId": "user-directory-role-normalized-label" },
+    { "id": "task11-manager-summary-document", "ownerTask": "Task 11", "activation": "active", "indexMode": "automatic", "currentScope": "Direct manager_user_summaries/{uid} document subscription; no collection query or composite index" },
     { "id": "task05-user-domain-documents", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
     { "id": "task05-inventory-complete-listener", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
     { "id": "task05-home-catalog-item-batches", "ownerTask": "Task 05 / Task 07", "activation": "active", "indexMode": "automatic" },

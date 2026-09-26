@@ -16,7 +16,7 @@ const fingerprint = (report) => createHash('sha256').update(JSON.stringify({
 })).digest('hex');
 const parseOptions = (argv) => {
   const options = parseArguments(argv);
-  if (!['performance', 'staging'].includes(options.environmentName)) throw new Error('Task11 supports performance or staging only.');
+  if (!['performance', 'staging', 'production'].includes(options.environmentName)) throw new Error('Task11 requires an explicit performance, staging or production environment.');
   if (!options.reportPathExplicit) options.reportPath = path.resolve('performance-results',
     options.verifyOnly ? 'task11-summary-verify.json' : 'task11-summary-dry-run.json');
   if (!argv.includes('--checkpoint')) options.checkpointPath = path.resolve('performance-results/task11-summary-checkpoint.json');

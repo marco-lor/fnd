@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {parseOptions, run, validateReport, fingerprint} = require('./backfill-manager-summaries');
+const {assertSafeTarget} = require('../backfill-user-directory');
 const hash = (n) => String(n).padStart(64, '0');
 const fixture = (count = 53) => {
   const states = new Map(Array.from({length: count}, (_, i) => [`player-${String(i).padStart(3, '0')}`, {current: hash(0), desired: hash(1)}]));
@@ -31,8 +32,23 @@ test('explicit target parser uses dedicated artifacts and rejects bypasses', () 
   assert.match(options.checkpointPath, /task11-summary-checkpoint/);
   assert.equal(parseOptions([...args, '--write', '--resume', '--approve-fingerprint', hash(1), '--report', 'review.json']).resume, true);
   assert.throws(() => parseOptions([...args, '--start-after', 'player-a']), /Unknown argument/);
-  assert.throws(() => parseOptions(['--environment', 'production', '--project', 'fatins']), /performance or staging/);
+  assert.equal(parseOptions(['--environment', 'production', '--project', 'fatins']).environmentName, 'production');
   assert.throws(() => parseOptions([...args, '--write', '--verify']), /mutually exclusive/);
+});
+
+test('production parser retains exact live target, confirmation and CLI authentication fences', () => {
+  const options = parseOptions(['--environment', 'production', '--project', 'fatins',
+    '--site', 'fatins', '--bucket', 'fatins.firebasestorage.app', '--allow-live-project',
+    '--confirm-project', 'fatins', '--auth', 'firebase-cli']);
+  const env = {FND_GIT_BRANCH: 'main'};
+  assert.deepEqual(assertSafeTarget(options, env), {emulatorHost: null, live: true, projectId: 'fatins'});
+  for (const patch of [{projectId: 'fatin-test'}, {hostingSite: 'fatin-test'},
+    {storageBucket: 'fatin-test.firebasestorage.app'}, {allowLiveProject: false},
+    {confirmProject: 'fatin-test'}, {authMode: 'admin'}]) {
+    assert.throws(() => assertSafeTarget({...options, ...patch}, env));
+  }
+  assert.throws(() => assertSafeTarget(options, {...env, FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080'}), /performance environment/);
+  assert.throws(() => assertSafeTarget(options, {...env, GCLOUD_PROJECT: 'fatin-test'}), /does not match/);
 });
 test('dry-run is read-only, complete approval is mandatory, and report integrity/age/project are checked', async () => {
   const f = fixture();

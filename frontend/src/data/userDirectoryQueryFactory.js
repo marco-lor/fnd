@@ -10,6 +10,17 @@ const USER_DIRECTORY_QUERY_KEYS = Object.freeze({
 const ALLOWED_ROLES = new Set(['player', 'dm', 'webmaster']);
 const normalizeDirectorySearch = (value = '') => String(value).normalize('NFKD')
   .replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const directorySearchUpperBound = (search) => {
+  if (typeof search !== 'string' || /[\uD800-\uDFFF]/u.test(search)) {
+    throw new TypeError('search must contain valid Unicode scalar values.');
+  }
+  const points = Array.from(search);
+  while (points.length) {
+    const code = points.pop().codePointAt(0);
+    if (code < 0x10ffff) return points.join('') + String.fromCodePoint(code === 0xd7ff ? 0xe000 : code + 1);
+  }
+  return null;
+};
 
 const normalizeRole = (role) => {
   if (role === null || role === undefined) return null;
@@ -64,10 +75,9 @@ const buildUserDirectoryQuery = ({
   const queryKey = queryKeyForRole(normalizedRole) + (normalizedSearch ? `:search:${normalizedSearch}` : '');
   const constraints = [];
   if (normalizedRole !== null) constraints.push(sdk.where('role', '==', normalizedRole));
-  if (normalizedSearch) constraints.push(
-    sdk.where('normalizedLabel', '>=', normalizedSearch),
-    sdk.where('normalizedLabel', '<=', `${normalizedSearch}\uf8ff`)
-  );
+  const upperBound = directorySearchUpperBound(normalizedSearch);
+  if (normalizedSearch) constraints.push(sdk.where('normalizedLabel', '>=', normalizedSearch));
+  if (upperBound) constraints.push(sdk.where('normalizedLabel', '<', upperBound));
   constraints.push(
     sdk.orderBy('normalizedLabel', 'asc'),
     sdk.orderBy(sdk.documentId(), 'asc')
@@ -89,4 +99,5 @@ module.exports = {
   USER_DIRECTORY_QUERY_KEYS,
   buildUserDirectoryQuery,
   normalizeDirectorySearch,
+  directorySearchUpperBound,
 };

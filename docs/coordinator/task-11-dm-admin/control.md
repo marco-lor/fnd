@@ -1,28 +1,27 @@
 # Control - Step 11
 
-- Stage: complete. A, B and C coordinator-accepted on 2026-09-26; agreed local, staging and Browser gates green.
-- Pause: clear. User authorized "keep going until green"; retain counters and gates, continue Astra High repairs if needed.
-- Workspace: permanent fnd-devs/devs; baseline HEAD93a393802b4a4fc70c5d509bbf43eaef04ea6db1. Main checkout clean/unchanged; protected Step10 hashes in plan match.
-- Resources: all three developers quiescent; leases released. Coordinator tests/emulators/deployments exited; ports free. Existing user browser remains open.
-- Blockers: none. Final Admin gate passed; Browser tab1 remains on Admin page1. User now requested a PR: coordinator authorized to commit/push Step11 on devs and open against main. Pre-existing Step10 notes stay uncommitted. No merge, production deployment, live deletion or privilege changes authorized.
-- Staging: Hosting version12127e32489f2cee, release1790430723912000 at2026-09-26T13:52:03.912Z; main.d43a8b41.js observed in browser. B rollback: versioneddc5f553a82815d/main.a1c03181.js; pre-A66b4a5ede1c2f830/main.f6c353d9.js.
+- Stage: repair source, local gates and affected staging interactions accepted. Coordinator publishes PR43 repair and verifies GitHub checks; current remote status is tracked on https://github.com/marco-lor/fnd/pull/43.
+- Pause: clear. User authorized "keep going until green", then diagnosis/fix/update of PR43. Continue reviewed Astra High repairs if needed, retaining counters and gates.
+- Workspace: permanent fnd-devs/devs. Original implementation commit63fe9cd; main checkout50d7bc8 remains clean/unchanged. Protected Step10 hashes in plan match and those files stay outside commits.
+- Resources: all developers, tests, builds and emulator processes quiescent; leases released. Coordinator owns docs, GitHub and staging/browser actions. No merge or production deployment authorized.
+- Blockers: none in reviewed source/local/staging gates. Four advisory performance target classes remain unmet: initial collections, INP, CLS and Grigliata long-task duration. All34blocking comparisons pass.
 
-## 11A accepted
-- Developer /root/task11_dashboard, gpt-6-astra/high; attempt4/token11A-20260926-04. Failures Light0/High3; last counted attempt3/token11A-20260926-03; user overrode automatic stop.
-- Gates: Node27, Firestore5, build115, lint/diff and Jest15/90; reviewed scheduler/summary source. Initial525 level206.082s/lock113.542s receipts,0failed; repeated combined result below.
-- Measurements: SDK serialized payload4405/576237/601815B;11/16/26 listeners at0/1/3 expanded. Collapse11 with0detail/dice; unmount0; full catalog0. Projection5r/<=1w; atomic bulk2level/3lock reads+<=1summarywrite; marked events0r/0w. Gold4r/2w,token5r/2w before retry.
-- Released separate bulk3functions, summary2triggers/progression/deleteUser/rules, fingerprinted backfill and Hosting. Backfill b630dfd94083080f79ec216bd52ba9eecc4bc8de9d02d8bcf9c6ba94ea1c0273:9sets/0deletes/3unchanged. Final canonical verify12/12 after restored mutations; recovery artifacts frontend/performance-results/task11-staging-{dry-run,checkpoint,verify}.json.
-- Browser passed search/selection/max3/collapse/lazy catalog and restored gold3565->3566->3565,combat42->43->42,base lock true->false->true; grant/bulk confirmations cancelled. Latest B reader regression search/detail/collapse pass;9collapsed/0expanded,console[],direct/admin redirects DM to/home. Screenshot frontend/performance-results/task11-dashboard-staging.png.
+## 11A accepted repair
+- Developer /root/task11_dashboard, gpt-6-astra/high; attempt5/token11A-20260926-05. Failures Light0/High4; last counted attempt4/token11A-20260926-04. User overrode automatic stop.
+- Fixed query-contract registration and browser fixture preparation/accounting. Guarded backfill supports production; Dashboard prefix bounds cover Unicode, UIDs reconcile without delimiter collisions, and optional transactional floorAtZero preserves Dashboard vital semantics and other callers.
+- Final checks exit0: perf:test495; five boundary/query gates(47listeners/16query shapes/10indexes); Jest175suites/1664tests; setup/backfill33; Task11Firestore7; Functions build117/lint; performance build/disabled verification; Chromium28/28 and34/34blocking comparisons; Firefox/WebKit6/6 with background35->35. Windows cleanup probes pass elevated; isolated timing failures resolve in the quiescent full run without test/timeout changes.
+- Fixture9139/hash fbabc02a3376d466cf717e3886e0d12a9e15568c17b654322cff4909dc6eaca8 unchanged. Setup verifies200summaries; readiness32/150Chromium and35/150cross-browser. Measurement zero-growth gate retained.
+- SDK serialized bytes4405/576237/601815 and11/16/26listeners at0/1/3 expansions unchanged; collapse11 with0detail/dice, unmount0, full catalog0. Projection5r/<=1w; atomic bulk2level/3lock additional reads+<=1summarywrite; marked events0r/0w.
+- Repair staging release: functions:task05UpdateResource then Hosting, both exit0. Function source SHA25662ADFE0885A06401E2B9C43CD7E36254548DA84305AB8E271604CC5C3250E04D. AppCheck, directory12/12 and callable policies41+5 green.
+- Hosting versionc94ad381d78f6b61, release1790448231017000 at2026-09-26T18:43:51.017Z; main.b6252120.js observed in Codex Browser. Rollback version12127e32489f2cee/main.d43a8b41.js; earlier releases in plan.
+- DM Browser passed normalized/no-match search/recovery, detail expansion and release on page change. Task08QA HP28 minus100 became0; further HP/essenza decrements stayed0; HP restored28, mana61 and essenza0 retained. Console[], canonical summaries12/12verified after restoration. Proof: frontend/performance-results/task11-dashboard-pr43-staging.png.
 
 ## 11B accepted
 - Developer /root/task11_admin, gpt-6-astra/high; attempt2/token11B-20260926-02. Failures Light0/High1; last counted attempt1/token11B-20260926-01.
-- Scope: Admin/client/query/role/delete/tests; shared operation changes only delete-user kind/status/resume and optional progress callback. Accepted A scheduler preserved.
-- 200-user fixture: before2requests/200rows/25724serializedB/403modeled reads; after1/10/1402B/22,20pages reachable. Targets<=1/10/1800B/22. Legacy100/UID callable retained; v2 private five-field NFKD-prefix/composite cursor verified. Unicode D7FF->E000 and malformed surrogate rejection repaired.
-- Delete adapter retains cleanup engine/permanent tombstone; Task06 actor/request-bound receipts/status/resume, target lease, cooperative50s deadline and generation fences. RPC groups drain before release; in-flight idempotent calls may settle after lease loss. Legacy/retry/duplicate/failure cleanup tested.
-- Gates: Jest5/68,Node25,deletion callable; repair build117/Node27/6rules+Admin callable (12Unicode matches/4pages,2unrelated excluded). Coordinator combined Jest7/32+Node37 green. Focused lint/diff and final staging-build verification pass; userDataV2 SHA256580EF4299AE6460BA5B3A515353EDF582F9B559174BBF382DE562B5D0B76DCD8.
-- Released separately deletion/status/resume, then query/role, then Hosting; all exit0. AppCheck/directory12/12/callable policies41+5 green; no B rules/index/backfill. Existing Task06 legacy owner config retained.
-- Browser: exact deployed build confirmed;10+2 users across2pages,12distinct, stable previous-page recovery. Search normalizes case/accents/space; no-match and clear recover correctly. Self-role/delete disabled. Delete button disabled for empty/wrong-case text, enabled for ELIMINA; cancelled, target/role retained. Direct/admin reload restored10rows; console[]. Proof frontend/performance-results/task11-admin-staging.png.
+- 200-user fixture before2requests/200rows/25724serializedB/403modeled reads; after1/10/1402B/22; all20pages reachable. Legacy100/UID contract retained; webmaster-only v2 five-field NFKD-prefix/composite cursor verified, including D7FF->E000 and malformed Unicode rejection.
+- Deletion retains cleanup/permanent tombstone, actor/request receipts/status/resume, target lease,50s cooperative deadline, generation fences and drained in-flight groups. Legacy/retry/duplicate/failure cases pass.
+- Prior local gates and separate deletion/query/role releases accepted. Webmaster Browser verified10+2users, stable paging, normalized/no-match search, self-action disabling, exact delete-confirmation/cancel and reload. No live deletion/role change; console[]. Evidence in plan and frontend/performance-results/task11-admin-staging.png. Affected combined frontend/browser checks pass above.
 
-## C final combined evidence / review
-- Coordinator525 gate exit0: level232.696s/525success+2skip;lock86.641s/526success+1skip. Both527processed/0failed, replay/exact summaries pass;6rules+2Functions tests green. Threshold240s/fixture/triggers unchanged. Paging unit tests cover partial checkpoint/pause/crash/replay; no further scaling change.
-- Reviewer /root/task11_projection_review, gpt-6-astra/high, token11B-review-01: one Unicode blocker confirmed and fixed; no remaining deletion/auth/receipt/lease/shared-bulk blocker. Quiescent/no resources.
+## C combined evidence / review
+- Unchanged525-user gate passed: level232.696s/525success+2skip, lock86.641s/526success+1skip; both527processed/0failed with replay/exact summaries. Existing240s threshold/triggers retained; scheduler unchanged by repair.
+- /root/task11_projection_review, AstraHigh token11B-review-01: Unicode blocker fixed; no remaining deletion/auth/receipt/lease/shared-bulk blocker. Coordinator verified and repaired all four PR review findings. No outstanding source owner/process.

@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PlayerInfo from './playerInfo';
 import { subscribeUserDomain } from '../../../data/userData/userDataRepository';
-import { adjustGold } from '../../../data/userData/userDataCommands';
+import { adjustGold, updateResource } from '../../../data/userData/userDataCommands';
 import { getDocs, onSnapshot } from '../../../performance/firestore';
 
 const mockRenders = new Map();
@@ -83,4 +83,42 @@ test('a failed detail domain stays visible after other domains succeed and can r
   expect(screen.queryByText('Inventory unavailable')).not.toBeInTheDocument();
   view.unmount();
   stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
+});
+
+test('pipe UIDs remain expanded across summary updates and colliding page identities release removed rows', () => {
+  const active = new Set();
+  subscribeUserDomain.mockImplementation((uid, domain, observer) => {
+    const key = JSON.stringify([uid, domain]); active.add(key);
+    observer.next(domain === 'inventory' ? [] : {});
+    return () => active.delete(key);
+  });
+  onSnapshot.mockImplementation(() => jest.fn());
+  const user = (id) => ({id, label: id, stats: {}, settings: {}});
+  const view = render(<PlayerInfo users={['a|b', 'c'].map(user)} />);
+  fireEvent.click(screen.getAllByRole('button', {name: 'Espandi'})[0]);
+  view.rerender(<PlayerInfo users={['a|b', 'c'].map(user)} />);
+  expect(screen.getByRole('button', {name: 'Comprimi'})).toBeVisible();
+  expect(active.size).toBe(4);
+  view.rerender(<PlayerInfo users={['a', 'b|c'].map(user)} />);
+  expect(active.size).toBe(0);
+  view.rerender(<PlayerInfo users={['a|b', 'c'].map(user)} />);
+  expect(screen.queryByRole('button', {name: 'Comprimi'})).not.toBeInTheDocument();
+  expect(active.size).toBe(0);
+  view.unmount();
+});
+
+test('Dashboard delta buttons request an authoritative zero floor', async () => {
+  updateResource.mockResolvedValue({});
+  const view = render(<PlayerInfo users={[{id: 'floor-player', label: 'Floor', stats: {}, settings: {}}]} canEditVitals />);
+  fireEvent.click(screen.getAllByRole('button', {name: '-', exact: true})[0]);
+  await waitFor(() => expect(updateResource).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'floor-player', resource: 'hp', mode: 'delta', value: -1, floorAtZero: true,
+  })));
+  fireEvent.click(screen.getAllByRole('button', {name: 'Δ', exact: true})[0]);
+  fireEvent.change(screen.getByRole('spinbutton'), {target: {value: '-99'}});
+  fireEvent.click(screen.getByRole('button', {name: 'Apply', exact: true}));
+  await waitFor(() => expect(updateResource).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'floor-player', resource: 'hp', mode: 'delta', value: -99, floorAtZero: true,
+  })));
+  view.unmount();
 });

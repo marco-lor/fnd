@@ -30,10 +30,11 @@ const STARTUP_REQUEST_TIMEOUT_MS = 10_000;
 const STARTUP_INTERVAL_MS = 500;
 const FIXTURE_SEED_TIMEOUT_MS = 300_000;
 const CATALOG_ACTIVATION_TIMEOUT_MS = 120_000;
+const SUMMARY_ACTIVATION_TIMEOUT_MS = 120_000;
 const TASK07_CALLABLES_TIMEOUT_MS = 240_000;
 const SECURITY_RULES_TIMEOUT_MS = 120_000;
 const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
-// Includes the reviewed Task 07 callable fixtures that run before measurement
+// Includes reviewed Task 07 callable fixtures and Task 11 summary maintenance before measurement
 // triggers are disabled. The allowlist below still rejects any other trigger,
 // and teardown requires zero growth throughout the measurement window.
 const MAX_SEED_BACKGROUND_INVOCATIONS = 150;
@@ -59,6 +60,8 @@ const NON_BACKGROUND_HTTP_FUNCTIONS = new Set([
 ]);
 const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-syncUserDirectory',
+  'europe-west8-syncManagerUserSummary',
+  'europe-west8-syncManagerUserSummaryShell',
   'europe-west8-cleanupLegacyRemovedFoeMedia',
   'europe-west8-cleanupLegacyRemovedUserMedia',
   'europe-west8-cleanupTask07RemovedBackgroundMedia',
@@ -85,6 +88,38 @@ const activateCatalogFixture = async (run = runBoundedChildProcess) => {
   });
   if (result.status !== 0) {
     throw new Error(`Catalog fixture activation failed.\n${result.stdout || ''}\n${result.stderr || ''}`);
+  }
+  process.stdout.write(result.stdout || '');
+  process.stderr.write(result.stderr || '');
+};
+
+const reconcileSummaryFixture = async ({db, lifecycleProjectId = projectId, runBackfill}) => {
+  assertPerformanceProject(lifecycleProjectId);
+  // Load compiled Functions only inside the emulator preparation child, not in perf:test.
+  const backfill = runBackfill || require('../scripts/task11/backfill-manager-summaries').run;
+  const options = {db, projectId: lifecycleProjectId};
+  const report = await backfill(options);
+  if (!report.complete) throw new Error('Summary fixture dry-run is incomplete.');
+  const applied = await backfill({...options, write: true, report, approveFingerprint: report.planFingerprint});
+  if (!applied.complete) throw new Error('Summary fixture apply is incomplete.');
+  const verified = await backfill({...options, mode: 'verify'});
+  if (!verified.complete || verified.counts?.set !== 0 || verified.counts?.delete !== 0) {
+    throw new Error('Summary fixture verification failed: incomplete, missing, stale or orphaned projections.');
+  }
+  return {applied: applied.counts, verified: verified.counts};
+};
+
+const activateSummaryFixture = async (run = runBoundedChildProcess) => {
+  const result = await run({
+    command: process.execPath,
+    args: [__filename, '--prepare-manager-summaries'],
+    cwd: frontendRoot,
+    environment: process.env,
+    timeoutMs: SUMMARY_ACTIVATION_TIMEOUT_MS,
+    label: 'Manager summary fixture activation',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Manager summary fixture activation failed.\n${result.stdout || ''}\n${result.stderr || ''}`);
   }
   process.stdout.write(result.stdout || '');
   process.stderr.write(result.stderr || '');
@@ -441,6 +476,9 @@ module.exports = async () => {
     stage = 'catalog-fixture-activation';
     await activateCatalogFixture();
 
+    stage = 'manager-summary-fixture-activation';
+    await activateSummaryFixture();
+
     stage = 'seed-trigger-accounting';
     report.triggerActivity = summarizeTriggerActivity(emulatorLogPath);
     report.measurementWindow.triggerActivityBaseline = report.triggerActivity;
@@ -533,7 +571,23 @@ module.exports = async () => {
 
 module.exports.assertMeasurementTriggerSuppression = assertMeasurementTriggerSuppression;
 module.exports.activateCatalogFixture = activateCatalogFixture;
+module.exports.activateSummaryFixture = activateSummaryFixture;
+module.exports.reconcileSummaryFixture = reconcileSummaryFixture;
 module.exports.fetchStartupResponse = fetchStartupResponse;
 module.exports.summarizeTriggerActivity = summarizeTriggerActivity;
 module.exports.summarizeTriggerActivityText = summarizeTriggerActivityText;
 module.exports.waitForEmulators = waitForEmulators;
+
+if (require.main === module) {
+  (async () => {
+    if (process.argv[2] !== '--prepare-manager-summaries') throw new Error('Unknown setup command.');
+    configureOwnedPerformanceEnvironment({mode: PERFORMANCE_ENVIRONMENT_MODE.OWNED_OVERRIDE});
+    assertPerformanceProject(projectId);
+    const app = initializeApp({projectId}, 'task11-fixture-preparation');
+    try {
+      console.log(JSON.stringify(await reconcileSummaryFixture({db: getFirestore(app)})));
+    } finally {
+      await deleteApp(app);
+    }
+  })().catch((error) => { console.error(error); process.exitCode = 1; });
+}

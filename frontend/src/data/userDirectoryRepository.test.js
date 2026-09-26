@@ -7,6 +7,7 @@ import {
   USER_DIRECTORY_PAGE_SIZE,
 } from './userDirectoryRepository';
 import { __resetRepositoryRuntimeForTests } from './repositoryRuntime';
+import { directorySearchUpperBound } from './userDirectoryQueryFactory';
 import {
   collection,
   documentId,
@@ -74,6 +75,18 @@ describe('userDirectoryRepository', () => {
     expect(query.mock.calls[0][1]).toEqual({
       type: 'orderBy', field: 'normalizedLabel', direction: 'asc',
     });
+  });
+
+  test('prefix bounds cover supplementary Unicode and reject malformed surrogates', () => {
+    for (const [prefix, upper] of [['anna', 'annb'], ['\ud7ff', '\ue000'], ['a\u{10ffff}', 'b'], ['\u{10ffff}', null]]) {
+      expect(directorySearchUpperBound(prefix)).toBe(upper);
+      __buildUserDirectoryQuery({search: prefix});
+      expect(where).toHaveBeenCalledWith('normalizedLabel', '>=', prefix);
+      if (upper) expect(where).toHaveBeenCalledWith('normalizedLabel', '<', upper);
+    }
+    for (const malformed of ['\ud800', 'a\udfff']) {
+      expect(() => __buildUserDirectoryQuery({search: malformed})).toThrow(/Unicode scalar/);
+    }
   });
 
   test('executes the role-indexed real builder and scalar deleted-document cursor', () => {

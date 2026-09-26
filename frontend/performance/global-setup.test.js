@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   activateCatalogFixture,
+  activateSummaryFixture,
+  reconcileSummaryFixture,
   assertMeasurementTriggerSuppression,
   summarizeTriggerActivityText,
   waitForEmulators,
@@ -40,6 +42,55 @@ test('browser setup activates the seeded catalog using the bounded emulator oper
   await assert.rejects(activateCatalogFixture(async () => ({
     status: 1, stderr: 'projection incomplete',
   })), /Catalog fixture activation failed.*projection incomplete/s);
+});
+
+test('summary preparation uses a bounded child and propagates preparation errors', async () => {
+  let call;
+  await activateSummaryFixture(async (input) => { call = input; return {status: 0}; });
+  assert.match(call.args[0], /global-setup\.js$/);
+  assert.equal(call.args[1], '--prepare-manager-summaries');
+  assert.equal(call.timeoutMs, 120_000);
+  await assert.rejects(activateSummaryFixture(async () => ({status: 1, stderr: 'stale approval'})),
+    /Manager summary fixture activation failed.*stale approval/s);
+});
+
+test('summary preparation approves its complete emulator plan then verifies every projection', async () => {
+  const report = {complete: true, planFingerprint: 'fixture-plan'};
+  const calls = [];
+  const results = [report, {complete: true, counts: {set: 200}}, {complete: true, counts: {set: 0, delete: 0, unchanged: 200}}];
+  const db = {};
+  const result = await reconcileSummaryFixture({db, runBackfill: async (options) => {
+    calls.push(options); return results[calls.length - 1];
+  }});
+  assert.deepEqual(calls, [
+    {db, projectId: 'demo-fnd-perf'},
+    {db, projectId: 'demo-fnd-perf', write: true, report, approveFingerprint: 'fixture-plan'},
+    {db, projectId: 'demo-fnd-perf', mode: 'verify'},
+  ]);
+  assert.equal(result.verified.unchanged, 200);
+});
+
+test('summary preparation fails closed for unsafe targets, partial plans, writes and invalid verification', async () => {
+  let calls = 0;
+  await assert.rejects(reconcileSummaryFixture({db: {}, lifecycleProjectId: 'fnd-staging',
+    runBackfill: async () => { calls += 1; }}), /non-demo/);
+  assert.equal(calls, 0);
+  for (const results of [
+    [{complete: false}],
+    [{complete: true}, {complete: false}],
+    [{complete: true}, new Error('stale or failed write')],
+    ...[{complete: false}, {complete: true, counts: {set: 1, delete: 0}},
+      {complete: true, counts: {set: 0, delete: 1}}, {complete: true}]
+      .map((verify) => [{complete: true}, {complete: true}, verify]),
+  ]) {
+    let index = 0;
+    await assert.rejects(reconcileSummaryFixture({db: {}, runBackfill: async () => {
+      const result = results[index++];
+      if (result instanceof Error) throw result;
+      return result;
+    }}), /incomplete|stale|verification failed/);
+    assert.equal(index, results.length);
+  }
 });
 
 test('seed trigger summary allows only bounded readiness activity', () => {
@@ -136,6 +187,25 @@ test('measured Task 05 HTTPS callables never count as background trigger activit
     'europe-west8-task05PrepareConsumable': 1,
     'europe-west8-task05CommitConsumable': 1,
   });
+});
+
+test('Task 11 summary triggers share the readiness budget and remain forbidden during measurement', () => {
+  const triggers = ['europe-west8-syncManagerUserSummary', 'europe-west8-syncManagerUserSummaryShell'];
+  const contents = Array.from({length: 150}, (_, index) => invocation(triggers[index % 2])).join('\n');
+  const baseline = summarizeTriggerActivityText(contents);
+  assert.equal(baseline.backgroundInvocations, 150);
+  assert.deepEqual(baseline.counts, Object.fromEntries(triggers.map((name) => [name, 75])));
+  for (const trigger of triggers) {
+    assert.throws(() => summarizeTriggerActivityText(`${contents}\n${invocation(trigger)}`), (error) => {
+      assert.match(error.message, /produced 151 background invocations/);
+      assert.equal(error.triggerActivity.counts[trigger], 76);
+      return true;
+    });
+    const before = summarizeTriggerActivityText(invocation(trigger));
+    assert.deepEqual(assertMeasurementTriggerSuppression(before, before), {expected: 1, observed: 1});
+    const after = summarizeTriggerActivityText(`${invocation(trigger)}\n${invocation(trigger)}`);
+    assert.throws(() => assertMeasurementTriggerSuppression(before, after), /ran during the measurement window/);
+  }
 });
 
 test('teardown re-enables triggers with the bounded heavy-runtime timeout', async () => {

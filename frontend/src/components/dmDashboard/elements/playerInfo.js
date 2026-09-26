@@ -299,6 +299,7 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
         userId,
         resource: vital,
         mode: "delta",
+        floorAtZero: true,
         value: delta,
         retryKey: ["dm-vital-delta", userId, vital, delta].join(":"),
       });
@@ -400,6 +401,7 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
           userId: vitalDialog.userId,
           resource: vitalDialog.vital,
           mode: "delta",
+          floorAtZero: true,
           value: n,
           retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, n].join(":"),
         });
@@ -1003,9 +1005,9 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
 
 const PlayerInfo = ({ users, loading, error, ...props }) => {
   const [expandedIds, setExpandedIds] = useState(() => new Set());
-  const userIds = users.map((user) => user.id).join('|');
+  const userIds = JSON.stringify(users.map((user) => user.id));
   useEffect(() => {
-    const visible = new Set(userIds.split('|'));
+    const visible = new Set(JSON.parse(userIds));
     setExpandedIds((previous) => {
       const next = new Set([...previous].filter((uid) => visible.has(uid)));
       return next.size === previous.size ? previous : next;

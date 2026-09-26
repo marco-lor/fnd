@@ -1124,12 +1124,16 @@ export const task05UpdateResource = onCall(
     resource: ResourceName;
     mode: "set" | "delta";
     value: number;
+    floorAtZero?: boolean;
     totalValue?: number;
     remainingTurns?: number;
     totalTurns?: number;
   }>) => {
     const resource = request.data?.resource;
     const mode = request.data?.mode;
+    if (request.data?.floorAtZero !== undefined && typeof request.data.floorAtZero !== "boolean") {
+      fail("invalid-argument", "floorAtZero must be a boolean.");
+    }
     if (!RESOURCE_NAMES.has(resource) || !["set", "delta"].includes(mode)) {
       fail("invalid-argument", "A valid resource and mutation mode are required.");
     }
@@ -1156,6 +1160,7 @@ export const task05UpdateResource = onCall(
       const requestedNext = applyResourceMutation(current, mode, request.data?.value);
       if (requestedNext === null) fail("invalid-argument", "Resource value must be finite.");
       let next = requestedNext ?? 0;
+      if (mode === "delta" && request.data.floorAtZero === true) next = Math.max(0, next);
       // Gesture deltas must never revive, exceed, or underflow a barrier when
       // another client changes the authoritative value during a hold.
       if (resource === "barriera" && mode === "delta") {

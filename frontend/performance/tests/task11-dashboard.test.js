@@ -8,7 +8,7 @@ const admin = require('../../functions/node_modules/firebase-admin');
 const {buildDocuments} = require('../../scripts/performance/fixtures');
 const {buildUserDirectoryQuery} = require('../../src/data/userDirectoryQueryFactory');
 const {buildManagerUserSummary, reconcileManagerUserSummary, inspectManagerUserSummary, syncManagerUserSummary, syncManagerUserSummaryShell, maintainManagerSummaryInTransaction, summaryMaintainedInCommit} = require('../../functions/lib/managerUserSummary');
-const {task05AdjustGold, task05UpdateProgression} = require('../../functions/lib/userDataCommands');
+const {task05AdjustGold, task05UpdateProgression, task05UpdateResource} = require('../../functions/lib/userDataCommands');
 const {run: backfill} = require('../../scripts/task11/backfill-manager-summaries');
 
 let env, db;
@@ -70,6 +70,64 @@ test('exact directory query: every player reachable, prefix normalized, cursor s
     await assertFails(sdk.setDoc(sdk.doc(firestore, 'manager_user_summaries/perf-player'), {}));
     await assertFails(sdk.getDocs(sdk.collection(firestore, 'manager_user_summaries')));
   }
+});
+
+test('Unicode prefix queries retain supplementary names, scalar boundaries and tied pagination', async () => {
+  const labels = ['anna', 'anna😀', 'anna😀', 'annb', '\ud7ff', '\ud7ff😀', '\ue000'];
+  const ids = labels.map((_label, index) => `task11-unicode-${index}`);
+  try {
+    await Promise.all(labels.map((normalizedLabel, index) => db.doc(`user_directory/${ids[index]}`).set({
+      schemaVersion: 1, characterId: normalizedLabel, label: normalizedLabel, normalizedLabel, role: 'player',
+    })));
+    for (const [search, expected] of [['anna', ids.slice(0, 3)], ['\ud7ff', ids.slice(4, 6)]]) {
+      for (const uid of ['perf-dm', 'perf-webmaster']) {
+        const reached = [];
+        let next = null;
+        do {
+          const query = buildUserDirectoryQuery({firestore: env.authenticatedContext(uid).firestore(), sdk,
+            role: 'player', search, pageSize: 1, cursor: next});
+          const page = await assertSucceeds(sdk.getDocs(query.target));
+          reached.push(...page.docs.map(({id}) => id));
+          next = page.size ? cursor(page.docs[0], query.queryKey) : null;
+        } while (next);
+        assert.deepEqual(reached, expected);
+      }
+      for (const actor of [env.unauthenticatedContext(), env.authenticatedContext('perf-player')]) {
+        await assertFails(sdk.getDocs(buildUserDirectoryQuery({firestore: actor.firestore(), sdk,
+          role: 'player', search, pageSize: 1}).target));
+      }
+    }
+  } finally {
+    await Promise.all(ids.map((id) => db.doc(`user_directory/${id}`).delete()));
+  }
+});
+
+test('Dashboard resource floors are transactional, optional, concurrent and replay safe', async () => {
+  const target = db.doc('users/perf-player/state/resources');
+  const original = (await target.get()).data();
+  const invoke = (data) => task05UpdateResource.run({auth: {uid: 'perf-dm', token: {}},
+    data: {userId: 'perf-player', mode: 'delta', floorAtZero: true, ...data}});
+  try {
+    for (const resource of ['hp', 'mana', 'essenza']) {
+      await target.set({stats: {[`${resource}Current`]: 2}}, {merge: true});
+      const requests = [0, 1].map((index) => ({resource, value: -5, operationId: `task11-floor-${resource}-${index}`}));
+      const results = await Promise.all(requests.map(invoke));
+      assert.deepEqual(results.map(({appliedDelta}) => appliedDelta).sort((a, b) => a - b), [-2, 0]);
+      assert.equal((await target.get()).get(`stats.${resource}Current`), 0);
+      const revision = (await target.get()).get('revision');
+      await invoke(requests[0]);
+      assert.equal((await target.get()).get('revision'), revision);
+      await assert.rejects(invoke({...requests[0], floorAtZero: false}), /different|reused|payload|operation/i);
+      await invoke({resource, value: -1, floorAtZero: false, operationId: `task11-unfloored-${resource}`});
+      assert.equal((await target.get()).get(`stats.${resource}Current`), -1);
+      const added = await invoke({resource, value: 100, operationId: `task11-floor-add-${resource}`});
+      assert.equal(added.newValue, 99);
+    }
+    await assert.rejects(invoke({resource: 'hp', value: -1, floorAtZero: 'yes', operationId: 'task11-bad-floor'}), /boolean/);
+    await target.set({stats: {barrieraCurrent: 2, barrieraTotal: 3}}, {merge: true});
+    assert.equal((await invoke({resource: 'barriera', value: 9, operationId: 'task11-floor-barrier-up'})).newValue, 3);
+    assert.equal((await invoke({resource: 'barriera', value: -9, operationId: 'task11-floor-barrier-down'})).newValue, 0);
+  } finally { await target.set(original); }
 });
 
 test('real SDK snapshot payload and onSnapshot ownership: 0/1/3 expanded populated users', async () => {
