@@ -343,51 +343,61 @@ test('startup readiness refuses a different demo project before making requests'
   assert.equal(fetchCalls, 0);
 });
 
-test('startup readiness aborts stalled response headers within its hard deadline', async () => {
-  const signals = [];
-  const startedAt = Date.now();
-  await assert.rejects(
-    waitForEmulators({
-      lifecycleProjectId: 'demo-fnd-perf',
-      timeoutMs: 35,
-      requestTimeoutMs: 10,
-      intervalMs: 0,
-      fetchImpl: async (_url, init) => {
-        signals.push(init.signal);
-        return new Promise(() => {});
-      },
-    }),
-    /not ready within 35 ms \(Firebase Emulator Hub startup probe timed out after/
-  );
-  assert.ok(Date.now() - startedAt < 1_000);
-  assert.ok(signals.length >= 1);
-  assert.ok(signals.every(({ aborted }) => aborted));
-});
-
-test('startup readiness aborts a stalled Hub JSON body within its hard deadline', async () => {
-  const signals = [];
-  const startedAt = Date.now();
-  await assert.rejects(
-    waitForEmulators({
-      lifecycleProjectId: 'demo-fnd-perf',
-      timeoutMs: 35,
-      requestTimeoutMs: 10,
-      intervalMs: 0,
-      fetchImpl: async (_url, init) => {
-        signals.push(init.signal);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => new Promise(() => {}),
-        };
-      },
-    }),
-    /not ready within 35 ms \(Firebase Emulator Hub startup probe timed out after/
-  );
-  assert.ok(Date.now() - startedAt < 1_000);
-  assert.ok(signals.length >= 1);
-  assert.ok(signals.every(({ aborted }) => aborted));
-});
+for (const stalledPhase of ['response headers', 'Hub JSON body']) {
+  for (const deadlinePath of ['request timeout', 'between loop and request']) {
+    test(`startup readiness aborts stalled ${stalledPhase}: ${deadlinePath}`, async () => {
+      const signals = [];
+      let currentTime = 0;
+      let crossDeadlineOnNextRead = false;
+      let sleeps = 0;
+      let bodyReads = 0;
+      const startedAt = Date.now();
+      const expectedError = deadlinePath === 'request timeout'
+        ? 'Firebase emulators were not ready within 35 ms (Firebase Emulator Hub startup probe timed out after 10 ms.).'
+        : 'Firebase emulators were not ready within 35 ms (Firebase emulator startup deadline expired.).';
+      await assert.rejects(waitForEmulators({
+        lifecycleProjectId: 'demo-fnd-perf',
+        timeoutMs: 35,
+        requestTimeoutMs: 10,
+        intervalMs: 0,
+        nowImpl: () => {
+          const observed = currentTime;
+          // Return 34 to the loop check, then 35 to nextRequestTimeout.
+          if (crossDeadlineOnNextRead) {
+            currentTime = 35;
+            crossDeadlineOnNextRead = false;
+          }
+          return observed;
+        },
+        sleepImpl: async (delayMs) => {
+          assert.equal(delayMs, 0);
+          sleeps += 1;
+          crossDeadlineOnNextRead = true;
+        },
+        fetchImpl: async (url, init) => {
+          assert.equal(url, 'http://127.0.0.1:4400/emulators');
+          signals.push(init.signal);
+          // Keep the real request timer/abort; control only the outer clock so
+          // event-loop scheduling cannot choose the final diagnostic for us.
+          init.signal.addEventListener('abort', () => {
+            currentTime = deadlinePath === 'request timeout' ? 35 : 34;
+          }, {once: true});
+          if (stalledPhase === 'response headers') return new Promise(() => {});
+          return {ok: true, status: 200, json: async () => {
+            bodyReads += 1;
+            return new Promise(() => {});
+          }};
+        },
+      }), {message: expectedError});
+      assert.ok(Date.now() - startedAt < 1_000);
+      assert.equal(currentTime, 35);
+      assert.equal(signals.length, 1);
+      assert.ok(signals.every(({aborted}) => aborted));
+      assert.equal(bodyReads, stalledPhase === 'Hub JSON body' ? 1 : 0);
+      assert.equal(sleeps, deadlinePath === 'request timeout' ? 0 : 1);
+    });
+  }
+}
 
 test('teardown preserves raw trigger and log evidence when their assertions fail', () => {
   const triggerActivity = {
