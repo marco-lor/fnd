@@ -11,7 +11,7 @@ jest.mock('../../firebaseConfig', () => ({db: {}}));
 jest.mock('../../../data/userDirectoryRepository', () => ({}));
 jest.mock('../../../data/userData/managerSummaryRepository', () => ({}));
 jest.mock('../../../data/userData/userDataRepository', () => ({subscribeUserDomain: jest.fn()}));
-jest.mock('../../../data/userData/userDataCommands', () => ({adjustGold: jest.fn(), updateResource: jest.fn()}));
+jest.mock('../../../data/userData/userDataCommands', () => ({adjustGold: jest.fn(), updateResource: jest.fn(), createUserOperationId: () => 'test-vital-operation'}));
 jest.mock('../../../performance/firestore', () => ({collection: (_db, ...path) => path.join('/'), query: (ref) => ref, orderBy: jest.fn(), limit: jest.fn(), onSnapshot: jest.fn(), getDocs: jest.fn()}));
 jest.mock('./playerInfo/sections/PlayerInfoActionsRow', () => ({users, onAddSpell}) => {
   const uid = users[0].id; mockRenders.set(uid, (mockRenders.get(uid) || 0) + 1);
@@ -51,7 +51,7 @@ test('visible card ownership, max3, unchanged row renders, saves and collapse/un
   await waitFor(() => expect(adjustGold).toHaveBeenCalledWith(expect.objectContaining({userId: 'a', delta: 5})));
   fireEvent.click(screen.getByRole('button', {name: 'Add spell a'}));
   fireEvent.click(screen.getByRole('button', {name: 'Save spell'}));
-  await act(async () => {});
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Save spell'})).not.toBeInTheDocument());
   expect(getDocs).not.toHaveBeenCalled();
   expect(subscribeUserDomain).toHaveBeenCalledTimes(subscriptions);
   for (const button of screen.getAllByRole('button', {name: 'Comprimi'})) fireEvent.click(button);

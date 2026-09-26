@@ -57,8 +57,10 @@ test('legacy deletion claims the same target fence; stale runners cannot publish
   documents.get('user_deletion_jobs/target').leaseExpiresAt = Timestamp.fromMillis(0);
   await assert.rejects(legacy.assertLease(), {code: 'aborted'});
   const replacement = await claimUserDeletion(db, actor, target, id);
+  await assert.rejects(legacy.progress('failed', 0), {code: 'aborted'});
   await assert.rejects(legacy.progress('completed', 5), {code: 'aborted'});
   await replacement.progress('completed', 5);
+  await assert.rejects(replacement.progress('failed', 5), {code: 'aborted'});
 });
 
 test('deletion refuses self, invalid IDs, request rebinding and inactive actor', async () => {
@@ -111,6 +113,23 @@ test('cooperative deadline fences a valid lease and sibling work drains on error
   assert.equal(finished, false);
   settle('drained');
   await assert.rejects(result, /first failed/);
+});
+
+test('deadline failure publishes a retryable receipt and releases the owned claim', async (t) => {
+  const {db, documents} = fakeDb();
+  const start = Date.now();
+  const runner = await claimUserDeletion(db, actor, target, id);
+  t.mock.method(Date, 'now', () => start + 51000);
+  await assert.rejects(runner.step(async () => assert.fail('must not launch')), {code: 'aborted'});
+  await runner.progress('failed', 3);
+  assert.equal((await runner.view()).status, 'failed');
+  assert.equal((await runner.view()).retryable, true);
+  assert.equal(documents.get('user_deletion_jobs/target').leaseExpiresAt.toMillis(), 0);
+  const retry = await claimUserDeletion(db, actor, target, id);
+  assert.equal(retry.run, true);
+  await assert.rejects(runner.progress('failed', 3), {code: 'aborted'});
+  await retry.progress('completed', 5);
+  assert.equal((await retry.view()).status, 'completed');
 });
 
 test('awaited cleanup retries an actual media failure, preserves archives until verified, and supports legacy callers', async (t) => {

@@ -1,7 +1,8 @@
 import { webcrypto } from 'node:crypto';
 import { TextEncoder } from 'node:util';
 import { waitFor } from '@testing-library/react';
-import { deleteAdminUser } from './adminUserOperations';
+import { deleteAdminUser, listAdminUserDeletions, resumeAdminUserDeletion } from './adminUserOperations';
+import { TASK06_OPERATION_INTENT_STORAGE_KEY } from '../functions/backendOperationIntentStore';
 const mockDelete = jest.fn();
 const mockStatus = jest.fn();
 const mockResume = jest.fn();
@@ -56,4 +57,22 @@ test('self deletion makes no request; replay failure uses shared domain resume',
   mockResume.mockResolvedValueOnce({data: {operation: completed}});
   expect(await deleteAdminUser({actorUid: 'actor', userId: 'target'})).toEqual(completed);
   expect(mockResume).toHaveBeenCalledWith({operationId: mockDelete.mock.calls[0][0].operationId});
+});
+
+test('receipts saved before recovery discovery was added are scoped by server ownership', async () => {
+  mockDelete.mockRejectedValue(new Error('connection lost'));
+  await expect(deleteAdminUser({actorUid: 'actor', userId: 'target'})).rejects.toThrow();
+  await expect(deleteAdminUser({actorUid: 'another-actor', userId: 'other-target'})).rejects.toThrow();
+  const operationId = mockDelete.mock.calls[0][0].operationId;
+  const oldStore = JSON.parse(sessionStorage.getItem(TASK06_OPERATION_INTENT_STORAGE_KEY));
+  oldStore.entries.forEach((entry) => { delete entry.actorDigest; });
+  sessionStorage.setItem(TASK06_OPERATION_INTENT_STORAGE_KEY, JSON.stringify(oldStore));
+  mockStatus.mockImplementation(({operationId: requested}) => requested === operationId
+    ? Promise.resolve({data: {kind: 'delete-user', status: 'failed', retryable: true}})
+    : Promise.reject(Object.assign(new Error('not found'), {code: 'functions/not-found'})));
+  expect(await listAdminUserDeletions('actor')).toEqual([{operationId, createdAt: oldStore.entries[0].createdAt}]);
+  mockResume.mockResolvedValueOnce({data: {operation: completed}});
+  await resumeAdminUserDeletion({actorUid: 'actor', operationId});
+  expect(mockResume).toHaveBeenCalledWith({operationId});
+  expect(JSON.parse(sessionStorage.getItem(TASK06_OPERATION_INTENT_STORAGE_KEY)).entries).toHaveLength(1);
 });

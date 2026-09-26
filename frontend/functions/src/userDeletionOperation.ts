@@ -94,9 +94,15 @@ export const claimUserDeletion = async (
     return {run: !completed,
       operation: operationRef ? operationViewFromData(receipt, completed) : null};
   });
+  const checkOwner = (job: admin.firestore.DocumentSnapshot) => {
+    if (job.get("invocationId") !== invocationId || job.get("stage") === "completed") {
+      throw new HttpsError("aborted", "Deletion runner no longer owns the operation.");
+    }
+  };
   const check = (job: admin.firestore.DocumentSnapshot) => {
+    checkOwner(job);
     const lease = job.get("leaseExpiresAt");
-    if (Date.now() >= deadline || job.get("invocationId") !== invocationId ||
+    if (Date.now() >= deadline ||
       !(lease instanceof Timestamp) || lease.toMillis() <= Date.now()) {
       throw new HttpsError("aborted", "Deletion runner lease expired. Retry the operation.");
     }
@@ -113,9 +119,13 @@ export const claimUserDeletion = async (
     processed: number,
     extra: Record<string, unknown> = {}
   ) => db.runTransaction(async (tx) => {
-    check(await tx.get(jobRef));
     const completed = stage === "completed";
     const failed = stage === "failed";
+    const job = await tx.get(jobRef);
+    // A drained runner must release its claim even after its work deadline.
+    // Ownership is checked transactionally so it cannot fail a replacement.
+    if (failed) checkOwner(job);
+    else check(job);
     const terminal = completed || failed;
     const update = {...extra, stage, updatedAt: FieldValue.serverTimestamp(),
       ...(terminal ? {leaseExpiresAt: Timestamp.fromMillis(0)} : {}),

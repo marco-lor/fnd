@@ -113,6 +113,7 @@ const isValidEntry = (entry) => (
   && KIND_PATTERN.test(entry.kind)
   && OPERATION_ID_PATTERN.test(entry.operationId)
   && DIGEST_PATTERN.test(entry.intentDigest)
+  && (entry.actorDigest === undefined || DIGEST_PATTERN.test(entry.actorDigest))
   && Number.isSafeInteger(entry.createdAt)
   && entry.createdAt >= 0
 );
@@ -189,6 +190,7 @@ const acquireIntent = ({
   storage,
   kind,
   intentDigest,
+  actorDigest,
   now,
   createOperationId,
 }) => {
@@ -196,7 +198,13 @@ const acquireIntent = ({
   const existing = entries.find((entry) => (
     entry.kind === kind && entry.intentDigest === intentDigest
   ));
-  if (existing) return existing.operationId;
+  if (existing) {
+    if (!existing.actorDigest) {
+      existing.actorDigest = actorDigest;
+      writeStore(storage, entries);
+    }
+    return existing.operationId;
+  }
   if (entries.length >= MAX_INTENTS) {
     throw new BackendOperationIntentError(
       'Too many unfinished operations are stored in this session.'
@@ -216,6 +224,7 @@ const acquireIntent = ({
       kind,
       operationId,
       intentDigest,
+      actorDigest,
       createdAt: now,
     },
   ]);
@@ -235,6 +244,68 @@ const clearIntent = ({
     && entry.intentDigest === intentDigest
     && entry.operationId === operationId
   )));
+};
+
+const actorDigestFor = (actorUid, cryptoImpl) => {
+  if (typeof actorUid !== 'string' || !actorUid.trim()) {
+    throw new BackendOperationIntentError('An authenticated actor is required for this operation.');
+  }
+  return digestHex({actorUid: actorUid.trim()}, cryptoImpl);
+};
+
+// Enumerate opaque session receipts without needing a deleted directory row or
+// storing the actor/target identity in plaintext. The server still authorizes
+// every status/resume request against the authenticated actor.
+export const listDurableOperationIntents = async ({
+  actorUid, kind, storage, cryptoImpl = globalThis.crypto, now = () => Date.now(),
+  verifyLegacyOwnership, signal,
+}) => {
+  const actorDigest = await actorDigestFor(actorUid, cryptoImpl);
+  const resolvedStorage = resolveStorage(storage);
+  const entries = readStore(resolvedStorage, now());
+  const verified = new Set();
+  if (verifyLegacyOwnership) {
+    for (const entry of entries.filter((candidate) => candidate.kind === kind && !candidate.actorDigest)) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      if (await verifyLegacyOwnership(entry.operationId)) verified.add(entry.operationId);
+    }
+  }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  // Reread after asynchronous verification so an old receipt cannot be
+  // resurrected after another action completed or removed it.
+  const current = readStore(resolvedStorage, now());
+  if (verified.size) {
+    current.forEach((entry) => {
+      if (entry.kind === kind && !entry.actorDigest && verified.has(entry.operationId)) entry.actorDigest = actorDigest;
+    });
+    writeStore(resolvedStorage, current);
+  }
+  return current
+    .filter((entry) => entry.kind === kind && entry.actorDigest === actorDigest)
+    .map(({operationId, createdAt}) => ({operationId, createdAt}));
+};
+
+export const resumeDurableOperationIntent = async ({
+  actorUid, kind, operationId, invoke, storage,
+  cryptoImpl = globalThis.crypto, now = () => Date.now(),
+}) => {
+  const actorDigest = await actorDigestFor(actorUid, cryptoImpl);
+  const resolvedStorage = resolveStorage(storage);
+  const entry = readStore(resolvedStorage, now()).find((candidate) => (
+    candidate.kind === kind && candidate.operationId === operationId
+    && candidate.actorDigest === actorDigest
+  ));
+  if (!entry) throw new BackendOperationIntentError('The recovery receipt is unavailable for this actor.');
+  const result = await invoke(operationId);
+  try {
+    clearIntent({...entry, storage: resolvedStorage, now: now()});
+  } catch (cause) {
+    throw new BackendOperationCommittedError(
+      'The server committed the operation, but its local recovery receipt could not be removed.',
+      {cause, result, operationId}
+    );
+  }
+  return result;
 };
 
 export const runWithDurableOperationIntent = async ({
@@ -280,11 +351,13 @@ export const runWithDurableOperationIntent = async ({
 
   const run = (async () => {
     const intentDigest = await digestHex(canonicalIntent, cryptoImpl);
+    const actorDigest = await actorDigestFor(actorUid, cryptoImpl);
     const resolvedStorage = resolveStorage(storage);
     const operationId = acquireIntent({
       storage: resolvedStorage,
       kind,
       intentDigest,
+      actorDigest,
       now: now(),
       createOperationId,
     });

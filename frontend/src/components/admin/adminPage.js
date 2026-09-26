@@ -6,6 +6,7 @@ import { getCallable } from '../../data/functions/callableRegistry';
 import { deleteAdminUser } from '../../data/userData/adminUserOperations';
 import { normalizeDirectorySearch } from '../../data/userDirectoryQueryFactory';
 import AdminUserRow from './AdminUserRow';
+import AdminDeletionRecovery from './AdminDeletionRecovery';
 
 const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
 const updateUserRole = getCallable('updateUserRole');
@@ -35,6 +36,7 @@ const AdminPage = () => {
   const [confirmation, setConfirmation] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [operation, setOperation] = useState(null);
+  const [deletionRevision, setDeletionRevision] = useState(0);
   const mounted = useRef(false);
   const pageRequest = useRef(0);
   const mutationRevision = useRef(0);
@@ -168,7 +170,10 @@ const AdminPage = () => {
     } finally {
       if (inFlight.current.get(target.id) === controller) {
         inFlight.current.delete(target.id);
-        if (valid(owner, ownerEpoch)) setPending((previous) => ({ ...previous, [target.id]: null }));
+        if (valid(owner, ownerEpoch)) {
+          setPending((previous) => ({ ...previous, [target.id]: null }));
+          setDeletionRevision((previous) => previous + 1);
+        }
       }
     }
   };
@@ -176,6 +181,8 @@ const AdminPage = () => {
   if (!isWebmaster || !actorUid) return <p role="alert">Accesso riservato ai webmaster.</p>;
   return <main className="min-h-screen bg-gray-900 text-white p-8">
     <h1 className="text-3xl font-bold mb-6">Pannello di Amministrazione</h1>
+    <AdminDeletionRecovery key={actorUid} actorUid={actorUid} revision={deletionRevision}
+      onRecovered={() => loadPage(lastRequest.current)} />
     <h2 className="text-2xl mb-4">Gestione Utenti</h2>
     <form className="flex gap-2 mb-4" onSubmit={(event) => {
       event.preventDefault();

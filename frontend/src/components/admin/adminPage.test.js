@@ -13,7 +13,7 @@ let mockAuth = { user: { uid: 'perf-webmaster' }, userData: { role: 'webmaster' 
 jest.mock('../../AuthContext', () => ({ useAuth: () => mockAuth }));
 jest.mock('../../data/configRepository', () => ({ getPossibleLists: async () => ({ ruoli: ['player', 'dm', 'webmaster'] }) }));
 jest.mock('../../data/userData/userDataCommands', () => ({ getAdminUsersPage: jest.fn() }));
-jest.mock('../../data/userData/adminUserOperations', () => ({ deleteAdminUser: jest.fn() }));
+jest.mock('../../data/userData/adminUserOperations', () => ({ deleteAdminUser: jest.fn(), listAdminUserDeletions: async () => [] }));
 jest.mock('../../data/functions/callableRegistry', () => ({ getCallable: () => (...args) => mockRole(...args) }));
 jest.mock('./AdminUserRow', () => {
   const React = require('react');

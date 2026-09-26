@@ -1,5 +1,5 @@
 // frontend/src/components/dmDashboard/elements/playerInfo.js
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
 import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
@@ -40,7 +40,7 @@ import PlayerInfoProfessioniRow from "./playerInfo/sections/PlayerInfoProfession
 import PlayerInfoLingueRow from "./playerInfo/sections/PlayerInfoLingueRow";
 import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow";
 import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
-import { adjustGold, updateResource } from "../../../data/userData/userDataCommands";
+import { adjustGold, updateResource, createUserOperationId } from "../../../data/userData/userDataCommands";
 import { buildManagerResourceTotalOptions } from "../../../data/userData/managerResourceCommands";
 import ManagerActionDialog, { parseIntegerInput } from "./ManagerActionDialog";
 
@@ -99,6 +99,8 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
   const [vitalDialog, setVitalDialog] = useState(null);
   const [vitalDialogError, setVitalDialogError] = useState(null);
   const [vitalDialogBusy, setVitalDialogBusy] = useState(false);
+  const [failedVitalDeltas, setFailedVitalDeltas] = useState([]);
+  const runningVitalDeltas = useRef(new Set());
 
   const refreshUserData = useCallback(() => Promise.resolve(), []);
 
@@ -290,22 +292,26 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
     essenza: { current: "stats.essenzaCurrent", total: "stats.essenzaTotal", label: "Essenza" },
   };
 
-  const adjustVitalDelta = async (userId, vital, delta) => {
-    if (!canEditVitals) return;
-    const u = users.find((x) => x.id === userId);
-    if (!u) return;
+  const runVitalDelta = async (command) => {
+    if (!canEditVitals || runningVitalDeltas.current.has(command.operationId)) return;
+    runningVitalDeltas.current.add(command.operationId);
     try {
-      await updateResource({
-        userId,
-        resource: vital,
-        mode: "delta",
-        floorAtZero: true,
-        value: delta,
-        retryKey: ["dm-vital-delta", userId, vital, delta].join(":"),
-      });
+      await updateResource(command);
+      setFailedVitalDeltas((previous) => previous.filter((entry) => entry.operationId !== command.operationId));
     } catch (e) {
-      console.error("adjustVitalDelta failed", e);
+      setFailedVitalDeltas((previous) => previous.some((entry) => entry.operationId === command.operationId)
+        ? previous : [...previous, command]);
+    } finally {
+      runningVitalDeltas.current.delete(command.operationId);
     }
+  };
+
+  const adjustVitalDelta = (userId, vital, delta) => {
+    if (!canEditVitals || !users.some((entry) => entry.id === userId)) return;
+    // Each click is a new adjustment, even before an earlier response arrives.
+    // Only the explicit retry control reuses this immutable command identity.
+    return runVitalDelta({userId, resource: vital, mode: "delta", floorAtZero: true,
+      value: delta, operationId: createUserOperationId('dm-vital-delta')});
   };
 
   const resetVital = async (userId, vital) => {
@@ -334,6 +340,7 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
     const total = Number(u?.stats?.[`${vital}Total`]) || 0;
     setVitalDialogError(null);
     setVitalDialog({
+      actionId: createUserOperationId('dm-vital-dialog'),
       userId,
       vital,
       kind,
@@ -403,7 +410,7 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
           mode: "delta",
           floorAtZero: true,
           value: n,
-          retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, n].join(":"),
+          retryKey: [vitalDialog.actionId, vitalDialog.vital, n].join(":"),
         });
       }
       setVitalDialog(null);
@@ -579,6 +586,12 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
 
             <div className="mt-4 space-y-4">
               {renderVitals(user)}
+              {failedVitalDeltas.map((command) => <div key={command.operationId} role="alert" className="text-sm text-red-300">
+                Adjustment not confirmed.{' '}
+                <button onClick={() => runVitalDelta(command)} disabled={!canEditVitals} className="underline">
+                  Retry {vitalFieldMap[command.resource].label} {command.value > 0 ? '+' : ''}{command.value}
+                </button>
+              </div>)}
 
               <button
                 type="button"
