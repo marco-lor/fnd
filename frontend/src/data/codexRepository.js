@@ -116,6 +116,21 @@ export const getCodexControl = () => fresh(V2_KEYS.control, 'codex:control:get',
   controlFromSnapshot(await getDoc(controlTarget(V2_KEYS.control)))
 ));
 
+const readCodexSource = async (control, read) => {
+  try {
+    return await read();
+  } catch (error) {
+    if (error?.code !== 'permission-denied') throw error;
+    // Rules may fence the captured source between the control read and the
+    // source read. Reacquire only after an authoritative scope transition;
+    // metadata-only updates cannot explain a denied source. Control failures
+    // propagate, and the enclosing actor-scoped acquisition fences this await.
+    const current = await getCodexControl();
+    if (['source', 'mode', 'generation', 'epoch'].some(key => control[key] !== current[key])) throw stale();
+    throw error;
+  }
+};
+
 export const subscribeCodexControl = observer => subscribeShared({
   metricKey: V2_KEYS.controlSubscribe, instanceKey: 'codex:control:subscribe',
   listen: ({ next, error }) => onSnapshot(controlTarget(V2_KEYS.controlSubscribe), snapshot => {
@@ -176,20 +191,20 @@ export const getCodexCategories = async categoryKeys => {
       return await fresh(V2_KEYS.options, `codex:acquire:${JSON.stringify(categoryKeys)}`, async () => {
         const control = await getCodexControl();
         if (control.source === 'legacy') {
-          const source = await getLegacyForControl(control);
+          const source = await readCodexSource(control, () => getLegacyForControl(control));
           if (!sameControl(control, await getCodexControl())) throw stale();
           return source === null ? null : Object.fromEntries(categoryKeys.filter(key => Object.prototype.hasOwnProperty.call(source, key)).map(key => [key, source[key]]));
         }
         const selected = [];
         let cursor = null;
         do {
-          const page = await getCodexMetadataPage({ control, order: 'source', cursor, pageSize: 50 });
+          const page = await readCodexSource(control, () => getCodexMetadataPage({ control, order: 'source', cursor, pageSize: 50 }));
           selected.push(...page.items.filter(category => categoryKeys.includes(category.legacyKey)));
           cursor = page.cursor;
         } while (cursor);
         const entries = [];
         for (const category of selected) {
-          const value = await getCached({ metricKey: V2_KEYS.options,
+          const value = await readCodexSource(control, () => getCached({ metricKey: V2_KEYS.options,
             instanceKey: `codex:options:${control.generation}:${control.epoch}:${category.id}:${category.revision}`,
             load: async () => {
               const rows = [];
@@ -202,7 +217,7 @@ export const getCodexCategories = async categoryKeys => {
               if (rows.length !== category.itemCount || new Set(rows.map(x => x.legacyKey)).size !== rows.length
                 || (await readCategory(control, category.id)).revision !== category.revision) throw stale();
               return Object.fromEntries(rows.map(item => [item.legacyKey, item.value]));
-            } });
+            } }));
           entries.push([category.legacyKey, value]);
         }
         if (!sameControl(control, await getCodexControl())) throw stale();

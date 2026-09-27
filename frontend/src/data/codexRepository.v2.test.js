@@ -73,6 +73,129 @@ test('a cutover during legacy acquisition cannot publish a stale legacy result',
   expect(await getCodexCategories(['Razze'])).toEqual({ Razze: legacy.Razze });
 });
 
+const permissionDenied = () => Object.assign(new Error('Source read denied'), { code: 'permission-denied' });
+const controlReadCount = () => getDoc.mock.calls.filter(([target]) => target.path === 'utils/codex_control').length;
+const legacyReadCount = () => getDoc.mock.calls.filter(([target]) => target.path === 'utils/codex').length;
+
+test.each(['legacy', 'frozen'])('reacquires v2 when a %s source read is denied by cutover', async mode => {
+  activeState = { ...state, mode, epoch: 0 };
+  const original = getDoc.getMockImplementation();
+  getDoc.mockImplementation(async target => {
+    if (target.path === 'utils/codex') { activeState = state; throw permissionDenied(); }
+    return original(target);
+  });
+  await expect(getCodexCategories(['Razze'])).resolves.toEqual({ Razze: legacy.Razze });
+  expect(legacyReadCount()).toBe(1);
+  expect(getDocs.mock.calls.filter(([target]) => target.path.endsWith('/items'))).toHaveLength(3);
+});
+
+test.each(['metadata', 'items', 'category'])('reacquires legacy when a v2 %s source read is denied by rollback', async deniedSource => {
+  const originalDoc = getDoc.getMockImplementation();
+  const originalQuery = getDocs.getMockImplementation();
+  const rollback = () => { activeState = { ...state, mode: 'legacy', epoch: 2 }; throw permissionDenied(); };
+  getDocs.mockImplementation(target => {
+    if (deniedSource === 'metadata' || (deniedSource === 'items' && target.path.endsWith('/items'))) rollback();
+    return originalQuery(target);
+  });
+  getDoc.mockImplementation(target => {
+    if (deniedSource === 'category' && target.path.startsWith('codex_versions/')) rollback();
+    if (target.path === 'utils/codex') return Promise.resolve(docSnapshot({ Razze: { Restored: 'current rollback value' } }));
+    return originalDoc(target);
+  });
+  await expect(getCodexCategories(['Razze'])).resolves.toEqual({ Razze: { Restored: 'current rollback value' } });
+  expect(legacyReadCount()).toBe(1);
+});
+
+test('reacquires a changed v2 generation without reusing rejected source pages', async () => {
+  const original = getDocs.getMockImplementation();
+  getDocs.mockImplementation(target => {
+    if (target.path.includes('/g1/')) { activeState = { ...state, generation: 'g2', epoch: 2 }; throw permissionDenied(); }
+    return original(target);
+  });
+  await expect(getCodexCategories(['Razze'])).resolves.toEqual({ Razze: legacy.Razze });
+  expect(getDocs.mock.calls.filter(([target]) => target.path.includes('/g1/'))).toHaveLength(1);
+  expect(getDocs.mock.calls.filter(([target]) => target.path.includes('/g2/'))).toHaveLength(4);
+});
+
+test.each([['legacy', false], ['v2', false], ['v2', true]])('unchanged %s source denial is preserved, including metadata-only change=%s', async (mode, metadataOnly) => {
+  const denial = permissionDenied();
+  activeState = { ...state, mode };
+  const original = getDoc.getMockImplementation();
+  getDoc.mockImplementation(target => {
+    if (target.path === 'utils/codex') throw denial;
+    return original(target);
+  });
+  getDocs.mockImplementation(() => {
+    if (metadataOnly) activeState = { ...state, metadataRevision: 2 };
+    throw denial;
+  });
+  await expect(getCodexCategories(['Razze'])).rejects.toBe(denial);
+  expect(getDocs).toHaveBeenCalledTimes(mode === 'legacy' ? 0 : 1);
+  expect(legacyReadCount()).toBe(mode === 'legacy' ? 1 : 0);
+  expect(controlReadCount()).toBe(2);
+});
+
+test('non-permission source failure stays visible without a control recheck', async () => {
+  const failure = Object.assign(new Error('Source unavailable'), { code: 'unavailable' });
+  getDocs.mockRejectedValue(failure);
+  await expect(getCodexCategories(['Razze'])).rejects.toBe(failure);
+  expect(getDocs).toHaveBeenCalledTimes(1);
+  expect(controlReadCount()).toBe(1);
+});
+
+test.each(['permission-denied', 'unavailable'])('control recheck failure %s stays visible without source retry', async code => {
+  const failure = Object.assign(new Error('Control recheck failed'), { code });
+  getDocs.mockRejectedValue(permissionDenied());
+  const original = getDoc.getMockImplementation();
+  getDoc.mockImplementation(target => {
+    if (target.path === 'utils/codex_control' && controlReadCount() > 1) throw failure;
+    return original(target);
+  });
+  await expect(getCodexCategories(['Razze'])).rejects.toBe(failure);
+  expect(getDocs).toHaveBeenCalledTimes(1);
+  expect(controlReadCount()).toBe(2);
+});
+
+test('initial control denial does not trigger a recheck or source read', async () => {
+  const failure = permissionDenied();
+  getDoc.mockRejectedValue(failure);
+  await expect(getCodexCategories(['Razze'])).rejects.toBe(failure);
+  expect(controlReadCount()).toBe(1);
+  expect(getDocs).not.toHaveBeenCalled();
+});
+
+test('repeated source transitions exhaust the existing three-attempt bound', async () => {
+  getDocs.mockImplementation(() => {
+    activeState = { ...activeState, epoch: activeState.epoch + 1, generation: `g${activeState.epoch + 1}` };
+    throw permissionDenied();
+  });
+  await expect(getCodexCategories(['Razze'])).rejects.toMatchObject({ code: 'codex-stale-snapshot' });
+  expect(getDocs).toHaveBeenCalledTimes(3);
+  expect(controlReadCount()).toBe(6);
+});
+
+test('account change during a denied-source control recheck prevents reacquisition', async () => {
+  let release;
+  const original = getDoc.getMockImplementation();
+  getDoc.mockImplementation(target => {
+    if (target.path === 'utils/codex_control' && controlReadCount() > 1) {
+      return new Promise(resolve => { release = () => resolve(docSnapshot({ ...state, generation: 'g2', epoch: 2 })); });
+    }
+    return original(target);
+  });
+  getDocs.mockRejectedValue(permissionDenied());
+  setRepositoryActor('first');
+  const pending = getCodexCategories(['Razze']);
+  pending.catch(() => {});
+  for (let n = 0; n < 60 && !release; n++) await Promise.resolve();
+  expect(release).toBeDefined();
+  setRepositoryActor('second');
+  release();
+  await expect(pending).rejects.toMatchObject({ code: 'repository-session-changed', retryableTransition: false });
+  expect(getDocs).toHaveBeenCalledTimes(1);
+  expect(controlReadCount()).toBe(2);
+});
+
 test('all consumer options traverse every bounded source-order page with no unrelated bodies', async () => {
   expect(await getCodexCategories(['Razze'])).toEqual({ Razze: legacy.Razze });
   const itemCalls = getDocs.mock.calls.filter(([target]) => target.path.endsWith('/items'));
