@@ -5,6 +5,8 @@ import {
   BackendOperationIntentError,
   TASK06_OPERATION_INTENT_STORAGE_KEY,
   runWithDurableOperationIntent,
+  listDurableOperationIntents,
+  resumeDurableOperationIntent,
 } from './backendOperationIntentStore';
 
 const createMemoryStorage = () => {
@@ -48,6 +50,26 @@ const runIntent = (overrides = {}) => runWithDurableOperationIntent({
 });
 
 describe('durable Task 06 operation intents', () => {
+  test('discovers and resumes only the current actor receipts without the original request', async () => {
+    const storage = createMemoryStorage();
+    const context = {storage, cryptoImpl: webcrypto, now: () => 1_750_000_000_000, kind: 'delete-user'};
+    const invoke = jest.fn().mockRejectedValue(new Error('auth deletion failed'));
+    await expect(runIntent({...context, actorUid: 'actor-a', intent: {userId: 'removed-target'}, invoke,
+      createOperationId: () => 'delete-user-recovery-0001'})).rejects.toThrow();
+    await expect(runIntent({...context, actorUid: 'actor-b', invoke,
+      createOperationId: () => 'delete-user-recovery-0002'})).rejects.toThrow();
+    const receipts = await listDurableOperationIntents({...context, actorUid: 'actor-a'});
+    expect(receipts).toEqual([{operationId: 'delete-user-recovery-0001', createdAt: 1_750_000_000_000}]);
+    const resume = jest.fn().mockResolvedValue({status: 'completed'});
+    await expect(resumeDurableOperationIntent({...context, actorUid: 'actor-b', operationId: receipts[0].operationId, invoke: resume})).rejects.toThrow();
+    expect(resume).not.toHaveBeenCalled();
+    await resumeDurableOperationIntent({...context, actorUid: 'actor-a', operationId: receipts[0].operationId, invoke: resume});
+    expect(resume).toHaveBeenCalledWith('delete-user-recovery-0001');
+    expect(await listDurableOperationIntents({...context, actorUid: 'actor-a'})).toEqual([]);
+    expect(storedEntries(storage).map(({operationId}) => operationId)).toEqual(['delete-user-recovery-0002']);
+    expect(storage.values.get(TASK06_OPERATION_INTENT_STORAGE_KEY)).not.toContain('actor-b');
+  });
+
   test('persists the opaque operation ID before invoking and clears on success', async () => {
     const storage = createMemoryStorage();
     const invoke = jest.fn(async (operationId) => {

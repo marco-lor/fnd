@@ -1,4 +1,5 @@
 import {createHash} from "crypto";
+import {normalizeDirectoryLabel} from "./userDirectoryProjection";
 
 export const USER_DATA_SCHEMA_VERSION = 2 as const;
 export const USER_DATA_OPERATION_TTL_DAYS = 30;
@@ -57,6 +58,34 @@ export interface AdminUserListPagination {
   cursor: string | null;
   limit: number;
 }
+export interface AdminUserPageV2 {
+  schemaVersion: 2;
+  search: string;
+  limit: number;
+  cursor: {normalizedLabel: string; uid: string; search: string} | null;
+}
+// With Unicode mode, a valid surrogate pair is one supplementary code point;
+// this range therefore matches only unpaired UTF-16 code units.
+const isUnicodeScalarString = (value: unknown): value is string => (
+  typeof value === "string" && !/[\uD800-\uDFFF]/u.test(value)
+);
+// Use the next Unicode prefix, rather than prefix+U+F8FF, so names containing
+// supplementary-plane characters remain navigable too.
+export const adminSearchUpperBound = (search: string): string | null => {
+  if (!isUnicodeScalarString(search)) {
+    throw new TypeError("search must contain valid Unicode scalar values.");
+  }
+  const points = Array.from(search);
+  while (points.length) {
+    const last = points.pop() as string;
+    const code = last.codePointAt(0) as number;
+    if (code < 0x10ffff) {
+      const successor = code === 0xd7ff ? 0xe000 : code + 1;
+      return points.join("") + String.fromCodePoint(successor);
+    }
+  }
+  return null;
+};
 
 export interface AdminUserListItem {
   id: string;
@@ -68,8 +97,39 @@ export interface AdminUserListItem {
 
 export const normalizeAdminUserListPagination = (
   input: unknown
-): AdminUserListPagination => {
+): AdminUserListPagination | AdminUserPageV2 => {
   const data = asRecord(input);
+  if (data.schemaVersion !== undefined) {
+    if (data.schemaVersion !== 2) {
+      throw new TypeError("Unsupported Admin page schemaVersion.");
+    }
+    if (data.search !== undefined && !isUnicodeScalarString(data.search)) {
+      throw new TypeError("search must be a valid Unicode string.");
+    }
+    const search = normalizeDirectoryLabel(asTrimmedString(data.search));
+    if (search.length > 200) throw new TypeError("search is too long.");
+    const limit = data.limit === undefined ? 10 : data.limit;
+    if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 10) {
+      throw new TypeError("limit must be an integer from 1 to 10.");
+    }
+    let cursor: AdminUserPageV2["cursor"] = null;
+    if (data.cursor !== undefined && data.cursor !== null) {
+      const value = asRecord(data.cursor);
+      if (!isUnicodeScalarString(value.normalizedLabel) ||
+        !isUnicodeScalarString(value.uid) ||
+        !isUnicodeScalarString(value.search) ||
+        value.normalizedLabel.length > 1500 ||
+        value.search !== search ||
+        !isValidFirestoreDocumentId(value.uid) ||
+        value.uid !== asTrimmedString(value.uid) ||
+        !value.normalizedLabel.startsWith(search)) {
+        throw new TypeError("cursor must match the search, label and user ID.");
+      }
+      cursor = {normalizedLabel: value.normalizedLabel,
+        uid: value.uid as string, search};
+    }
+    return {schemaVersion: 2, search, limit: limit as number, cursor};
+  }
   const limit = data.limit === undefined ? 100 : data.limit;
   if (typeof limit !== "number" || !Number.isInteger(limit) ||
     limit < 1 || limit > 100) {
@@ -77,7 +137,7 @@ export const normalizeAdminUserListPagination = (
   }
   if (data.cursor === undefined) return {cursor: null, limit};
   const cursor = asTrimmedString(data.cursor);
-  if (!isValidFirestoreDocumentId(cursor)) {
+  if (!isUnicodeScalarString(cursor) || !isValidFirestoreDocumentId(cursor)) {
     throw new TypeError("cursor must be a valid user document ID.");
   }
   return {cursor, limit};

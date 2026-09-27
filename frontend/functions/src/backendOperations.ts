@@ -42,6 +42,8 @@ import {
   startServerTelemetry,
 } from "./serverTelemetry";
 
+import {maintainManagerSummaryInTransaction} from "./managerUserSummary";
+
 const REGION = "europe-west8";
 const TASK06_CONFIG_PATH = "app_config/task06_backend";
 const OPERATION_COLLECTION = "backend_operations";
@@ -291,6 +293,8 @@ const processLevelUpSubject = async (input: {
   );
   const resourcesRef = db.doc(`users/${input.userId}/state/resources`);
   const utilsRef = db.doc("utils/varie");
+  const settingsRef = db.doc(`users/${input.userId}/state/settings`);
+  const managerSummaryRef = db.doc(`manager_user_summaries/${input.userId}`);
   const subjectRef = input.operationRef.collection("subjects").doc(
     hashValue(["user", input.userId]).slice(0, 48)
   );
@@ -304,6 +308,8 @@ const processLevelUpSubject = async (input: {
       resources,
       utils,
       subject,
+      settings,
+      managerSummary,
     ] = await transaction.getAll(
       input.operationRef,
       actorRef,
@@ -311,7 +317,9 @@ const processLevelUpSubject = async (input: {
       progressionRef,
       resourcesRef,
       utilsRef,
-      subjectRef
+      subjectRef,
+      settingsRef,
+      managerSummaryRef
     );
     if (subject.exists) return "replayed";
     if (!operation.exists || operation.get("status") !== "running") {
@@ -368,18 +376,24 @@ const processLevelUpSubject = async (input: {
       level: toLevel,
       utils: utils.data(),
     });
+    const nextResourceStats = {...asRecord(resources.get("stats")), ...resourceTotals};
+    const summaryMetadata = maintainManagerSummaryInTransaction(
+      transaction, managerSummaryRef, user, managerSummary, {
+        progression: {stats: nextProgressionStats},
+        resources: {stats: nextResourceStats}, settings: settings.data(),
+      }
+    );
     transaction.set(progressionRef, {
       ...stateMetadata(input.actorUid, progression.get("revision")),
+      ...summaryMetadata,
       stats: nextProgressionStats,
       Parametri: nextParametri,
     }, {merge: true});
     if (Object.keys(resourceTotals).length) {
       transaction.set(resourcesRef, {
         ...stateMetadata(input.actorUid, resources.get("revision")),
-        stats: {
-          ...asRecord(resources.get("stats")),
-          ...resourceTotals,
-        },
+        ...summaryMetadata,
+        stats: nextResourceStats,
       }, {merge: true});
     }
     transaction.update(
@@ -414,17 +428,23 @@ const processLockSubject = async (input: {
   const userRef = db.doc(`users/${input.userId}`);
   const actorRef = db.doc(`users/${input.actorUid}`);
   const settingsRef = db.doc(`users/${input.userId}/state/settings`);
+  const progressionRef = db.doc(`users/${input.userId}/state/progression`);
+  const resourcesRef = db.doc(`users/${input.userId}/state/resources`);
+  const managerSummaryRef = db.doc(`manager_user_summaries/${input.userId}`);
   const subjectRef = input.operationRef.collection("subjects").doc(
     hashValue(["settings", input.userId, input.field]).slice(0, 48)
   );
   return db.runTransaction(async (transaction) => {
-    const [operation, actor, user, settings, subject] =
+    const [operation, actor, user, settings, subject, progression, resources, managerSummary] =
       await transaction.getAll(
         input.operationRef,
         actorRef,
         userRef,
         settingsRef,
-        subjectRef
+        subjectRef,
+        progressionRef,
+        resourcesRef,
+        managerSummaryRef
       );
     if (subject.exists) return "replayed";
     if (!operation.exists || operation.get("status") !== "running") {
@@ -445,12 +465,17 @@ const processLockSubject = async (input: {
       incrementProgress(transaction, input.operationRef, "skipped");
       return "new";
     }
+    const nextSettings = {...asRecord(settings.get("settings")), [input.field]: input.value};
+    const summaryMetadata = maintainManagerSummaryInTransaction(
+      transaction, managerSummaryRef, user, managerSummary, {
+        progression: progression.data(), resources: resources.data(),
+        settings: {settings: nextSettings},
+      }
+    );
     transaction.set(settingsRef, {
       ...stateMetadata(input.actorUid, settings.get("revision")),
-      settings: {
-        ...asRecord(settings.get("settings")),
-        [input.field]: input.value,
-      },
+      ...summaryMetadata,
+      settings: nextSettings,
     }, {merge: true});
     createSubject(transaction, subjectRef, "succeeded");
     incrementProgress(transaction, input.operationRef, "succeeded");
@@ -458,64 +483,70 @@ const processLockSubject = async (input: {
   });
 };
 
-const processUserPage = async (input: {
+// The optional dependencies let tests advance the clock at transaction/query
+// boundaries without changing the production budget or subject semantics.
+export const processUserPage = async (input: {
   operation: admin.firestore.DocumentSnapshot;
   operationRef: admin.firestore.DocumentReference;
   receiptId: string;
   kind: "level-up-all" | "set-parameter-locks";
-}): Promise<OperationStepResult> => {
-  const cursor = asTrimmedString(input.operation.get("cursor"));
-  const users = await queryUsersPage(cursor);
-  if (users.empty) {
-    return {
-      done: true,
-      phase: "completed",
-      result: {
-        processedUsers: asFiniteNumber(
-          input.operation.get("progress.processed")
-        ),
-      },
-    };
-  }
+}, dependencies: {
+  now?: () => number;
+  queryPage?: typeof queryUsersPage;
+  processSubject?: (userId: string) => Promise<SubjectResult>;
+} = {}): Promise<OperationStepResult> => {
+  const now = dependencies.now ?? Date.now;
+  const queryPage = dependencies.queryPage ?? queryUsersPage;
+  // One deadline for the whole step, never reset at a query boundary.
+  const deadline = now() + BACKEND_OPERATION_STEP_BUDGET_MS;
+  let cursor = asTrimmedString(input.operation.get("cursor"));
+  let processedAny = false;
   const actorUid = asTrimmedString(input.operation.get("actorUid"));
   const operationInput = asRecord(input.operation.get("input"));
-  let paused = false;
-  let lastProcessedCursor = cursor;
-  const deadline = Date.now() + BACKEND_OPERATION_STEP_BUDGET_MS;
-  for (const user of users.docs) {
-    if (
-      lastProcessedCursor !== cursor &&
-      Date.now() >= deadline
-    ) break;
-    const result = input.kind === "level-up-all"
-      ? await processLevelUpSubject({
-        actorUid,
-        operationRef: input.operationRef,
-        receiptId: input.receiptId,
-        userId: user.id,
+  const processSubject = dependencies.processSubject ?? ((userId: string) => (
+    input.kind === "level-up-all"
+      ? processLevelUpSubject({
+        actorUid, operationRef: input.operationRef,
+        receiptId: input.receiptId, userId,
       })
-      : await processLockSubject({
-        actorUid,
-        operationRef: input.operationRef,
-        userId: user.id,
+      : processLockSubject({
+        actorUid, operationRef: input.operationRef, userId,
         field: asTrimmedString(operationInput.field),
         value: operationInput.value === true,
-      });
-    if (result === "paused") {
-      paused = true;
-      break;
+      })
+  ));
+  while (!processedAny || now() < deadline) {
+    // Query and retained page size stay bounded at WORKER_PAGE_SIZE (100).
+    const users = await queryPage(cursor);
+    if (users.empty) {
+      const latest = await input.operationRef.get();
+      return {done: true, phase: "completed", result: {
+        processedUsers: asFiniteNumber(latest.get("progress.processed")),
+      }};
     }
-    lastProcessedCursor = user.id;
-  }
-  if (lastProcessedCursor !== cursor) {
-    await input.operationRef.update({
-      cursor: lastProcessedCursor,
-      phase: "mutate",
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  }
-  if (paused) {
-    return {done: false, phase: "paused", paused: true};
+    let paused = false;
+    let lastProcessedCursor = cursor;
+    for (const user of users.docs) {
+      if (processedAny && now() >= deadline) break;
+      const result = await processSubject(user.id);
+      if (result === "paused") {
+        paused = true;
+        break;
+      }
+      processedAny = true;
+      lastProcessedCursor = user.id;
+    }
+    if (lastProcessedCursor !== cursor) {
+      // Checkpoint complete AND partial pages. A crash before this checkpoint
+      // replays committed subject receipts; it cannot grant points twice.
+      await input.operationRef.update({
+        cursor: lastProcessedCursor,
+        phase: "mutate",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      cursor = lastProcessedCursor;
+    }
+    if (paused) return {done: false, phase: "paused", paused: true};
   }
   return {done: false, phase: "mutate"};
 };
@@ -1203,6 +1234,16 @@ export const getBackendOperationStatus = onCall(
     if (!operation.exists || operation.get("actorUid") !== actorUid) {
       throw new HttpsError("not-found", "Operation not found.");
     }
+    if (operation.get("kind") === "delete-user") {
+      const [actor, deletionJob] = await admin.firestore().getAll(
+        admin.firestore().doc(`users/${actorUid}`),
+        admin.firestore().doc(`user_deletion_jobs/${actorUid}`)
+      );
+      if (!actor.exists || actor.get("role") !== "webmaster" ||
+        actor.get("deletionState") === "pending" || deletionJob.exists) {
+        throw new HttpsError("permission-denied", "Active webmaster required.");
+      }
+    }
     return operationViewFromData(operation.data());
   }
 );
@@ -1223,6 +1264,16 @@ export const resumeBackendOperation = onCall(
     const db = admin.firestore();
     const receiptId = backendOperationReceiptId(actorUid, operationId);
     const operationRef = operationRefFor(db, receiptId);
+    // User deletion owns its awaited, leased cleanup runner. Never enqueue it
+    // into the generic bulk scheduler or alter other operation kinds here.
+    const domainOperation = await operationRef.get();
+    if (domainOperation.get("kind") === "delete-user" &&
+      domainOperation.get("actorUid") === actorUid) {
+      const {deleteUserHandler} = await import("./deleteUser.js");
+      return deleteUserHandler({...request, data: {
+        operationId, userId: domainOperation.get("targetUid"),
+      }});
+    }
     const configRef = db.doc(TASK06_CONFIG_PATH);
     return db.runTransaction(async (transaction) => {
       const [operation, actor, configSnapshot] = await transaction.getAll(

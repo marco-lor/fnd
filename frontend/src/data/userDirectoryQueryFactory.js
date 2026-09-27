@@ -8,6 +8,19 @@ const USER_DIRECTORY_QUERY_KEYS = Object.freeze({
   }),
 });
 const ALLOWED_ROLES = new Set(['player', 'dm', 'webmaster']);
+const normalizeDirectorySearch = (value = '') => String(value).normalize('NFKD')
+  .replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const directorySearchUpperBound = (search) => {
+  if (typeof search !== 'string' || /[\uD800-\uDFFF]/u.test(search)) {
+    throw new TypeError('search must contain valid Unicode scalar values.');
+  }
+  const points = Array.from(search);
+  while (points.length) {
+    const code = points.pop().codePointAt(0);
+    if (code < 0x10ffff) return points.join('') + String.fromCodePoint(code === 0xd7ff ? 0xe000 : code + 1);
+  }
+  return null;
+};
 
 const normalizeRole = (role) => {
   if (role === null || role === undefined) return null;
@@ -49,6 +62,7 @@ const buildUserDirectoryQuery = ({
   role = null,
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
+  search = '',
   sdk,
 } = {}) => {
   if (!firestore) throw new TypeError('Directory queries require a Firestore instance.');
@@ -57,9 +71,13 @@ const buildUserDirectoryQuery = ({
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > USER_DIRECTORY_PAGE_SIZE) {
     throw new TypeError(`Directory pageSize must be between 1 and ${USER_DIRECTORY_PAGE_SIZE}.`);
   }
-  const queryKey = queryKeyForRole(normalizedRole);
+  const normalizedSearch = normalizeDirectorySearch(search);
+  const queryKey = queryKeyForRole(normalizedRole) + (normalizedSearch ? `:search:${normalizedSearch}` : '');
   const constraints = [];
   if (normalizedRole !== null) constraints.push(sdk.where('role', '==', normalizedRole));
+  const upperBound = directorySearchUpperBound(normalizedSearch);
+  if (normalizedSearch) constraints.push(sdk.where('normalizedLabel', '>=', normalizedSearch));
+  if (upperBound) constraints.push(sdk.where('normalizedLabel', '<', upperBound));
   constraints.push(
     sdk.orderBy('normalizedLabel', 'asc'),
     sdk.orderBy(sdk.documentId(), 'asc')
@@ -71,6 +89,7 @@ const buildUserDirectoryQuery = ({
   return {
     queryKey,
     role: normalizedRole,
+    search: normalizedSearch,
     target: sdk.query(sdk.collection(firestore, 'user_directory'), ...constraints),
   };
 };
@@ -79,4 +98,6 @@ module.exports = {
   USER_DIRECTORY_PAGE_SIZE,
   USER_DIRECTORY_QUERY_KEYS,
   buildUserDirectoryQuery,
+  normalizeDirectorySearch,
+  directorySearchUpperBound,
 };

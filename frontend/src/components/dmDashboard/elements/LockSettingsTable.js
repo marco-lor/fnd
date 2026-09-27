@@ -1,5 +1,5 @@
 // frontend/src/components/dmDashboard/elements/LockSettingsTable.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { auth } from '../../firebaseConfig';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock, faLockOpen } from '@fortawesome/free-solid-svg-icons';
@@ -13,6 +13,49 @@ import {
 import { updateUserSettings } from '../../../data/userData/userDataCommands';
 
 const setAllParameterLocks = getCallable('setAllParameterLocks');
+
+const sameHeader = (a, b) => a.id === b.id && a.characterId === b.characterId && a.label === b.label && a.email === b.email
+  && ['level', 'basePointsAvailable', 'basePointsSpent', 'combatTokensAvailable', 'combatTokensSpent'].every((key) => a.stats?.[key] === b.stats?.[key]);
+const LockUserHeader = React.memo(({ user }) => {
+              const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
+              const bSpent = Number(user?.stats?.basePointsSpent) || 0;
+              const bTot = bAvail + bSpent;
+              const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
+              const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
+              const cTot = cAvail + cSpent;
+              return (
+                <th key={user.id} className="border border-gray-600 px-3 py-2 align-top">
+                  <div className="flex flex-col items-center gap-1 min-w-[12.5rem]">
+                    <div className="text-sm font-medium">
+                      {user.characterId || user.label || user.email || 'Unknown User'}
+                    </div>
+                    <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
+                    <div className="mt-1 flex items-center gap-1 text-[11px]">
+                      <span className="text-slate-400/80">Base</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px]">
+                      <span className="text-slate-400/80">Combat</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
+                    </div>
+                  </div>
+                </th>
+              );
+}, (previous, next) => sameHeader(previous.user, next.user));
+const LockUserCell = React.memo(({ uid, label, field, locked, disabled, onToggle }) => (
+  <td className="border border-gray-600 px-4 py-2 text-center">
+    <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggle(uid, field); }}
+      disabled={disabled} className="focus:outline-none"
+      aria-label={`${locked ? 'Unlock' : 'Lock'} ${field} parameters for ${label}`}
+      title={`${locked ? 'Unlock' : 'Lock'} ${field} parameters for ${label}`}>
+      <FontAwesomeIcon icon={locked ? faLock : faLockOpen} className={locked ? 'text-red-500' : 'text-green-500'} />
+    </button>
+  </td>
+));
 
 // Displays and manages per-user and bulk lock toggles for base and combat parameters.
 // Only this table re-renders when toggling, keeping the rest of the dashboard stable.
@@ -74,6 +117,10 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
     }
   };
 
+  const toggleRef = useRef(toggleOne);
+  toggleRef.current = toggleOne;
+  const stableToggle = useCallback((...args) => toggleRef.current(...args), []);
+
   const toggleAll = async (fieldKey) => {
     if (!canEdit || !users.length) return;
     const allLocked = users.every((u) => !!lockMap?.[u.id]?.[fieldKey]);
@@ -111,36 +158,7 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
         <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
           <tr className="text-slate-100">
             <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Setting</th>
-            {users.map((user) => {
-              const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
-              const bSpent = Number(user?.stats?.basePointsSpent) || 0;
-              const bTot = bAvail + bSpent;
-              const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
-              const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
-              const cTot = cAvail + cSpent;
-              return (
-                <th key={user.id} className="border border-gray-600 px-3 py-2 align-top">
-                  <div className="flex flex-col items-center gap-1 min-w-[12.5rem]">
-                    <div className="text-sm font-medium">
-                      {user.characterId || user.email || 'Unknown User'}
-                    </div>
-                    <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
-                    <div className="mt-1 flex items-center gap-1 text-[11px]">
-                      <span className="text-slate-400/80">Base</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
-                    </div>
-                    <div className="flex items-center gap-1 text-[11px]">
-                      <span className="text-slate-400/80">Combat</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
-                    </div>
-                  </div>
-                </th>
-              );
-            })}
+            {users.map((user) => <LockUserHeader key={user.id} user={user} />)}
           </tr>
         </thead>
         <tbody>
@@ -164,23 +182,9 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
                 </button>
               </div>
             </td>
-            {users.map((user) => (
-              <td key={`${user.id}-base`} className="border border-gray-600 px-4 py-2 text-center">
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleOne(user.id, 'base'); }}
-                  disabled={!canEdit || pending.has(user.id)}
-                  className="focus:outline-none"
-                  aria-label={`${lockMap?.[user.id]?.base ? 'Unlock' : 'Lock'} base parameters for ${user.characterId || user.email || 'Unknown User'}`}
-                  title={`${lockMap?.[user.id]?.base ? 'Unlock' : 'Lock'} base parameters for ${user.characterId || user.email || 'Unknown User'}`}
-                >
-                  <FontAwesomeIcon
-                    icon={lockMap?.[user.id]?.base ? faLock : faLockOpen}
-                    className={lockMap?.[user.id]?.base ? 'text-red-500' : 'text-green-500'}
-                  />
-                </button>
-              </td>
-            ))}
+            {users.map((user) => <LockUserCell key={`${user.id}-base`} uid={user.id}
+              label={user.characterId || user.label || user.email || 'Unknown User'} field="base"
+              locked={!!lockMap?.[user.id]?.base} disabled={!canEdit || pending.has(user.id)} onToggle={stableToggle} />)}
           </tr>
           <tr>
             <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">
@@ -202,28 +206,16 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
                 </button>
               </div>
             </td>
-            {users.map((user) => (
-              <td key={`${user.id}-combat`} className="border border-gray-600 px-4 py-2 text-center">
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleOne(user.id, 'combat'); }}
-                  disabled={!canEdit || pending.has(user.id)}
-                  className="focus:outline-none"
-                  aria-label={`${lockMap?.[user.id]?.combat ? 'Unlock' : 'Lock'} combat parameters for ${user.characterId || user.email || 'Unknown User'}`}
-                  title={`${lockMap?.[user.id]?.combat ? 'Unlock' : 'Lock'} combat parameters for ${user.characterId || user.email || 'Unknown User'}`}
-                >
-                  <FontAwesomeIcon
-                    icon={lockMap?.[user.id]?.combat ? faLock : faLockOpen}
-                    className={lockMap?.[user.id]?.combat ? 'text-red-500' : 'text-green-500'}
-                  />
-                </button>
-              </td>
-            ))}
+            {users.map((user) => <LockUserCell key={`${user.id}-combat`} uid={user.id}
+              label={user.characterId || user.label || user.email || 'Unknown User'} field="combat"
+              locked={!!lockMap?.[user.id]?.combat} disabled={!canEdit || pending.has(user.id)} onToggle={stableToggle} />)}
           </tr>
         </tbody>
       </table>
     </div>
   );
-});
+}, (previous, next) => previous.canEdit === next.canEdit && previous.users.length === next.users.length
+  && previous.users.every((user, index) => sameHeader(user, next.users[index])
+    && ['lock_param_base', 'lock_param_combat'].every((key) => user.settings?.[key] === next.users[index].settings?.[key])));
 
 export default LockSettingsTable;

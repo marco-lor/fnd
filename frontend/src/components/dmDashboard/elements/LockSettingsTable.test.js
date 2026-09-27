@@ -4,6 +4,9 @@ import LockSettingsTable from './LockSettingsTable';
 import { updateUserSettings } from '../../../data/userData/userDataCommands';
 import { callBackendOperationAndWait } from '../../../data/functions/backendOperationClient';
 import { runWithDurableOperationIntent } from '../../../data/functions/backendOperationIntentStore';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+
+jest.mock('@fortawesome/react-fontawesome', () => ({FontAwesomeIcon: jest.fn(() => <span />)}));
 
 jest.mock('../../firebaseConfig', () => ({
   auth: { currentUser: { uid: 'dm-1' } },
@@ -43,6 +46,12 @@ const users = [{
 }];
 
 describe('LockSettingsTable Task05 commands', () => {
+  test('unrelated resource revisions do not rerender lock cells', () => {
+    const view = render(<LockSettingsTable users={users} canEdit />);
+    const renders = FontAwesomeIcon.mock.calls.length;
+    view.rerender(<LockSettingsTable users={[{...users[0], stats: {...users[0].stats, gold: 30}}]} canEdit />);
+    expect(FontAwesomeIcon).toHaveBeenCalledTimes(renders);
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     runWithDurableOperationIntent.mockImplementation(({ invoke }) => (

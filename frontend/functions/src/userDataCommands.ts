@@ -21,6 +21,7 @@ import {
   asFiniteNumber,
   asRecord,
   asTrimmedString,
+  adminSearchUpperBound,
   buildAdminUserListItem,
   canListPrivateUserLabels,
   normalizeAdminUserListPagination,
@@ -367,7 +368,7 @@ type CharacterCreationAction =
 
 export const task05ListAdminUsers = onCall(
   {region: REGION},
-  async (request: CallableRequest<{cursor?: string; limit?: number}>) => {
+  async (request: CallableRequest<Record<string, unknown>>) => {
     assertPayloadSize(request.data);
     const actorUid = requireActor(request);
     const pagination = (() => {
@@ -386,10 +387,25 @@ export const task05ListAdminUsers = onCall(
     }
 
     const directory = db.collection("user_directory");
-    let query: admin.firestore.Query = directory
-      .orderBy(FieldPath.documentId());
-    if (pagination.cursor) {
-      query = query.startAfter(directory.doc(pagination.cursor));
+    let query: admin.firestore.Query;
+    if ("schemaVersion" in pagination) {
+      query = directory.orderBy("normalizedLabel")
+        .orderBy(FieldPath.documentId());
+      if (pagination.search) {
+        query = query.where("normalizedLabel", ">=", pagination.search);
+        const upper = adminSearchUpperBound(pagination.search);
+        if (upper) query = query.where("normalizedLabel", "<", upper);
+      }
+      if (pagination.cursor) {
+        query = query.startAfter(
+          pagination.cursor.normalizedLabel, pagination.cursor.uid
+        );
+      }
+    } else {
+      query = directory.orderBy(FieldPath.documentId());
+      if (pagination.cursor) {
+        query = query.startAfter(directory.doc(pagination.cursor));
+      }
     }
     const snapshot = await query.limit(pagination.limit + 1).get();
     const hasMore = snapshot.docs.length > pagination.limit;
@@ -414,7 +430,11 @@ export const task05ListAdminUsers = onCall(
           document.data()
         )),
       cursor: hasMore && pageDocs.length > 0 ?
-        pageDocs[pageDocs.length - 1].id : null,
+        ("schemaVersion" in pagination ? {
+          normalizedLabel: pageDocs[pageDocs.length - 1].get("normalizedLabel"),
+          uid: pageDocs[pageDocs.length - 1].id,
+          search: pagination.search,
+        } : pageDocs[pageDocs.length - 1].id) : null,
       hasMore,
     };
   }
@@ -1104,12 +1124,16 @@ export const task05UpdateResource = onCall(
     resource: ResourceName;
     mode: "set" | "delta";
     value: number;
+    floorAtZero?: boolean;
     totalValue?: number;
     remainingTurns?: number;
     totalTurns?: number;
   }>) => {
     const resource = request.data?.resource;
     const mode = request.data?.mode;
+    if (request.data?.floorAtZero !== undefined && typeof request.data.floorAtZero !== "boolean") {
+      fail("invalid-argument", "floorAtZero must be a boolean.");
+    }
     if (!RESOURCE_NAMES.has(resource) || !["set", "delta"].includes(mode)) {
       fail("invalid-argument", "A valid resource and mutation mode are required.");
     }
@@ -1136,6 +1160,7 @@ export const task05UpdateResource = onCall(
       const requestedNext = applyResourceMutation(current, mode, request.data?.value);
       if (requestedNext === null) fail("invalid-argument", "Resource value must be finite.");
       let next = requestedNext ?? 0;
+      if (mode === "delta" && request.data.floorAtZero === true) next = Math.max(0, next);
       // Gesture deltas must never revive, exceed, or underflow a barrier when
       // another client changes the authoritative value during a hold.
       if (resource === "barriera" && mode === "delta") {
@@ -2356,10 +2381,14 @@ export const task05UpdateProfileContent = onCall(
 
 export const task05UpdateProgression = onCall(
   {region: REGION},
-  async (request: CallableRequest<BaseCommand & {patch: UnknownRecord}>) => {
+  async (request: CallableRequest<BaseCommand & {patch?: UnknownRecord; combatTokenDelta?: number}>) => {
     const patch = asRecord(request.data?.patch);
+    const delta = request.data?.combatTokenDelta;
+    if (delta !== undefined && (!Number.isSafeInteger(delta) || delta === 0 || Object.keys(patch).length)) {
+      fail("invalid-argument", "Supply one nonzero integer combat-token delta without a patch.");
+    }
     if (
-      !Object.keys(patch).length ||
+      (delta === undefined && !Object.keys(patch).length) ||
       Object.keys(patch).some((key) => !PROGRESSION_KEYS.has(key))
     ) {
       fail("invalid-argument", "The progression patch is invalid.");
@@ -2375,7 +2404,7 @@ export const task05UpdateProgression = onCall(
         context.actorUid,
         context.targetUid
       );
-      const statsPatch = asRecord(patch.stats);
+      const statsPatch = delta === undefined ? asRecord(patch.stats) : {combatTokensAvailable: delta};
       if (hasAnyOwnField(statsPatch, RESOURCE_FIELDS)) {
         fail(
           "invalid-argument",
@@ -2406,8 +2435,13 @@ export const task05UpdateProgression = onCall(
         progressionRef,
         utilsRef
       );
+      const nextTokens = asFiniteNumber(progression.get("stats.combatTokensAvailable"), 0) + (delta || 0);
+      if (delta !== undefined && !Number.isSafeInteger(nextTokens)) {
+        fail("invalid-argument", "The resulting combat-token count is invalid.");
+      }
+      const effectivePatch = delta === undefined ? patch : {stats: {combatTokensAvailable: nextTokens}};
       const mergedPatch: UnknownRecord = Object.fromEntries(Object.entries(
-        patch
+        effectivePatch
       ).map(
         ([key, value]) => [
           key,

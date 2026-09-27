@@ -1,5 +1,8 @@
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {FieldValue} from "firebase-admin/firestore";
+import {assertActiveCaller} from "./callerAuthorization";
+import {isValidFirestoreDocumentId} from "./userDataV2";
 
 type UpdateUserRolePayload = {
   userId: string;
@@ -33,7 +36,7 @@ export const updateUserRole = onCall(
 
     const targetUserId = asNonEmptyString(request.data?.userId);
     const nextRole = normalizeRole(request.data?.role);
-    if (!targetUserId || !ALLOWED_ROLES.has(nextRole)) {
+    if (!isValidFirestoreDocumentId(targetUserId) || !ALLOWED_ROLES.has(nextRole)) {
       throw new HttpsError(
         "invalid-argument",
         "A valid userId and role are required."
@@ -52,11 +55,16 @@ export const updateUserRole = onCall(
     const auditRef = db.collection("security_audit").doc();
 
     await db.runTransaction(async (tx) => {
-      const [callerSnap, targetSnap] = await Promise.all([
+      const [callerSnap, targetSnap, callerJob, targetJob] = await Promise.all([
         tx.get(callerRef),
         tx.get(targetRef),
+        tx.get(db.doc(`user_deletion_jobs/${callerUid}`)),
+        tx.get(db.doc(`user_deletion_jobs/${targetUserId}`)),
       ]);
-
+      assertActiveCaller(callerSnap);
+      if (callerJob.exists) {
+        throw new HttpsError("permission-denied", "Caller is pending deletion.");
+      }
       if (!callerSnap.exists || callerSnap.get("role") !== "webmaster") {
         throw new HttpsError(
           "permission-denied",
@@ -66,11 +74,14 @@ export const updateUserRole = onCall(
       if (!targetSnap.exists) {
         throw new HttpsError("not-found", "Target user not found.");
       }
+      if (targetSnap.get("deletionState") === "pending" || targetJob.exists) {
+        throw new HttpsError("failed-precondition", "Target is pending deletion.");
+      }
 
       const previousRole = normalizeRole(targetSnap.get("role")) || "player";
       tx.update(targetRef, {
         role: nextRole,
-        roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        roleUpdatedAt: FieldValue.serverTimestamp(),
         roleUpdatedBy: callerUid,
       });
       tx.set(auditRef, {
@@ -79,7 +90,7 @@ export const updateUserRole = onCall(
         targetUid: targetUserId,
         previousRole,
         nextRole,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       });
     });
 

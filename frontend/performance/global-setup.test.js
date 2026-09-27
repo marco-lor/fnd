@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   activateCatalogFixture,
+  activateSummaryFixture,
+  reconcileSummaryFixture,
   assertMeasurementTriggerSuppression,
   summarizeTriggerActivityText,
   waitForEmulators,
@@ -40,6 +42,55 @@ test('browser setup activates the seeded catalog using the bounded emulator oper
   await assert.rejects(activateCatalogFixture(async () => ({
     status: 1, stderr: 'projection incomplete',
   })), /Catalog fixture activation failed.*projection incomplete/s);
+});
+
+test('summary preparation uses a bounded child and propagates preparation errors', async () => {
+  let call;
+  await activateSummaryFixture(async (input) => { call = input; return {status: 0}; });
+  assert.match(call.args[0], /global-setup\.js$/);
+  assert.equal(call.args[1], '--prepare-manager-summaries');
+  assert.equal(call.timeoutMs, 120_000);
+  await assert.rejects(activateSummaryFixture(async () => ({status: 1, stderr: 'stale approval'})),
+    /Manager summary fixture activation failed.*stale approval/s);
+});
+
+test('summary preparation approves its complete emulator plan then verifies every projection', async () => {
+  const report = {complete: true, planFingerprint: 'fixture-plan'};
+  const calls = [];
+  const results = [report, {complete: true, counts: {set: 200}}, {complete: true, counts: {set: 0, delete: 0, unchanged: 200}}];
+  const db = {};
+  const result = await reconcileSummaryFixture({db, runBackfill: async (options) => {
+    calls.push(options); return results[calls.length - 1];
+  }});
+  assert.deepEqual(calls, [
+    {db, projectId: 'demo-fnd-perf'},
+    {db, projectId: 'demo-fnd-perf', write: true, report, approveFingerprint: 'fixture-plan'},
+    {db, projectId: 'demo-fnd-perf', mode: 'verify'},
+  ]);
+  assert.equal(result.verified.unchanged, 200);
+});
+
+test('summary preparation fails closed for unsafe targets, partial plans, writes and invalid verification', async () => {
+  let calls = 0;
+  await assert.rejects(reconcileSummaryFixture({db: {}, lifecycleProjectId: 'fnd-staging',
+    runBackfill: async () => { calls += 1; }}), /non-demo/);
+  assert.equal(calls, 0);
+  for (const results of [
+    [{complete: false}],
+    [{complete: true}, {complete: false}],
+    [{complete: true}, new Error('stale or failed write')],
+    ...[{complete: false}, {complete: true, counts: {set: 1, delete: 0}},
+      {complete: true, counts: {set: 0, delete: 1}}, {complete: true}]
+      .map((verify) => [{complete: true}, {complete: true}, verify]),
+  ]) {
+    let index = 0;
+    await assert.rejects(reconcileSummaryFixture({db: {}, runBackfill: async () => {
+      const result = results[index++];
+      if (result instanceof Error) throw result;
+      return result;
+    }}), /incomplete|stale|verification failed/);
+    assert.equal(index, results.length);
+  }
 });
 
 test('seed trigger summary allows only bounded readiness activity', () => {
@@ -136,6 +187,25 @@ test('measured Task 05 HTTPS callables never count as background trigger activit
     'europe-west8-task05PrepareConsumable': 1,
     'europe-west8-task05CommitConsumable': 1,
   });
+});
+
+test('Task 11 summary triggers share the readiness budget and remain forbidden during measurement', () => {
+  const triggers = ['europe-west8-syncManagerUserSummary', 'europe-west8-syncManagerUserSummaryShell'];
+  const contents = Array.from({length: 150}, (_, index) => invocation(triggers[index % 2])).join('\n');
+  const baseline = summarizeTriggerActivityText(contents);
+  assert.equal(baseline.backgroundInvocations, 150);
+  assert.deepEqual(baseline.counts, Object.fromEntries(triggers.map((name) => [name, 75])));
+  for (const trigger of triggers) {
+    assert.throws(() => summarizeTriggerActivityText(`${contents}\n${invocation(trigger)}`), (error) => {
+      assert.match(error.message, /produced 151 background invocations/);
+      assert.equal(error.triggerActivity.counts[trigger], 76);
+      return true;
+    });
+    const before = summarizeTriggerActivityText(invocation(trigger));
+    assert.deepEqual(assertMeasurementTriggerSuppression(before, before), {expected: 1, observed: 1});
+    const after = summarizeTriggerActivityText(`${invocation(trigger)}\n${invocation(trigger)}`);
+    assert.throws(() => assertMeasurementTriggerSuppression(before, after), /ran during the measurement window/);
+  }
 });
 
 test('teardown re-enables triggers with the bounded heavy-runtime timeout', async () => {
@@ -273,51 +343,61 @@ test('startup readiness refuses a different demo project before making requests'
   assert.equal(fetchCalls, 0);
 });
 
-test('startup readiness aborts stalled response headers within its hard deadline', async () => {
-  const signals = [];
-  const startedAt = Date.now();
-  await assert.rejects(
-    waitForEmulators({
-      lifecycleProjectId: 'demo-fnd-perf',
-      timeoutMs: 35,
-      requestTimeoutMs: 10,
-      intervalMs: 0,
-      fetchImpl: async (_url, init) => {
-        signals.push(init.signal);
-        return new Promise(() => {});
-      },
-    }),
-    /not ready within 35 ms \(Firebase Emulator Hub startup probe timed out after/
-  );
-  assert.ok(Date.now() - startedAt < 1_000);
-  assert.ok(signals.length >= 1);
-  assert.ok(signals.every(({ aborted }) => aborted));
-});
-
-test('startup readiness aborts a stalled Hub JSON body within its hard deadline', async () => {
-  const signals = [];
-  const startedAt = Date.now();
-  await assert.rejects(
-    waitForEmulators({
-      lifecycleProjectId: 'demo-fnd-perf',
-      timeoutMs: 35,
-      requestTimeoutMs: 10,
-      intervalMs: 0,
-      fetchImpl: async (_url, init) => {
-        signals.push(init.signal);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => new Promise(() => {}),
-        };
-      },
-    }),
-    /not ready within 35 ms \(Firebase Emulator Hub startup probe timed out after/
-  );
-  assert.ok(Date.now() - startedAt < 1_000);
-  assert.ok(signals.length >= 1);
-  assert.ok(signals.every(({ aborted }) => aborted));
-});
+for (const stalledPhase of ['response headers', 'Hub JSON body']) {
+  for (const deadlinePath of ['request timeout', 'between loop and request']) {
+    test(`startup readiness aborts stalled ${stalledPhase}: ${deadlinePath}`, async () => {
+      const signals = [];
+      let currentTime = 0;
+      let crossDeadlineOnNextRead = false;
+      let sleeps = 0;
+      let bodyReads = 0;
+      const startedAt = Date.now();
+      const expectedError = deadlinePath === 'request timeout'
+        ? 'Firebase emulators were not ready within 35 ms (Firebase Emulator Hub startup probe timed out after 10 ms.).'
+        : 'Firebase emulators were not ready within 35 ms (Firebase emulator startup deadline expired.).';
+      await assert.rejects(waitForEmulators({
+        lifecycleProjectId: 'demo-fnd-perf',
+        timeoutMs: 35,
+        requestTimeoutMs: 10,
+        intervalMs: 0,
+        nowImpl: () => {
+          const observed = currentTime;
+          // Return 34 to the loop check, then 35 to nextRequestTimeout.
+          if (crossDeadlineOnNextRead) {
+            currentTime = 35;
+            crossDeadlineOnNextRead = false;
+          }
+          return observed;
+        },
+        sleepImpl: async (delayMs) => {
+          assert.equal(delayMs, 0);
+          sleeps += 1;
+          crossDeadlineOnNextRead = true;
+        },
+        fetchImpl: async (url, init) => {
+          assert.equal(url, 'http://127.0.0.1:4400/emulators');
+          signals.push(init.signal);
+          // Keep the real request timer/abort; control only the outer clock so
+          // event-loop scheduling cannot choose the final diagnostic for us.
+          init.signal.addEventListener('abort', () => {
+            currentTime = deadlinePath === 'request timeout' ? 35 : 34;
+          }, {once: true});
+          if (stalledPhase === 'response headers') return new Promise(() => {});
+          return {ok: true, status: 200, json: async () => {
+            bodyReads += 1;
+            return new Promise(() => {});
+          }};
+        },
+      }), {message: expectedError});
+      assert.ok(Date.now() - startedAt < 1_000);
+      assert.equal(currentTime, 35);
+      assert.equal(signals.length, 1);
+      assert.ok(signals.every(({aborted}) => aborted));
+      assert.equal(bodyReads, stalledPhase === 'Hub JSON body' ? 1 : 0);
+      assert.equal(sleeps, deadlinePath === 'request timeout' ? 0 : 1);
+    });
+  }
+}
 
 test('teardown preserves raw trigger and log evidence when their assertions fail', () => {
   const triggerActivity = {

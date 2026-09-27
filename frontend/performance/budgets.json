@@ -101,7 +101,10 @@
       "severity": "blocking",
       "comparison": "relative-to-baseline",
       "maximum": null,
-      "tolerance": { "percent": 10, "absoluteBytes": 30720 },
+      "tolerance": {
+        "percent": 10,
+        "absoluteBytes": 30720
+      },
       "ownerTask": "01"
     },
     {
@@ -324,5 +327,30 @@
       "tolerance": null,
       "ownerTask": "07"
     }
-  ]
+  ],
+  "task11Dashboard": {
+    "fixture": "fnd-performance-v2-task05-runtime-retired-task07-media-codex-map",
+    "pageSize": 10,
+    "maxExpanded": 3,
+    "listeners": [
+      11,
+      16,
+      26
+    ],
+    "serializedPayloadBytes": [
+      5500,
+      580000,
+      620000
+    ],
+    "fullCatalogReads": 0,
+    "collapsedDetailListeners": 0,
+    "method": "Serialized document data, not network wire bytes; enforced by Task11 Jest and emulator suites."
+  },
+  "task11Admin": {
+    "pageSize": 10,
+    "initialRequests": 1,
+    "serializedResponseBytes": 1800,
+    "sourceDocumentReads": 22,
+    "method": "Serialized private callable response bytes, not network transfer; source reads exclude independent roles config."
+  }
 }

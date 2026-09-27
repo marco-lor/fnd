@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import DMDashboard from './DMDashboard';
+import { useManagerUserData } from '../../data/userData/managerUserData';
 import { getCallable } from '../../data/functions/callableRegistry';
 import { callBackendOperationAndWait } from '../../data/functions/backendOperationClient';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
@@ -28,11 +29,11 @@ jest.mock('../../data/userData/managerUserData', () => {
       stats: { level: 6 },
   }];
   return {
-    useManagerUserData: () => ({
+    useManagerUserData: jest.fn(() => ({
       users,
       loading: false,
       error: null,
-    }),
+    })),
   };
 });
 
@@ -60,6 +61,10 @@ jest.mock('../../data/functions/backendOperationClient', () => ({
 jest.mock('../../data/functions/backendOperationIntentStore', () => ({
   runWithDurableOperationIntent: jest.fn(({ invoke }) => invoke('operation-123')),
 }));
+
+beforeEach(() => {
+  useManagerUserData.mockReturnValue({users: [{id: 'player-1', characterId: 'MarcoTEST', settings: {}, stats: {level: 6}}], loading: false, error: null});
+});
 
 const levelUpAllCallable = getCallable.mock.results[0].value;
 const levelUpUserCallable = getCallable.mock.results[1].value;
@@ -116,4 +121,29 @@ describe('DM dashboard V2 level-up routing', () => {
       { operationId: 'operation-123' }
     );
   });
+});
+
+ test('failed directory with no rows still exposes the data retry action', () => {
+  const retry = jest.fn();
+  useManagerUserData.mockReturnValue({users: [], loading: false, error: new Error('permission-denied'), retry});
+  render(<DMDashboard />);
+  expect(screen.getByRole('alert')).toHaveTextContent('permission-denied');
+  fireEvent.click(screen.getByRole('button', {name: 'Retry player data'}));
+  expect(retry).toHaveBeenCalledTimes(1);
+});
+
+test('unavailable player summaries expose retry while healthy player controls remain usable', () => {
+  const retry = jest.fn();
+  useManagerUserData.mockReturnValue({
+    users: [{id: 'player-1', characterId: 'MarcoTEST', settings: {}, stats: {level: 6}}],
+    loading: false, error: null, retry,
+    unavailableUsers: [{id: 'deleting', label: 'Deleting player', error: new Error('permission-denied')}],
+  });
+  render(<DMDashboard />);
+  expect(screen.getByRole('alert')).toHaveTextContent('Deleting player');
+  expect(screen.getByRole('alert')).toHaveTextContent('permission-denied');
+  expect(screen.getByRole('button', {name: 'Level Up'})).toBeEnabled();
+  expect(screen.getByText('Lock table')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', {name: 'Retry unavailable players'}));
+  expect(retry).toHaveBeenCalledTimes(1);
 });

@@ -106,6 +106,19 @@ describe('Task 05 user commands', () => {
       value: -3,
     });
   });
+  test('forwards the optional Dashboard floor without applying it to other resource commands', async () => {
+    await updateResource({resource: 'hp', mode: 'delta', value: -5, floorAtZero: true, operationId: 'floor-fixed'});
+    expect(mockCallable).toHaveBeenLastCalledWith({resource: 'hp', mode: 'delta', value: -5, floorAtZero: true, operationId: 'floor-fixed'});
+    await updateResource({resource: 'hp', mode: 'delta', value: -5, operationId: 'no-floor-fixed'});
+    expect(mockCallable.mock.calls.at(-1)[0]).not.toHaveProperty('floorAtZero');
+  });
+  test('opts into bounded Admin pages without changing the legacy default', async () => {
+    await getAdminUsersPage();
+    expect(mockCallable).toHaveBeenLastCalledWith({limit: 100});
+    const cursor = {normalizedLabel: 'name', uid: 'user-1', search: 'na'};
+    await getAdminUsersPage({schemaVersion: 2, search: 'na', cursor});
+    expect(mockCallable).toHaveBeenLastCalledWith({schemaVersion: 2, limit: 10, search: 'na', cursor});
+  });
 
   test('records callable attempts and outcomes without exposing operation or user IDs', async () => {
     await updateResource({

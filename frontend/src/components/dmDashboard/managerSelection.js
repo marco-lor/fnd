@@ -1,16 +1,9 @@
 export const reconcileManagerUserSelection = ({
-  selectedUserIds = [],
-  currentUserIds = [],
-  previousUserIds = [],
-  isInitialLoad = false,
+  selectedUserIds = new Set(), currentUserIds = [], previousUserIds = [], isInitialLoad = false,
 }) => {
-  const currentIds = Array.from(new Set(currentUserIds.filter(Boolean)));
-  const currentIdSet = new Set(currentIds);
-  const previousIdSet = new Set(previousUserIds.filter(Boolean));
-  const stillSelected = selectedUserIds.filter((id) => currentIdSet.has(id));
-  const additions = isInitialLoad
-    ? currentIds
-    : currentIds.filter((id) => !previousIdSet.has(id));
-
-  return Array.from(new Set([...stillSelected, ...additions]));
+  const current = new Set(currentUserIds.filter(Boolean));
+  const previous = new Set(previousUserIds);
+  const next = new Set([...selectedUserIds].filter((uid) => current.has(uid)));
+  for (const uid of current) if (isInitialLoad || !previous.has(uid)) next.add(uid);
+  return next.size === selectedUserIds.size && [...next].every((uid) => selectedUserIds.has(uid)) ? selectedUserIds : next;
 };

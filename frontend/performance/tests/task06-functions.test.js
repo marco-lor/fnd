@@ -918,6 +918,8 @@ test('bounded operation completes above 500 subjects and replays idempotently', 
   assert.equal(started.operation.kind, 'level-up-all');
 
   const completed = await waitForOperation(OPERATION_ID, ['completed']);
+  const levelReceipt = await operationDocument(OPERATION_ID);
+  console.log('TASK11_BULK_LEVEL', JSON.stringify({operationLatencyMs: levelReceipt.get('updatedAt').toMillis() - levelReceipt.get('createdAt').toMillis(), progress: completed.progress}));
   assert.equal(completed.retryable, false);
   assert.equal(completed.progress.succeeded, SCALE_USER_COUNT);
   assert.equal(completed.progress.skipped, 2);
@@ -941,6 +943,14 @@ test('bounded operation completes above 500 subjects and replays idempotently', 
   assert.equal(lastProgression.get('stats.level'), 2);
   assert.equal(pendingProgression.exists, false);
   assert.equal(retiredRootProgression.get('stats.level'), 3);
+  const managerSummaries = await db.collection('manager_user_summaries').get();
+  assert.equal(managerSummaries.size, SCALE_USER_COUNT);
+  assert.equal(managerSummaries.docs.find(doc => doc.id === 'task06-scale-0000').get('stats.level'), 2);
+  assert.equal(managerSummaries.docs.find(doc => doc.id === RETIRED_ROOT_USER_ID).get('stats.level'), 3);
+  assert.equal(managerSummaries.docs.some(doc => doc.id === 'task06-scale-0524'), false);
+  assert.match(firstProgression.get('managerSummaryCommitId'), /^[0-9a-f-]{36}$/);
+  for (const summary of managerSummaries.docs) assert.deepEqual(Object.keys(summary.data()).sort(), ['schemaVersion', 'settings', 'stats']);
+
 
   const replay = await invokeCallable('levelUpAll', {
     operationId: OPERATION_ID,
@@ -1117,6 +1127,8 @@ test('lock-all uses bounded subjects and completes beyond the former batch ceili
     LOCK_OPERATION_ID,
     ['completed']
   );
+  const lockReceipt = await operationDocument(LOCK_OPERATION_ID);
+  console.log('TASK11_BULK_LOCK', JSON.stringify({operationLatencyMs: lockReceipt.get('updatedAt').toMillis() - lockReceipt.get('createdAt').toMillis(), progress: completed.progress}));
   assert.ok(completed.progress.processed > 500);
   assert.equal(completed.progress.failed, 0);
   assert.equal(completed.progress.skipped, 1);
@@ -1134,6 +1146,11 @@ test('lock-all uses bounded subjects and completes beyond the former batch ceili
   });
   assert.equal(replay.replayed, true);
   assert.equal(replay.status, 'completed');
+  const summaries = await db.collection('manager_user_summaries').get();
+  assert.equal(summaries.size, SCALE_USER_COUNT);
+  assert.ok(summaries.docs.every(doc => doc.get('settings.lock_param_base') === true));
+  const state = await db.doc('users/task06-scale-0000/state/settings').get();
+  assert.match(state.get('managerSummaryCommitId'), /^[0-9a-f-]{36}$/);
 });
 
 test('NPC and encounter cleanup remove indexed and nested descendants', async () => {
@@ -2081,4 +2098,163 @@ test('every callable manifest entry is reachable in its declared emulator region
       'spendCharacterPointV2:europe-west8',
     ]
   );
+});
+
+test('Task11 Admin private pages, stable ties, search, authorization and role fences', async () => {
+  const {buildDocuments} = require('../../scripts/performance/fixtures');
+  const {buildUserDirectoryProjection} = require('../../functions/lib/userDirectoryProjection');
+  const fixtureRoots = buildDocuments().filter(({path}) => /^users\/[^/]+$/.test(path));
+  assert.equal(fixtureRoots.length, 200);
+  const entries = fixtureRoots.flatMap(({data}, index) => {
+    const uid = `task11-admin-${String(index).padStart(3, '0')}`;
+    const root = {...data, characterId: `Tâsk11 ${String(Math.floor(index / 2)).padStart(3, '0')}`};
+    return [[`users/${uid}`, root], [`user_directory/${uid}`, buildUserDirectoryProjection(root)]];
+  });
+  // Supplement the unchanged 200-user case with scalar-boundary probes.
+  // Equal labels cross page boundaries; supplementary suffixes must survive.
+  const scalarUsers = Array.from({length: 14}, (_, index) => {
+    const uid = `task11-scalar-${String(index).padStart(2, '0')}`;
+    const characterId = index < 12
+      ? `\uD7FF${index < 10 ? 'task11' : '🔥'}-${Math.floor(index / 2)}`
+      : `\uE000unrelated-${index}`;
+    const root = {...fixtureRoots[0].data, characterId};
+    const directory = buildUserDirectoryProjection(root);
+    entries.push([`users/${uid}`, root], [`user_directory/${uid}`, directory]);
+    return {uid, normalizedLabel: directory.normalizedLabel};
+  });
+  await withRawBackgroundTriggersDisabled(async () => writeBatches(entries), {projectId: PERFORMANCE_PROJECT_ID});
+  await assert.rejects(invokeCallable('task05ListAdminUsers', {schemaVersion: 2}), {code: 'PERMISSION_DENIED'});
+  await db.doc(`users/${actor.uid}`).update({role: 'webmaster'});
+  try {
+    const found = [];
+    let cursor;
+    do {
+      const page = await invokeCallable('task05ListAdminUsers', {schemaVersion: 2, search: '  TÂSK11  ', ...(cursor ? {cursor} : {})});
+      assert.ok(page.items.length <= 10);
+      page.items.forEach((item) => assert.deepEqual(Object.keys(item).sort(), ['characterId', 'email', 'id', 'role', 'username']));
+      found.push(...page.items.map(({id}) => id));
+      cursor = page.hasMore ? page.cursor : null;
+    } while (cursor);
+    assert.equal(found.length, 200);
+    assert.equal(new Set(found).size, 200);
+    assert.deepEqual(found, [...found].sort());
+    const scalarFound = [];
+    let scalarCursor;
+    let scalarPages = 0;
+    do {
+      const page = await invokeCallable('task05ListAdminUsers', {
+        schemaVersion: 2, search: '\uD7FF', limit: 3,
+        ...(scalarCursor ? {cursor: scalarCursor} : {}),
+      });
+      scalarPages += 1;
+      assert.equal(page.items.length, 3);
+      assert.ok(page.items.every(({characterId}) => characterId.startsWith('\uD7FF')));
+      scalarFound.push(...page.items.map(({id}) => id));
+      scalarCursor = page.hasMore ? page.cursor : null;
+      if (scalarCursor) {
+        assert.equal(scalarCursor.search, '\uD7FF');
+        assert.ok(scalarCursor.normalizedLabel.startsWith('\uD7FF'));
+        assert.equal(/[\uD800-\uDFFF]/u.test(scalarCursor.normalizedLabel), false);
+      }
+    } while (scalarCursor);
+    assert.equal(scalarPages, 4);
+    const expectedScalarIds = scalarUsers.filter(({normalizedLabel}) => normalizedLabel.startsWith('\uD7FF'))
+      .sort((a, b) => Buffer.compare(Buffer.from(a.normalizedLabel), Buffer.from(b.normalizedLabel)) || Buffer.compare(Buffer.from(a.uid), Buffer.from(b.uid)))
+      .map(({uid}) => uid);
+    assert.deepEqual(scalarFound, expectedScalarIds);
+    for (const malformed of ['\uD800', '\uDFFF']) {
+      for (const payload of [
+        {schemaVersion: 2, search: malformed},
+        {cursor: malformed},
+        ...['normalizedLabel', 'uid', 'search'].map((field) => ({schemaVersion: 2,
+          cursor: {...{normalizedLabel: 'label', uid: 'valid-user', search: ''}, [field]: malformed}})),
+      ]) await assert.rejects(invokeCallable('task05ListAdminUsers', payload), {code: 'INVALID_ARGUMENT'});
+    }
+    const first = await invokeCallable('task05ListAdminUsers', {schemaVersion: 2, search: 'task11'});
+    await assert.rejects(invokeCallable('task05ListAdminUsers', {schemaVersion: 2, search: 'other', cursor: first.cursor}), {code: 'INVALID_ARGUMENT'});
+    const empty = await invokeCallable('task05ListAdminUsers', {schemaVersion: 2, search: 'task11 absent'});
+    assert.deepEqual(empty, {items: [], hasMore: false, cursor: null});
+    const legacy = await invokeCallable('task05ListAdminUsers', {});
+    assert.equal(legacy.items.length, 100);
+    assert.equal(typeof legacy.cursor, 'string');
+    const legacyNext = await invokeCallable('task05ListAdminUsers', {cursor: legacy.cursor});
+    assert.ok(legacyNext.items[0].id > legacy.cursor);
+    await db.doc('user_deletion_jobs/task11-admin-000').set({stage: 'failed'});
+    await assert.rejects(invokeCallable('updateUserRole', {userId: 'task11-admin-000', role: 'dm'}), {code: 'FAILED_PRECONDITION'});
+    await db.doc('user_deletion_jobs/task11-admin-000').delete();
+    await invokeCallable('updateUserRole', {userId: 'task11-admin-000', role: 'dm'});
+    assert.equal((await db.doc('users/task11-admin-000').get()).get('role'), 'dm');
+    await db.doc(`users/${actor.uid}`).update({deletionState: 'pending'});
+    await assert.rejects(invokeCallable('task05ListAdminUsers', {schemaVersion: 2}), {code: 'PERMISSION_DENIED'});
+    await assert.rejects(invokeCallable('updateUserRole', {userId: 'task11-admin-000', role: 'player'}), {code: 'PERMISSION_DENIED'});
+  } finally {
+    await db.doc(`users/${actor.uid}`).update({role: 'dm', deletionState: FieldValue.delete()});
+    await withRawBackgroundTriggersDisabled(async () => {
+      const batch = db.batch();
+      entries.forEach(([path]) => batch.delete(db.doc(path)));
+      await batch.commit();
+    }, {projectId: PERFORMANCE_PROJECT_ID});
+  }
+});
+
+test('Task11 deletion Task06 progress, duplicate, failure resume and verified cleanup', async () => {
+  const {getAuth} = require('firebase-admin/auth');
+
+  const {backendOperationReceiptId, backendOperationRequestHash} = require('../../functions/lib/backendOperationCore');
+  const auth = getAuth(app);
+  const uid = 'task11-delete-target';
+  const operationId = 'task11-delete-operation-0001';
+  const receipt = db.doc(`backend_operations/${backendOperationReceiptId(actor.uid, operationId)}`);
+  await db.doc(`users/${actor.uid}`).update({role: 'webmaster'});
+  try {
+    await assert.rejects(invokeCallable('deleteUser', {userId: actor.uid, operationId}), {code: 'FAILED_PRECONDITION'});
+    await auth.createUser({uid, email: `${uid}@example.test`, password: 'PerfTest!123'});
+    await withRawBackgroundTriggersDisabled(async () => writeBatches([
+      [`users/${uid}`, {role: 'player', characterId: 'Delete target'}],
+      [`users/${uid}/inventory/one`, {displayName: 'Owned inventory'}],
+      [`users/${uid}/state/resources`, {gold: 1}],
+      [`user_directory/${uid}`, {label: 'Delete target', normalizedLabel: 'delete target', role: 'player'}],
+      [`manager_user_summaries/${uid}`, {schemaVersion: 1}],
+      [`migration_state/user-data-v2/archives/${uid}/domains/profile`, {domain: 'profile', payload: {characterId: 'Archived'}}],
+      [`migration_state/user-data-v2/root_compaction_archives/${uid}/root_fields/email`, {field: 'email', value: 'archived@example.test'}],
+    ]), {projectId: PERFORMANCE_PROJECT_ID});
+    const file = getStorage(app).bucket().file(`users/${uid}/profile/test.txt`);
+    await file.save('owned media', {resumable: false});
+    await db.doc(`users/${uid}`).update({deletionState: 'pending'});
+    await db.doc(`user_deletion_jobs/${uid}`).set({stage: 'auth-disabled', targetUid: uid,
+      invocationId: 'fixture-runner', activeReceiptId: receipt.id,
+      leaseExpiresAt: Timestamp.fromMillis(Date.now() + 120000)});
+    await receipt.set({schemaVersion: 1, kind: 'delete-user', actorUid: actor.uid,
+      targetUid: uid, operationId, requestHash: backendOperationRequestHash('delete-user', {userId: uid}),
+      status: 'running', retryable: false, progress: {planned: 5, processed: 1, succeeded: 1, failed: 0, skipped: 0}});
+    const duplicate = await invokeCallable('deleteUser', {userId: uid, operationId});
+    assert.equal(duplicate.operation.replayed, true);
+    assert.equal(duplicate.operation.progress.processed, 1);
+    await assert.rejects(invokeCallable('deleteUser', {userId: uid, operationId: 'task11-other-delete-0001'}), {code: 'ABORTED'});
+    await assert.rejects(invokeCallable('deleteUser', {userId: uid}), {code: 'ABORTED'});
+    await assert.rejects(invokeCallable('deleteUser', {userId: 'different-target', operationId}), {code: 'ALREADY_EXISTS'});
+    await db.doc(`user_deletion_jobs/${uid}`).update({stage: 'failed', leaseExpiresAt: Timestamp.fromMillis(0)});
+    await receipt.update({status: 'failed', retryable: true, errorClass: 'fixture-retry'});
+    const failed = await invokeCallable('getBackendOperationStatus', {operationId});
+    assert.equal(failed.status, 'failed'); assert.equal(failed.retryable, true);
+    const resumed = await invokeCallable('resumeBackendOperation', {operationId});
+    assert.equal(resumed.operation.status, 'completed');
+    assert.equal(resumed.operation.progress.processed, 5);
+    assert.equal((await receipt.get()).get('status'), 'completed');
+    for (const path of [`users/${uid}`, `user_directory/${uid}`, `manager_user_summaries/${uid}`,
+      `migration_state/user-data-v2/archives/${uid}/domains/profile`,
+      `migration_state/user-data-v2/root_compaction_archives/${uid}/root_fields/email`]) {
+      assert.equal((await db.doc(path).get()).exists, false, path);
+    }
+    assert.deepEqual(await db.doc(`users/${uid}`).listCollections(), []);
+    assert.equal((await file.exists())[0], false);
+    await assert.rejects(auth.getUser(uid), {code: 'auth/user-not-found'});
+    assert.equal((await invokeCallable('deleteUser', {userId: uid, operationId})).operation.replayed, true);
+    assert.equal((await invokeCallable('deleteUser', {userId: uid})).success, true);
+    await db.doc(`users/${actor.uid}`).update({role: 'dm'});
+    await assert.rejects(invokeCallable('getBackendOperationStatus', {operationId}), {code: 'PERMISSION_DENIED'});
+    await assert.rejects(invokeCallable('resumeBackendOperation', {operationId}), {code: 'PERMISSION_DENIED'});
+  } finally {
+    await db.doc(`users/${actor.uid}`).update({role: 'dm'});
+  }
 });

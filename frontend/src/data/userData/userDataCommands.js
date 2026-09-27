@@ -287,11 +287,12 @@ const callWithOperation = async ({
   }
 };
 
-export const getAdminUsersPage = ({ cursor, limit = 100 } = {}) => call(
+export const getAdminUsersPage = ({ cursor, schemaVersion, search, limit = schemaVersion === 2 ? 10 : 100 } = {}) => call(
   'task05ListAdminUsers',
   {
     ...(cursor ? { cursor } : {}),
     limit,
+    ...(schemaVersion === 2 ? { schemaVersion, search: search || '' } : {}),
   }
 );
 
@@ -338,10 +339,10 @@ export const updateGrigliataCharacterResources = ({ operationId, retryKey, ...pa
   retryKey,
 });
 
-export const updateProgression = ({ userId, patch, operationId, retryKey }) => callWithOperation({
+export const updateProgression = ({ userId, patch, combatTokenDelta, operationId, retryKey }) => callWithOperation({
   name: 'task05UpdateProgression',
   prefix: 'progression',
-  payload: { ...(userId ? { userId } : {}), patch },
+  payload: { ...(userId ? { userId } : {}), ...(combatTokenDelta === undefined ? { patch } : { combatTokenDelta }) },
   operationId,
   retryKey,
 });
