@@ -131,3 +131,19 @@ describe('DM dashboard V2 level-up routing', () => {
   fireEvent.click(screen.getByRole('button', {name: 'Retry player data'}));
   expect(retry).toHaveBeenCalledTimes(1);
 });
+
+test('unavailable player summaries expose retry while healthy player controls remain usable', () => {
+  const retry = jest.fn();
+  useManagerUserData.mockReturnValue({
+    users: [{id: 'player-1', characterId: 'MarcoTEST', settings: {}, stats: {level: 6}}],
+    loading: false, error: null, retry,
+    unavailableUsers: [{id: 'deleting', label: 'Deleting player', error: new Error('permission-denied')}],
+  });
+  render(<DMDashboard />);
+  expect(screen.getByRole('alert')).toHaveTextContent('Deleting player');
+  expect(screen.getByRole('alert')).toHaveTextContent('permission-denied');
+  expect(screen.getByRole('button', {name: 'Level Up'})).toBeEnabled();
+  expect(screen.getByText('Lock table')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', {name: 'Retry unavailable players'}));
+  expect(retry).toHaveBeenCalledTimes(1);
+});

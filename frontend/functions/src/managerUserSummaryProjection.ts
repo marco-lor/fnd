@@ -2,9 +2,11 @@ type RecordData = Record<string, any>;
 const record = (value: unknown): RecordData => (
   value && typeof value === "object" && !Array.isArray(value) ? value : {}
 );
-const number = (value: unknown, fallback = 0): number => (
-  typeof value === "number" && Number.isFinite(value) ? value : fallback
-);
+const number = (value: unknown, fallback = 0): number => {
+  // V2 migration preserves numeric strings from legacy character sheets.
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : fallback;
+};
 
 // This private projection is independent of the safe label/role directory.
 // Only fields rendered by the Dashboard cards and lock table belong here.

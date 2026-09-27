@@ -75,7 +75,7 @@ export const useManagerUserData = (enabled = true, {
   cursor = null, pageSize = MANAGER_USER_PAGE_SIZE, search = '',
 } = {}) => {
   const { repositoryAccessGeneration = 0 } = useAuthSession();
-  const [state, setState] = useState({ users: [], loading: Boolean(enabled), error: null });
+  const [state, setState] = useState({ users: [], unavailableUsers: [], loading: Boolean(enabled), error: null });
   const retryRef = useRef(() => {});
   const retry = useCallback(() => retryRef.current(), []);
   useEffect(() => {
@@ -89,10 +89,16 @@ export const useManagerUserData = (enabled = true, {
     const records = new Map();
     const publish = () => {
       if (!active) return;
-      const users = entries.map((entry) => records.get(entry.id)?.user).filter(Boolean);
-      const error = directoryError || entries.map((entry) => records.get(entry.id)?.error).find(Boolean) || null;
-      setState((previous) => ({ users: preserveUserDomainIdentity(previous.users, users), error,
-        loading: !error && (!directoryReady || users.length !== entries.length), hasMore: page.hasMore === true,
+      const users = [];
+      const unavailableUsers = [];
+      entries.forEach((entry) => {
+        const record = records.get(entry.id);
+        if (record?.error) unavailableUsers.push({ ...entry, error: record.error });
+        else if (record?.user) users.push(record.user);
+      });
+      setState((previous) => ({ users: preserveUserDomainIdentity(previous.users, users), unavailableUsers,
+        error: directoryError,
+        loading: !directoryError && (!directoryReady || users.length + unavailableUsers.length !== entries.length), hasMore: page.hasMore === true,
         nextCursor: page.cursor || null, pageSize }));
     };
     const compose = (entry, summary, previous) => preserveUserDomainIdentity(previous, Object.freeze({
@@ -100,7 +106,7 @@ export const useManagerUserData = (enabled = true, {
     }));
     const subscribeRecord = (record) => {
       record.stop?.();
-      record.error = null;
+      // Keep failed rows unavailable during retry until a fresh summary arrives.
       const sequence = (record.sequence || 0) + 1;
       record.sequence = sequence;
       const isCurrent = () => active && records.get(record.entry.id) === record && record.sequence === sequence;
@@ -154,7 +160,7 @@ export const useManagerUserData = (enabled = true, {
         },
       }, { role: MANAGER_USER_DIRECTORY_ROLE, cursor, pageSize, search });
     };
-    setState({ users: [], loading: Boolean(enabled), error: null, hasMore: false, nextCursor: null, pageSize });
+    setState({ users: [], unavailableUsers: [], loading: Boolean(enabled), error: null, hasMore: false, nextCursor: null, pageSize });
     if (!enabled) return undefined;
     retryRef.current = () => {
       if (!active) return;

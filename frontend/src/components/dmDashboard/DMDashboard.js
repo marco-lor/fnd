@@ -36,6 +36,7 @@ const DMDashboard = () => {
     users,
     loading,
     error: userDataError,
+    unavailableUsers = [],
     retry: retryUserData,
     hasMore = false,
     nextCursor = null,
@@ -363,6 +364,13 @@ const DMDashboard = () => {
         {userDataError && <div role="alert" className="mb-4 rounded border border-red-700 p-3 text-red-200">
           <p>{userDataError.message}</p>
           <button type="button" onClick={retryUserData} className="mt-2 rounded border px-3 py-1">Retry player data</button>
+        </div>}
+        {unavailableUsers.length > 0 && <div role="alert" className="mb-4 rounded border border-amber-700 p-3 text-amber-200">
+          <p>Some players are unavailable:</p>
+          <ul>{unavailableUsers.map((entry) => <li key={entry.id}>
+            {entry.label || entry.id}: {entry.error.message}
+          </li>)}</ul>
+          <button type="button" onClick={retryUserData} className="mt-2 rounded border px-3 py-1">Retry unavailable players</button>
         </div>}
         <div className="bg-gray-800/90 border border-slate-700/60 rounded-lg p-4">
           <p className="text-slate-200 text-sm">

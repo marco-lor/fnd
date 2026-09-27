@@ -151,7 +151,7 @@ const PlayerInfoInventoryRow = ({
               const isVarie = (item.type || "").toLowerCase() === "varie";
               const displayName = isVarie ? item.name : item.displayName || item.name;
               const key = `${item.id}-${isVarie ? "v" : "n"}-${index}`;
-              const canEdit = item.stable && (["weapon", "armatura", "accessorio", "consumabile", "varie"].includes(item.type) || itemsDocs?.[item.catalogId]?.item_type || isVarie);
+              const canEdit = item.stable && (["weapon", "armatura", "accessorio", "consumabile", "varie"].includes(item.type) || item.catalogId);
               return (
                 <li key={key} className="flex items-center justify-between text-sm">
                   <span className="truncate mr-2">

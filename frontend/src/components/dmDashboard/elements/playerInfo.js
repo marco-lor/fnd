@@ -22,15 +22,9 @@ import {
   EditProfessionePersonaleOverlay,
   EditSpellOverlay,
   EditTecnicaPersonale,
-  EditVarieItemOverlay,
   GoldAdjustmentOverlay,
 } from './lazyPlayerInfoOverlays';
-import {
-  AddAccessorioOverlay,
-  AddArmaturaOverlay,
-  AddConsumabileOverlay,
-  AddWeaponOverlay,
-} from '../../bazaar/lazyBazaarEditors';
+import InventoryItemEditor from './InventoryItemEditor';
 
 import PlayerInfoActionsRow from "./playerInfo/sections/PlayerInfoActionsRow";
 import PlayerInfoTecnicheRow from "./playerInfo/sections/PlayerInfoTecnicheRow";
@@ -243,12 +237,7 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
         }
       }
     }
-    const catalogItemId = inventoryData?._task05?.catalogItemId
-      || inventoryData?._instance?.catalogItemId
-      || inventoryData?.id
-      || null;
-    const baseDoc = catalogItemId ? itemsDocs[catalogItemId] : null;
-    const initial = inventoryData || baseDoc;
+    const initial = inventoryData;
     if (!initial) {
       console.warn("No data found for inventory item id:", itemId);
       return;
@@ -949,61 +938,14 @@ const ManagerPlayerCard = React.memo(function ManagerPlayerCard({
       )}
 
       {expanded && showEditItemOverlay && editItemData && (
-        <>
-          {(editItemData?.type || editItemData?.item_type || "").toLowerCase() === "varie" ? (
-            <EditVarieItemOverlay
-              userId={selectedUserId}
-              initialData={editItemData}
-              inventoryItemId={selectedEditItemId}
-              inventoryItemIndex={selectedEditItemIndex}
-              onClose={handleInventoryOverlayClose}
-            />
-          ) : editItemData?.item_type === "armatura" ? (
-            <AddArmaturaOverlay
-              onClose={handleInventoryOverlayClose}
-              showMessage={console.log}
-              initialData={editItemData}
-              editMode
-              inventoryEditMode
-              inventoryUserId={selectedUserId}
-              inventoryItemId={selectedEditItemId}
-              inventoryItemIndex={selectedEditItemIndex}
-            />
-          ) : editItemData?.item_type === "accessorio" ? (
-            <AddAccessorioOverlay
-              onClose={handleInventoryOverlayClose}
-              showMessage={console.log}
-              initialData={editItemData}
-              editMode
-              inventoryEditMode
-              inventoryUserId={selectedUserId}
-              inventoryItemId={selectedEditItemId}
-              inventoryItemIndex={selectedEditItemIndex}
-            />
-          ) : editItemData?.item_type === "consumabile" ? (
-            <AddConsumabileOverlay
-              onClose={handleInventoryOverlayClose}
-              showMessage={console.log}
-              initialData={editItemData}
-              editMode
-              inventoryEditMode
-              inventoryUserId={selectedUserId}
-              inventoryItemId={selectedEditItemId}
-              inventoryItemIndex={selectedEditItemIndex}
-            />
-          ) : (
-            <AddWeaponOverlay
-              onClose={handleInventoryOverlayClose}
-              showMessage={console.log}
-              initialData={editItemData}
-              editMode
-              inventoryEditMode
-              inventoryUserId={selectedUserId}
-              inventoryItemId={selectedEditItemId}
-              inventoryItemIndex={selectedEditItemIndex}
-            />
-          )}
-        </>
+        <InventoryItemEditor
+          key={selectedEditItemId}
+          initialData={editItemData}
+          inventoryUserId={selectedUserId}
+          inventoryItemId={selectedEditItemId}
+          inventoryItemIndex={selectedEditItemIndex}
+          onClose={handleInventoryOverlayClose}
+        />
       )}
 
       {expanded && showAddVarieOverlay && addVarieUserId && (

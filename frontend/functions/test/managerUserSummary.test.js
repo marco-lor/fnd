@@ -1,6 +1,30 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {buildManagerUserSummary} = require('../lib/managerUserSummary');
+const {buildInitialUserDomainProjection} = require('../lib/userDataV2');
+
+test('migrated numeric strings retain progression and resource values in the summary', () => {
+  const domains = buildInitialUserDomainProjection({stats: {
+    level: '7', basePointsAvailable: '2', basePointsSpent: '12',
+    combatTokensAvailable: '4', combatTokensSpent: '9', gold: '150',
+    hpCurrent: '28', hpTotal: '35', manaCurrent: '0', manaTotal: '20',
+    essenzaCurrent: ' 3 ', essenzaTotal: '10',
+  }});
+  assert.deepEqual(buildManagerUserSummary(domains).stats, {
+    level: 7, basePointsAvailable: 2, basePointsSpent: 12,
+    combatTokensAvailable: 4, combatTokensSpent: 9, gold: 150,
+    hpCurrent: 28, hpTotal: 35, manaCurrent: 0, manaTotal: 20,
+    essenzaCurrent: 3, essenzaTotal: 10,
+  });
+});
+
+test('malformed and non-finite stats keep safe defaults', () => {
+  for (const value of [undefined, null, '', ' ', 'oops', 'Infinity', Infinity, NaN, true, [], {}]) {
+    const summary = buildManagerUserSummary({progression: {stats: {level: value}}, resources: {stats: {gold: value}}});
+    assert.equal(summary.stats.level, 1);
+    assert.equal(summary.stats.gold, 0);
+  }
+});
 
 test('manager summary is an exact projection of card and lock fields', () => {
   const summary = buildManagerUserSummary({

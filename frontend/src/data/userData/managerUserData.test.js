@@ -35,7 +35,8 @@ describe('composeManagerUser', () => {
       return jest.fn();
     });
     const {result} = renderHook(() => useManagerUserData(true));
-    await waitFor(() => expect(result.current.error?.message).toMatch(/backfill/));
+    await waitFor(() => expect(result.current.unavailableUsers?.[0]?.error.message).toMatch(/backfill/));
+    expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
     expect(subscribeUserDomain).not.toHaveBeenCalled();
   });
@@ -144,17 +145,51 @@ describe('composeManagerUser', () => {
     const {result} = renderHook(() => useManagerUserData(true));
     act(() => { observers.a.error(new Error('a missing')); observers.b.error(new Error('b denied')); });
     act(() => observers.c.next({stats: {}, settings: {}}));
-    expect(result.current.error.message).toBe('a missing');
+    expect(result.current.error).toBeNull();
+    expect(result.current.unavailableUsers.map(({id, error}) => [id, error.message])).toEqual([
+      ['a', 'a missing'], ['b', 'b denied'],
+    ]);
+    expect(result.current.users.map(({id}) => id)).toEqual(['c']);
+    expect(result.current.loading).toBe(false);
     act(() => observers.a.next({stats: {}, settings: {}}));
-    expect(result.current.error.message).toBe('b denied');
+    expect(result.current.unavailableUsers.map(({id}) => id)).toEqual(['b']);
     const stableA = result.current.users.find((user) => user.id === 'a');
     act(() => directory.next({items: [entries[0], entries[2]]}));
     expect(result.current.error).toBeNull();
+    expect(result.current.unavailableUsers).toEqual([]);
     expect(result.current.loading).toBe(false);
     expect(result.current.users[0]).toBe(stableA);
     expect(stops.b).toHaveBeenCalledTimes(1);
     act(() => observers.b.error(new Error('late removed error')));
     expect(result.current.error).toBeNull();
+  });
+
+  test('a denied summary removes stale controls without blocking healthy players, including during retry', () => {
+    const observers = {};
+    subscribeUserDirectoryPage.mockImplementation((observer) => {
+      observer.next({items: [{id: 'deleting', label: 'Deleting'}, {id: 'healthy', label: 'Healthy'}]});
+      return jest.fn();
+    });
+    subscribeManagerSummary.mockImplementation((uid, observer) => {
+      observers[uid] = observer;
+      observer.next({stats: {level: 7}, settings: {}});
+      return jest.fn();
+    });
+    const {result} = renderHook(() => useManagerUserData(true));
+    const healthy = result.current.users[1];
+    act(() => observers.deleting.error(new Error('permission-denied')));
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.users).toEqual([healthy]);
+    expect(result.current.users[0]).toBe(healthy);
+    expect(result.current.unavailableUsers[0]).toMatchObject({id: 'deleting', label: 'Deleting'});
+    subscribeManagerSummary.mockImplementation((uid, observer) => { observers[uid] = observer; return jest.fn(); });
+    act(() => result.current.retry());
+    expect(result.current.users).toEqual([healthy]);
+    expect(result.current.loading).toBe(false);
+    act(() => observers.deleting.next({stats: {level: 8}, settings: {}}));
+    expect(result.current.unavailableUsers).toEqual([]);
+    expect(result.current.users[1]).toBe(healthy);
   });
 
   test('retry restarts only failed summary owners and separately recovers the directory', () => {
