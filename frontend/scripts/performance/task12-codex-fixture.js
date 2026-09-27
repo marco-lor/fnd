@@ -30,10 +30,28 @@ async function prepareCodexFixture({ db, lifecycleProjectId = projectId, core, e
   const alreadyActive = initial.control?.mode === 'v2';
   if (!alreadyActive) {
     if (initial.control?.mode !== 'frozen') await apply('freeze');
-    let complete = false;
-    const maximumBatches = Math.ceil((source.categories + source.items) / C.PAGE) + 1;
-    for (let batch = 0; batch < maximumBatches && !complete; batch++) complete = (await apply('backfill')).complete;
-    assert.equal(complete, true, 'Codex fixture backfill did not complete within its bounded batch count.');
+    // One real backfill validates the existing checkpoint, including a resumed
+    // partial fixture. Repeating the operator's recursive inventory for every
+    // batch would make demo preparation quadratic in the number of item RPCs.
+    await apply('backfill');
+    const frozen = await C.readState(db, generation);
+    assert.equal(C.sourceHash(frozen.source), sourceDigest, 'Codex source changed during preparation.');
+    const root = `codex_versions/${generation}`;
+    const marker = frozen.documents.find(row => row.path === root).data;
+    const expected = C.verifyMigration(frozen, generation, frozen.control.collationLocale, false);
+    const existing = new Set(frozen.documents.map(row => row.path));
+    const missing = expected.filter(row => !existing.has(row.path));
+    const guardedWrite = async write => db.runTransaction(async tx => {
+      const snapshots = await tx.getAll(db.doc(C.LEGACY), db.doc(C.CONTROL), db.doc(root));
+      assert.deepEqual([C.sourceHash(snapshots[0].data()), C.hash(snapshots[1].data()), C.hash(snapshots[2].data())],
+        [sourceDigest, C.hash(frozen.control), C.hash(marker)], 'Frozen Codex fixture changed during preparation.');
+      write(tx);
+    });
+    for (let start = 0; start < missing.length; start += C.PAGE) {
+      const batch = missing.slice(start, start + C.PAGE);
+      await guardedWrite(tx => batch.forEach(row => tx.create(db.doc(row.path), row.data)));
+    }
+    await guardedWrite(tx => tx.update(db.doc(root), {offset: expected.length, status: 'building'}));
     const verified = await apply('verify');
     assert.equal(verified.verified, true, 'Codex fixture verification failed.');
     await apply('activate');
