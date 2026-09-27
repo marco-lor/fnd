@@ -123,7 +123,12 @@ function CodexSession({ role }) {
     && (!dialog.category || (selectedDialogCategory?.revision === dialog.category.revision && selectedDialogCategory?.legacyKey === dialog.category.legacyKey))
     && (!dialog.item || (selectedDialogItem?.revision === dialog.item.revision && selectedDialogItem?.legacyKey === dialog.item.legacyKey
       && JSON.stringify(selectedDialogItem?.value) === JSON.stringify(dialog.item.value))));
-  const selectCategory = next => { setActive(next); setItems(null); setItemHistory([null]); setItemError(''); };
+  const selectCategory = next => {
+    // Keep the active page/listener intact. Clearing items here without changing
+    // the subscription scope would leave the page waiting for a new snapshot.
+    if (next.id === activeId && next.legacyKey === activeKey) return;
+    setActive(next); setItems(null); setItemHistory([null]); setItemError('');
+  };
   const changeCategories = history => { setCategoryHistory(history); setActive(null); setItems(null); setItemHistory([null]); };
 
   return <div className="codex-page-container relative min-h-screen text-white">

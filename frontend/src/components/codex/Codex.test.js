@@ -173,3 +173,16 @@ test('metadata stale cursors recover on first page without loops', () => {
   expect(screen.getByRole('button', { name: 'Categoria 00', exact: true })).toBeInTheDocument();
   expect(subscribeCodexMetadataPage).toHaveBeenCalledTimes(3);
 });
+
+test.each([1, 2])('reselecting the active category preserves page %i and its listener', pageNumber => {
+  render(<Codex />);
+  if (pageNumber === 2) fireEvent.click(itemsNav().getByText('Successiva'));
+  const expected = pageNumber === 1 ? 'Nome 00' : 'Nome 25';
+  const subscriptionCount = subscribeCodexItemsPage.mock.calls.length;
+  const listener = latest('items');
+  fireEvent.click(screen.getByRole('button', { name: 'Lingue', exact: true }));
+  expect(screen.getByRole('heading', { name: expected, exact: true })).toBeInTheDocument();
+  expect(itemsNav().getByText(`Pagina ${pageNumber}`)).toBeInTheDocument();
+  expect(subscribeCodexItemsPage).toHaveBeenCalledTimes(subscriptionCount);
+  expect(listener.off).not.toHaveBeenCalled();
+});

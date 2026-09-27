@@ -31,6 +31,7 @@ const STARTUP_INTERVAL_MS = 500;
 const FIXTURE_SEED_TIMEOUT_MS = 300_000;
 const CATALOG_ACTIVATION_TIMEOUT_MS = 120_000;
 const SUMMARY_ACTIVATION_TIMEOUT_MS = 120_000;
+const CODEX_ACTIVATION_TIMEOUT_MS = 300_000;
 const TASK07_CALLABLES_TIMEOUT_MS = 240_000;
 const SECURITY_RULES_TIMEOUT_MS = 120_000;
 const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
@@ -123,6 +124,25 @@ const activateSummaryFixture = async (run = runBoundedChildProcess) => {
   }
   process.stdout.write(result.stdout || '');
   process.stderr.write(result.stderr || '');
+};
+
+const activateCodexFixture = async (run = runBoundedChildProcess) => {
+  const result = await run({
+    command: process.execPath,
+    args: [path.join(frontendRoot, 'scripts', 'performance', 'task12-codex-fixture.js')],
+    cwd: frontendRoot,
+    environment: process.env,
+    timeoutMs: CODEX_ACTIVATION_TIMEOUT_MS,
+    label: 'Codex fixture activation',
+  });
+  if (result.status !== 0) {
+    throw new Error(`Codex fixture activation failed.\n${result.stdout || ''}\n${result.stderr || ''}`);
+  }
+  const report = JSON.parse(result.stdout);
+  if (report.mode !== 'v2' || report.categories !== 20 || report.items !== 5000 || report.projectionDocuments !== 5020) {
+    throw new Error('Codex fixture activation returned an incomplete projection.');
+  }
+  return report;
 };
 
 const summarizeTriggerActivityText = (contents = '') => {
@@ -521,6 +541,11 @@ module.exports = async () => {
     process.stdout.write(directoryQueryBuilder.stdout || '');
     process.stderr.write(directoryQueryBuilder.stderr || '');
 
+    // The compatibility rules checks above intentionally exercise the legacy
+    // document. Cut over only after those checks, before browser measurement.
+    stage = 'codex-fixture-activation';
+    report.codex = await activateCodexFixture();
+
     stage = 'measurement-health';
     report.measurementWindow.health = await collectEmulatorHealth('measurement-ready');
 
@@ -572,6 +597,7 @@ module.exports = async () => {
 module.exports.assertMeasurementTriggerSuppression = assertMeasurementTriggerSuppression;
 module.exports.activateCatalogFixture = activateCatalogFixture;
 module.exports.activateSummaryFixture = activateSummaryFixture;
+module.exports.activateCodexFixture = activateCodexFixture;
 module.exports.reconcileSummaryFixture = reconcileSummaryFixture;
 module.exports.fetchStartupResponse = fetchStartupResponse;
 module.exports.summarizeTriggerActivity = summarizeTriggerActivity;

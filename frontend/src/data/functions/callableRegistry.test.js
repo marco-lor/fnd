@@ -72,6 +72,7 @@ describe('Firebase callable registry', () => {
     ['deleteUser', 'europe-west8'],
     ['deleteGrigliataCustomToken', 'europe-west1'],
     ['spendCharacterPointV2', 'europe-west8'],
+    ['task12MutateCodex', 'europe-west8'],
   ])('uses the declared region for %s', async (logicalKey, region) => {
     const { app, getFunctions, registry } = loadRegistry();
 
@@ -92,7 +93,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(46);
+    expect(entries).toHaveLength(47);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -112,6 +113,12 @@ describe('Firebase callable registry', () => {
       .toBe('europe-west8');
     expect(callableManifest.callables.spendCharacterPointV2.region)
       .toBe('europe-west8');
+    expect(callableManifest.callables.task12MutateCodex).toEqual({
+      functionId: 'task12MutateCodex',
+      region: 'europe-west8',
+      owner: 'codex',
+      compatibilityAliasOf: null,
+    });
     [
       'task07ResolveCharacterMedia',
       'task07PrepareMediaUpload',

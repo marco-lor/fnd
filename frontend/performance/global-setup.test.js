@@ -458,3 +458,74 @@ test('Playwright keeps one worker and zero retries', () => {
   assert.equal(playwrightConfig.workers, 1);
   assert.equal(playwrightConfig.retries, 0);
 });
+
+const { prepareCodexFixture, CODEX_FIXTURE_GENERATION } = require('../scripts/performance/task12-codex-fixture');
+const codexCore = require('../functions/lib/codexCore');
+const codexPreparationHarness = ({ mode = null, batches = 2 } = {}) => {
+  const source = { categoria_00: { 'Codex 0-0': 'zero', 'Codex 0-1': 'one' } };
+  const state = { source, control: mode ? { mode, generation: CODEX_FIXTURE_GENERATION, collationLocale: 'en-US' } : null, documents: [] };
+  const actions = []; let batch = 0; let verified = false; let validationCount = 0;
+  const core = {
+    ...codexCore,
+    readState: async () => state,
+    makePlan: (_state, action, generation) => ({ action, generation, fingerprint: `${action}-fingerprint` }),
+    applyPlan: async (_db, plan, fingerprint) => {
+      assert.equal(fingerprint, plan.fingerprint); actions.push(plan.action);
+      if (plan.action === 'freeze') state.control = { mode: 'frozen', generation: plan.generation, collationLocale: 'en-US' };
+      if (plan.action === 'backfill') return { complete: ++batch >= batches };
+      if (plan.action === 'verify') { verified = true; return { verified: true }; }
+      if (plan.action === 'activate') { assert.equal(verified, true); state.control.mode = 'v2'; }
+      return {};
+    },
+    verifyMigration: (actual, generation, locale, complete) => {
+      validationCount++; assert.equal(actual.control.mode, 'v2'); assert.equal(generation, CODEX_FIXTURE_GENERATION);
+      assert.equal(locale, 'en-US'); assert.equal(complete, true); return [1, 2, 3];
+    },
+  };
+  return { core, source, state, actions, validations: () => validationCount };
+};
+test('Codex preparation fences, backfills and verifies before activation; repeated preparation is read-only', async () => {
+  const h = codexPreparationHarness();
+  const input = { db: {}, core: h.core, expectedSource: structuredClone(h.source) };
+  const first = await prepareCodexFixture(input);
+  assert.deepEqual(h.actions, ['freeze', 'backfill', 'backfill', 'verify', 'activate']);
+  assert.deepEqual({ mode: first.mode, categories: first.categories, items: first.items, projectionDocuments: first.projectionDocuments },
+    { mode: 'v2', categories: 1, items: 2, projectionDocuments: 3 });
+  h.actions.length = 0;
+  assert.equal((await prepareCodexFixture(input)).alreadyActive, true);
+  assert.deepEqual(h.actions, []); assert.equal(h.validations(), 2);
+  assert.deepEqual(h.state.source, input.expectedSource);
+});
+test('Codex preparation resumes a frozen generation without freezing or overwriting source', async () => {
+  const h = codexPreparationHarness({ mode: 'frozen', batches: 1 });
+  await prepareCodexFixture({ db: {}, core: h.core, expectedSource: h.source });
+  assert.deepEqual(h.actions, ['backfill', 'verify', 'activate']);
+});
+test('Codex preparation refuses non-demo targets and noncanonical source before mutation', async () => {
+  const h = codexPreparationHarness();
+  await assert.rejects(prepareCodexFixture({ db: {}, lifecycleProjectId: 'fatin-test', core: h.core, expectedSource: h.source }), /non-demo/);
+  await assert.rejects(prepareCodexFixture({ db: {}, core: h.core, expectedSource: { changed: {} } }), /canonical fixture/);
+  assert.deepEqual(h.actions, []);
+});
+test('Codex preparation fails closed on changed source, incomplete backfill and corrupt active projection', async () => {
+  const changed = codexPreparationHarness(); const expected = structuredClone(changed.source);
+  let read = 0; changed.core.readState = async () => { if (++read > 1) changed.source.categoria_00['Codex 0-0'] = 'changed'; return changed.state; };
+  await assert.rejects(prepareCodexFixture({ db: {}, core: changed.core, expectedSource: expected }), /source changed/);
+  assert.deepEqual(changed.actions, []);
+  const incomplete = codexPreparationHarness({ batches: 100 });
+  await assert.rejects(prepareCodexFixture({ db: {}, core: incomplete.core, expectedSource: incomplete.source }), /bounded batch count/);
+  assert.deepEqual(incomplete.actions, ['freeze', 'backfill', 'backfill']);
+  const corrupt = codexPreparationHarness({ mode: 'v2' });
+  corrupt.core.verifyMigration = () => { throw new Error('Corrupt target projection'); };
+  await assert.rejects(prepareCodexFixture({ db: {}, core: corrupt.core, expectedSource: corrupt.source }), /Corrupt/);
+  assert.deepEqual(corrupt.actions, []);
+});
+
+test('browser setup prepares Codex in a bounded child and rejects incomplete activation reports', async () => {
+  const { activateCodexFixture } = require('./global-setup');
+  let call; const report = { mode: 'v2', categories: 20, items: 5000, projectionDocuments: 5020 };
+  assert.deepEqual(await activateCodexFixture(async input => { call = input; return { status: 0, stdout: JSON.stringify(report) }; }), report);
+  assert.match(call.args[0], /task12-codex-fixture\.js$/); assert.equal(call.timeoutMs, 300_000);
+  await assert.rejects(activateCodexFixture(async () => ({ status: 1, stderr: 'projection incomplete' })), /Codex fixture activation failed.*projection incomplete/s);
+  await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: JSON.stringify({ ...report, items: 4999 }) })), /incomplete projection/);
+});

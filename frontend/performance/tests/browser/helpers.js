@@ -1331,6 +1331,42 @@ const runFoesHubRowInteraction = async (row, {
   await assertExpanded(row);
 };
 
+const codexFixturePages = () => {
+  const source = require('../../../scripts/performance/fixtures').buildDocuments()
+    .find(row => row.path === 'utils/codex').data;
+  const keys = Object.keys(source.categoria_00).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase(), 'en-US'));
+  return Array.from({ length: Math.ceil(keys.length / 25) }, (_, index) => keys.slice(index * 25, (index + 1) * 25));
+};
+
+const traverseCodexFixturePages = async ({ pages, verifyPage, nextPage, previousPage }) => {
+  const targetPage = pages.findIndex(keys => keys.includes('Codex 0-42'));
+  if (targetPage <= 0) throw new Error('Codex fixture must exercise a target beyond the first page.');
+  for (let index = 0; index < pages.length; index++) {
+    await verifyPage(pages[index], index);
+    if (index + 1 < pages.length) await nextPage();
+  }
+  // Verify backwards navigation too, ending on the original smoke target.
+  for (let index = pages.length - 2; index >= targetPage; index--) {
+    await previousPage();
+    await verifyPage(pages[index], index);
+  }
+};
+
+const assertCodexV2PageTelemetry = (events, { initial = false } = {}) => {
+  const codex = events.filter(event => event.category === 'firestore' && event.tags?.target?.startsWith('codex.'));
+  expect(codex.filter(event => event.tags.target.startsWith('codex.document.')), 'Codex smoke must not fall back to the legacy aggregate').toHaveLength(0);
+  const items = codex.filter(event => event.tags.target === 'codex.items.page.v2' && event.metric === 'initial-documents-delivered');
+  expect(items.length, 'Missing v2 active-page telemetry').toBeGreaterThan(0);
+  items.forEach(event => expect(event.value, 'Unbounded Codex item delivery').toBeLessThanOrEqual(26));
+  if (initial) {
+    expect(items).toHaveLength(1);
+    expect(items[0].value).toBe(26);
+    const categories = codex.filter(event => event.tags.target === 'codex.categories.page.v2' && event.metric === 'initial-documents-delivered');
+    expect(categories).toHaveLength(1);
+    expect(categories[0].value).toBe(20);
+  }
+};
+
 const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
   switch (scenario.id) {
     case 'login-cold':
@@ -1375,10 +1411,32 @@ const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
       break;
     }
     case 'codex': {
+      const pages = codexFixturePages();
       const category = page.getByRole('button', { name: 'Categoria 00', exact: true });
       await expect(category).toBeVisible();
+      const region = page.getByRole('region', { name: 'Elementi Codex' });
+      const headings = region.getByRole('heading', { level: 3 });
+      await expect(headings).toHaveText(pages[0]);
+      assertCodexV2PageTelemetry(await page.evaluate(() => window.__FND_PERF__.snapshot().events), { initial: true });
+      await expect(page.getByRole('navigation', { name: 'Categorie Codex' }).getByRole('button')).toHaveCount(20);
+      // Reselecting the active category must preserve its loaded page.
       await category.click();
-      await expect(page.getByText('Codex 0-42', { exact: false }).first()).toBeVisible();
+      const paging = page.getByRole('navigation', { name: 'Pagine elementi' });
+      await traverseCodexFixturePages({
+        pages,
+        verifyPage: async (keys, index) => {
+          await expect(headings).toHaveText(keys);
+          await expect(region.locator('li p')).toHaveText(keys.map(key => key.replace('Codex ', 'Deterministic fixture entry ')));
+          await expect(paging.getByText(`Pagina ${index + 1}`, { exact: true })).toBeVisible();
+          await expect(paging.getByRole('button', { name: 'Precedente' })).toBeEnabled({ enabled: index > 0 });
+          await expect(paging.getByRole('button', { name: 'Successiva' })).toBeEnabled({ enabled: index + 1 < pages.length });
+          if (index === 1) { await category.click(); await expect(headings).toHaveText(keys); }
+        },
+        nextPage: () => paging.getByRole('button', { name: 'Successiva' }).click(),
+        previousPage: () => paging.getByRole('button', { name: 'Precedente' }).click(),
+      });
+      await expect(page.getByRole('heading', { name: 'Codex 0-42', exact: true })).toBeVisible();
+      assertCodexV2PageTelemetry(await page.evaluate(() => window.__FND_PERF__.snapshot().events));
       break;
     }
     case 'combat': {
@@ -1813,6 +1871,9 @@ const restoreScenarioState = async (scenarioId) => {
 };
 
 module.exports = {
+  codexFixturePages,
+  traverseCodexFixturePages,
+  assertCodexV2PageTelemetry,
   ACCOUNT,
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
   MAX_RETAINED_IMAGE_RESOURCE_TIMINGS,
