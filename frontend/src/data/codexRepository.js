@@ -198,7 +198,8 @@ export const getCodexCategories = async categoryKeys => {
         const selected = [];
         let cursor = null;
         do {
-          const page = await readCodexSource(control, () => getCodexMetadataPage({ control, order: 'source', cursor, pageSize: 50 }));
+          const request = { control, order: 'source', cursor, pageSize: 50 };
+          const page = await readCodexSource(control, () => getCodexMetadataPage(request));
           selected.push(...page.items.filter(category => categoryKeys.includes(category.legacyKey)));
           cursor = page.cursor;
         } while (cursor);

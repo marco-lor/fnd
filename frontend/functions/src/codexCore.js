@@ -13,6 +13,13 @@ const sourceHash = source => hash(Object.entries(source).map(([key, items]) => [
 const idOK = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
 const keyOK = key => typeof key === 'string' && key.isWellFormed() && key.length > 0 && Buffer.byteLength(key) <= 1500 && !/^__.*__$/.test(key);
 const runtime = () => ({node: process.versions.node, icu: process.versions.icu});
+const rollbackCandidatePath = generation => `codex_rollback_candidates/${generation}`;
+// Firestore maps sort keys by UTF-8 bytes. Object.fromEntries additionally
+// applies JavaScript's integer-key enumeration, as every legacy consumer does.
+const firestoreMapOrder = value => Array.isArray(value) ? value.map(firestoreMapOrder)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value)
+    .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+    .map(key => [key, firestoreMapOrder(value[key])])) : value;
 function encodedSize(path, value) {
   // Firestore documented storage encoding: name components+16, document+32,
   // field UTF8+1, nested maps+32, strings UTF8+1, doubles/int64=8.
@@ -174,15 +181,16 @@ async function inventory(db, generation) {
 }
 async function readState(db, generation = null) {
   const refs = await inventory(db, generation);
-  return db.runTransaction(async tx => readStateInTransaction(db, tx, refs), {readOnly: true});
+  return db.runTransaction(async tx => readStateInTransaction(db, tx, refs, generation), {readOnly: true});
 }
-async function readStateInTransaction(db, tx, refs) {
-  const [source, control] = await tx.getAll(db.doc(LEGACY), db.doc(CONTROL));
+async function readStateInTransaction(db, tx, refs, generation) {
+  const [source, control, candidate] = await tx.getAll(db.doc(LEGACY), db.doc(CONTROL), ...(generation ? [db.doc(rollbackCandidatePath(generation))] : []));
   const documents = [];
   for (let start = 0; start < refs.length; start += PAGE) {
     for (const snapshot of await tx.getAll(...refs.slice(start, start + PAGE))) if (snapshot.exists) documents.push({path: snapshot.ref.path, data: snapshot.data()});
   }
-  return {source: source.exists ? source.data() : null, control: control.exists ? control.data() : null, documents};
+  return {source: source.exists ? source.data() : null, control: control.exists ? control.data() : null, documents,
+    rollbackCandidate: candidate?.exists ? candidate.data() : null};
 }
 function targetRows(state, generation, locale, {partial = false} = {}) {
   const root = `codex_versions/${generation}`, groups = [], deleted = [];
@@ -225,6 +233,36 @@ function verifyMigration(state, generation, locale, complete = true) {
   return expected;
 }
 const ACTIONS = ['freeze', 'backfill', 'verify', 'activate', 'rollback-freeze', 'rollback', 'resume-v2'];
+function rollbackProjection(state, generation, c, scope) {
+  const {groups, marker} = targetRows(state, generation, c.collationLocale);
+  const restored = M.restoreLegacyCodex(groups), checked = inspectSource(restored, c.collationLocale);
+  check(checked.valid && sourceHash(M.restoreLegacyCodex(checked.groups)) === sourceHash(restored), 'Rollback reconstruction mismatch.');
+  const {rollback, ...stableMarker} = marker || {};
+  const bindings = {schemaVersion: 1, generation, epoch: c.epoch, controlDigest: hash(c),
+    digest: sourceHash(restored), contentDigest: hash(restored), scopeDigest: hash(scope), runtime: runtime(),
+    targetDigest: hash({marker: stableMarker, documents: state.documents.filter(d => d.path !== `codex_versions/${generation}`)})};
+  const candidate = {...bindings, source: restored};
+  const encodedBytes = encodedSize(LEGACY, restored), candidateEncodedBytes = encodedSize(rollbackCandidatePath(generation), candidate);
+  return {bindings, candidate, restored, checked, encodedBytes, candidateEncodedBytes,
+    orderRepresentable: sourceHash(firestoreMapOrder(restored)) === bindings.digest,
+    fits: Math.max(encodedBytes, candidateEncodedBytes) <= MAX_DOCUMENT_BYTES};
+}
+function verifyRollbackCandidate(candidate, checkpoint, expected, generation) {
+  const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  const keys = Object.keys(expected.bindings);
+  check(exact(checkpoint, [...keys, 'phase', 'priorLegacyDigest'])
+    && ['candidate-persisted', 'legacy-persisted'].includes(checkpoint.phase)
+    && /^[a-f0-9]{64}$/.test(checkpoint.priorLegacyDigest)
+    && keys.every(key => hash(checkpoint[key]) === hash(expected.bindings[key])), 'Rollback checkpoint/control/runtime/target changed; remain frozen or resume-v2.');
+  check(exact(candidate, [...keys, 'source'])
+    && keys.every(key => hash(candidate[key]) === hash(expected.bindings[key]))
+    && inspectSource(candidate.source).valid
+    && hash(candidate.source) === expected.bindings.contentDigest
+    && sourceHash(candidate.source) === expected.bindings.digest
+    && encodedSize(rollbackCandidatePath(generation), candidate) <= MAX_DOCUMENT_BYTES,
+  'Persisted rollback candidate content/order/schema mismatch; remain frozen or resume-v2.');
+}
 function makePlan(state, action, generation, scope = {}) {
   check(ACTIONS.includes(action) && idOK(generation), 'Invalid migration action/generation.');
   const c = controlData(state.control), source = inspectSource(state.source, c.collationLocale);
@@ -237,15 +275,31 @@ function makePlan(state, action, generation, scope = {}) {
   let rollback = null;
   if (['v2', 'rollback-frozen'].includes(c.mode)) {
     try {
-      const {groups} = targetRows(state, generation, c.collationLocale), restored = M.restoreLegacyCodex(groups);
-      const encodedBytes = encodedSize(LEGACY, restored);
-      rollback = {valid: true, digest: sourceHash(restored), encodedBytes, fits: encodedBytes <= MAX_DOCUMENT_BYTES,
-        categories: groups.length, items: groups.reduce((sum, group) => sum + group.items.length, 0)};
+      const projected = rollbackProjection(state, generation, c, scope);
+      const checkpoint = state.documents.find(d => d.path === root)?.data.rollback;
+      let candidateVerified = false;
+      if (['candidate-persisted', 'legacy-persisted'].includes(checkpoint?.phase)) {
+        try { verifyRollbackCandidate(state.rollbackCandidate, checkpoint, projected, generation); candidateVerified = true; } catch (_) { /* report blocked checkpoint below */ }
+      }
+      const legacyVerified = source.valid && source.sourceDigest === projected.bindings.digest && hash(state.source) === projected.bindings.contentDigest;
+      const priorLegacyUnchanged = source.valid && source.sourceDigest === checkpoint?.priorLegacyDigest;
+      rollback = {valid: true, digest: projected.bindings.digest, encodedBytes: projected.encodedBytes,
+        candidateEncodedBytes: projected.candidateEncodedBytes, fits: projected.fits, orderRepresentable: projected.orderRepresentable,
+        safe: projected.fits && projected.orderRepresentable && (!checkpoint || checkpoint.phase === 'abandoned'
+          || (candidateVerified && (checkpoint.phase === 'candidate-persisted' ? priorLegacyUnchanged : legacyVerified))),
+        stage: checkpoint?.phase || 'not-started', candidateVerified, legacyVerified,
+        reason: !projected.orderRepresentable ? 'Current source order cannot be represented by Firestore legacy maps; remain frozen or resume-v2.'
+          : !projected.fits ? 'Aggregate or private candidate exceeds the conservative encoded-size limit.'
+            : checkpoint && checkpoint.phase !== 'abandoned' && !candidateVerified ? 'Persisted candidate/checkpoint no longer matches current v2.'
+              : checkpoint?.phase === 'candidate-persisted' && !priorLegacyUnchanged ? 'Prior legacy source changed before candidate promotion.'
+                : checkpoint?.phase === 'legacy-persisted' && !legacyVerified ? 'Persisted legacy content/order mismatch; remain frozen or resume-v2.' : null,
+        categories: projected.checked.categories, items: projected.checked.items};
     } catch (_) { rollback = {valid: false, fits: false, reason: 'Current generation integrity verification failed.'}; }
   }
   const body = {schemaVersion: 2, action, generation, scope, runtime: runtime(), stateDigest: hash(state),
     control: c, source: {...source, groups: undefined}, target,
-    checkpoint: state.documents.find(d => d.path === root)?.data || null, rollback};
+    checkpoint: state.documents.find(d => d.path === root)?.data || null, rollback,
+    candidate: {path: rollbackCandidatePath(generation), exists: Boolean(state.rollbackCandidate), digest: hash(state.rollbackCandidate || null)}};
   return {...body, fingerprint: hash(body)};
 }
 function validatePlan(plan, fingerprint, state, action, generation, scope) {
@@ -255,7 +309,7 @@ function validatePlan(plan, fingerprint, state, action, generation, scope) {
 async function applyPlan(db, plan, fingerprint, scope = {}) {
   const {generation, action} = plan, refs = await inventory(db, generation);
   return db.runTransaction(async tx => {
-    const state = await readStateInTransaction(db, tx, refs);
+    const state = await readStateInTransaction(db, tx, refs, generation);
     validatePlan(plan, fingerprint, state, action, generation, scope);
     const c = controlData(state.control), root = `codex_versions/${generation}`, ref = db.doc(root);
     const marker = state.documents.find(d => d.path === root)?.data;
@@ -264,9 +318,9 @@ async function applyPlan(db, plan, fingerprint, scope = {}) {
       check(Number.isSafeInteger(c.epoch + 1), 'Control epoch exhausted.', 'resource-exhausted');
       tx.set(db.doc(CONTROL), {...c, mode, epoch: c.epoch + 1, ...extra});
     };
-    if (action === 'rollback' && c.mode === 'legacy' && !marker && state.documents.length === 0) return {mode: 'legacy', replayed: true};
+    if (action === 'rollback' && c.mode === 'legacy' && !marker && state.documents.length === 0 && !state.rollbackCandidate) return {mode: 'legacy', stage: 'complete', complete: true, nextAction: null, replayed: true};
     if (action === 'freeze') {
-      check(c.mode === 'legacy' && source.valid && state.documents.length === 0, 'Freeze requires valid legacy source and unused generation.');
+      check(c.mode === 'legacy' && source.valid && state.documents.length === 0 && !state.rollbackCandidate, 'Freeze requires valid legacy source and unused generation.');
       tx.create(ref, {schemaVersion: 2, generation, sourceDigest: source.sourceDigest, categories: source.categories, items: source.items,
         runtime: runtime(), offset: 0, status: 'building'});
       transition('frozen', {generation}); return {mode: 'frozen', offset: 0};
@@ -296,25 +350,48 @@ async function applyPlan(db, plan, fingerprint, scope = {}) {
     if (action === 'resume-v2') {
       check(c.mode === 'rollback-frozen' && marker.status === 'active', 'Only active v2 rollback freeze can resume.');
       targetRows(state, generation, c.collationLocale);
-      transition('v2'); return {mode: 'v2'};
+      // Candidate data is never authoritative. Explicit recovery may abandon
+      // even a corrupt candidate/checkpoint without weakening v2 orphan checks.
+      if (marker.rollback || state.rollbackCandidate) tx.set(ref, {...marker, rollback: {schemaVersion: 1, generation, phase: 'abandoned'}});
+      transition('v2'); return {mode: 'v2', stage: 'abandoned', complete: true, nextAction: null};
     }
     check(action === 'rollback', 'Invalid rollback action.');
-    if (c.mode === 'legacy' && marker.status === 'rolled-back') return {mode: 'legacy', replayed: true};
+    if (c.mode === 'legacy' && marker.status === 'rolled-back') return {mode: 'legacy', stage: 'complete', complete: true, nextAction: null, replayed: true};
     if (c.mode === 'frozen') {
       check(source.valid && marker.sourceDigest === source.sourceDigest, 'Frozen legacy source changed.');
       verifyMigration(state, generation, c.collationLocale, false);
-      transition('legacy'); tx.set(ref, {...marker, status: 'rolled-back'}); return {mode: 'legacy'};
+      transition('legacy'); tx.set(ref, {...marker, status: 'rolled-back'}); return {mode: 'legacy', stage: 'complete', complete: true, nextAction: null};
     }
     check(c.mode === 'rollback-frozen' && marker.status === 'active', 'Freeze v2 before reconstructing rollback.');
-    const {groups} = targetRows(state, generation, c.collationLocale);
-    const restored = M.restoreLegacyCodex(groups), checked = inspectSource(restored, c.collationLocale);
-    check(checked.valid && hash(M.restoreLegacyCodex(checked.groups)) === hash(restored), 'Rollback reconstruction mismatch.');
-    const bytes = encodedSize(LEGACY, restored);
-    check(bytes <= MAX_DOCUMENT_BYTES, 'Rollback aggregate exceeds conservative Firestore limit; remain frozen or resume-v2.', 'resource-exhausted');
-    tx.set(db.doc(LEGACY), restored);
-    transition('legacy'); tx.set(ref, {...marker, status: 'rolled-back', rollbackDigest: sourceHash(restored), rollbackEncodedBytes: bytes});
-    return {mode: 'legacy', categories: checked.categories, items: checked.items, encodedBytes: bytes, digest: sourceHash(restored)};
+    const projected = rollbackProjection(state, generation, c, scope);
+    check(projected.fits, 'Rollback aggregate or candidate exceeds conservative Firestore limit; remain frozen or resume-v2.', 'resource-exhausted');
+    check(projected.orderRepresentable, 'Current source order cannot be represented by Firestore legacy maps; remain frozen or resume-v2.');
+    const checkpoint = marker.rollback;
+    const result = {mode: 'rollback-frozen', complete: false, nextAction: 'rollback', categories: projected.checked.categories,
+      items: projected.checked.items, encodedBytes: projected.encodedBytes, candidateEncodedBytes: projected.candidateEncodedBytes, digest: projected.bindings.digest};
+    if (!checkpoint || checkpoint.phase === 'abandoned') {
+      check(checkpoint || !state.rollbackCandidate, 'Foreign rollback candidate without a checkpoint.');
+      if (checkpoint) check(hash(checkpoint) === hash({schemaVersion: 1, generation, phase: 'abandoned'}), 'Invalid abandoned rollback checkpoint.');
+      check(source.valid, 'Prior legacy data is invalid; preserve backup and repair before rollback.');
+      tx.set(db.doc(rollbackCandidatePath(generation)), projected.candidate);
+      tx.set(ref, {...marker, rollback: {...projected.bindings, priorLegacyDigest: sourceHash(state.source), phase: 'candidate-persisted'}});
+      return {...result, stage: 'candidate-persisted'};
+    }
+    verifyRollbackCandidate(state.rollbackCandidate, checkpoint, projected, generation);
+    if (checkpoint.phase === 'candidate-persisted') {
+      check(source.valid && sourceHash(state.source) === checkpoint.priorLegacyDigest, 'Prior legacy source changed before candidate promotion.');
+      tx.set(db.doc(LEGACY), state.rollbackCandidate.source);
+      tx.set(ref, {...marker, rollback: {...checkpoint, phase: 'legacy-persisted'}});
+      return {...result, stage: 'legacy-persisted'};
+    }
+    check(source.valid && sourceHash(state.source) === projected.bindings.digest && hash(state.source) === projected.bindings.contentDigest,
+      'Persisted legacy content/order mismatch; remain frozen or resume-v2.');
+    // Crucially, activation reads the persisted map and never writes it again.
+    transition('legacy'); tx.set(ref, {...marker, status: 'rolled-back', rollback: {...checkpoint, phase: 'complete'},
+      rollbackDigest: projected.bindings.digest, rollbackEncodedBytes: projected.encodedBytes});
+    return {...result, mode: 'legacy', stage: 'complete', complete: true, nextAction: null};
   });
 }
 module.exports = {M, CONTROL, LEGACY, PAGE, MAX_DOCUMENT_BYTES, hash, sourceHash, runtime, encodedSize, inspectSource, validateRows, insertion,
-  validateMutation, mutateCodex, inventory, readState, targetRows, verifyMigration, makePlan, validatePlan, applyPlan, ACTIONS};
+  validateMutation, mutateCodex, inventory, readState, targetRows, verifyMigration, makePlan, validatePlan, applyPlan, ACTIONS,
+  firestoreMapOrder, rollbackCandidatePath, rollbackProjection, verifyRollbackCandidate};

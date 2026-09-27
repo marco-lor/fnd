@@ -20,9 +20,12 @@
  * other IDs/ranks. New source ranks append; preserve map integer-key semantics.
  * Category changes increment metadataRevision; item changes do not.
  *
- * Rollback: freeze v2 writer, reconstruct CURRENT v2, verify exact equality and
- * Firestore encoded size, then atomically replace legacy/control. If it cannot
- * fit, remain frozen or resume v2: never overwrite with the stale backup.
+ * Rollback: freeze v2 writers and reconstruct CURRENT v2. Reject order that
+ * cannot survive Firestore's UTF-8 map-key sorting, and preflight encoded size.
+ * Three separately reviewed checkpoints persist a private candidate, verify it
+ * and persist legacy while still frozen, then verify persisted legacy and
+ * atomically switch control WITHOUT rewriting legacy. Unsafe/corrupt data stays
+ * frozen or explicitly resumes v2; never restore the stale backup over edits.
  * Retain original legacy and generation documents until explicit retirement.
  * Old clients receive write-denied after freeze; no client dual writing.
  */

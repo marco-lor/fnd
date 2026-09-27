@@ -8,6 +8,7 @@ const {initializeApp, deleteApp} = req('firebase-admin/app'), {getFirestore} = r
 const {configureOwnedPerformanceEnvironment} = require('../../scripts/performance/common');
 configureOwnedPerformanceEnvironment();
 const C = require('../../functions/lib/codexCore');
+const {verifyRollbackResult} = require('../../scripts/task12/codex-migration');
 const projectId = 'demo-fnd-perf', generation = 'test12';
 let env, app, db;
 before(async () => {
@@ -23,6 +24,16 @@ async function reset(source = small()) {
   await Promise.all([db.doc(C.LEGACY).set(source), ...['dm', 'webmaster', 'player', 'pending'].map(uid => db.doc('users/' + uid).set({role: uid === 'pending' ? 'dm' : uid, ...(uid === 'pending' ? {deletionState: 'pending'} : {})}))]);
 }
 async function action(name, gen = generation) { const state = await C.readState(db, gen), plan = C.makePlan(state, name, gen); return C.applyPlan(db, plan, plan.fingerprint); }
+async function completeRollback() {
+  for (const stage of ['candidate-persisted', 'legacy-persisted', 'complete']) {
+    const before = await db.doc(C.LEGACY).get(), result = await action('rollback');
+    assert.equal(result.stage, stage); assert.equal(result.complete, stage === 'complete');
+    const after = await C.readState(db, generation);
+    assert.equal(verifyRollbackResult(after, result, generation, {}), stage === 'complete' ? 'committed' : 'in-progress');
+    if (stage !== 'legacy-persisted') assert.ok((await db.doc(C.LEGACY).get()).updateTime.isEqual(before.updateTime));
+    if (stage === 'complete') { assert.equal(C.sourceHash(after.source), result.digest); return result; }
+  }
+}
 async function activate(source = small()) {
   await reset(source); await action('freeze');
   let result; do { result = await action('backfill'); } while (!result.complete);
@@ -144,29 +155,29 @@ test('writer exact two-document edits, same/different category contention and st
 test('numeric category/item additions preserve map enumeration, display pages and exact persisted rollback', async () => {
   let s = await activate({Named: {Word: 'word'}}), g = s.groups[0];
   const originalCategory = g.category, originalItem = g.items[0], expected = {Named: {Word: 'word'}};
-  for (const key of ['12', '2', '30', '02']) {
+  for (const key of ['12', '2', '30']) {
     const result = await C.mutateCodex(db, 'dm', request(s, 'item-add', {categoryId: g.category.id, categoryRevision: g.category.revision, legacyKey: key, value: 'value ' + key}));
     g = {...g, category: result.category}; expected.Named[key] = 'value ' + key;
   }
-  for (const key of ['12', '2', '30', '02']) {
+  for (const key of ['12', '2', '30']) {
     await C.mutateCodex(db, 'dm', request(s, 'category-add', {legacyKey: key, metadataRevision: s.control.metadataRevision}));
     s = {...s, control: {...s.control, metadataRevision: s.control.metadataRevision + 1}}; expected[key] = {};
   }
   s = await current(); g = s.groups.find(group => group.category.legacyKey === 'Named');
   assert.equal(g.category.id, originalCategory.id);
   assert.deepEqual(g.items.find(i => i.id === originalItem.id), originalItem);
-  assert.deepEqual([...g.items].sort((a, b) => a.sourceRank - b.sourceRank).map(i => i.legacyKey), ['Word', '12', '2', '30', '02']);
+  assert.deepEqual([...g.items].sort((a, b) => a.sourceRank - b.sourceRank).map(i => i.legacyKey), ['Word', '12', '2', '30']);
   const reconstructed = C.M.restoreLegacyCodex(s.groups);
   assert.deepEqual(reconstructed, expected);
-  assert.deepEqual(Object.keys(reconstructed), ['2', '12', '30', 'Named', '02']);
-  assert.deepEqual(Object.keys(reconstructed.Named), ['2', '12', '30', 'Word', '02']);
+  assert.deepEqual(Object.keys(reconstructed), ['2', '12', '30', 'Named']);
+  assert.deepEqual(Object.keys(reconstructed.Named), ['2', '12', '30', 'Word']);
   const player = client('player');
   for (const [collectionPath, names] of [[`codex_versions/${generation}/categories`, Object.keys(expected)],
     [`codex_versions/${generation}/categories/${g.category.id}/items`, Object.keys(expected.Named)]]) {
     const display = (await assertSucceeds(F.getDocs(F.query(F.collection(player, collectionPath), F.orderBy('displayRank'), F.orderBy(F.documentId()), F.limit(26))))).docs.map(d => d.get('legacyKey'));
     assert.deepEqual(display, [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase(), 'en-US')));
   }
-  await action('rollback-freeze'); const result = await action('rollback');
+  await action('rollback-freeze'); const result = await completeRollback();
   const stored = (await db.doc(C.LEGACY).get()).data();
   assert.deepEqual(stored, expected); assert.equal(C.sourceHash(stored), result.digest);
   assert.deepEqual(Object.keys(stored), Object.keys(expected)); assert.deepEqual(Object.keys(stored.Named), Object.keys(expected.Named));
@@ -196,8 +207,10 @@ test('category case collisions reject off-page and concurrent variants; migrated
   await assert.rejects(C.mutateCodex(db, 'dm', request(s, 'item-add', {categoryId: g.category.id, categoryRevision: g.category.revision, legacyKey: 'foo', value: 'duplicate'})), e => e.code === 'already-exists');
   s = await current(); const expected = C.M.restoreLegacyCodex(s.groups);
   assert.deepEqual(expected.Mixed, {Foo: 'upper original', foo: 'foo', FOO: 'FOO'}); assert.deepEqual(expected.mixed, source.mixed);
-  await action('rollback-freeze'); const result = await action('rollback');
-  const stored = (await db.doc(C.LEGACY).get()).data(); assert.deepEqual(stored, expected); assert.equal(C.sourceHash(stored), result.digest);
+  await action('rollback-freeze'); await assert.rejects(action('rollback'), /cannot be represented/);
+  assert.deepEqual((await db.doc(C.LEGACY).get()).data(), source);
+  assert.equal((await db.doc(C.CONTROL).get()).get('mode'), 'rollback-frozen');
+  await action('resume-v2'); assert.deepEqual(C.M.restoreLegacyCodex((await current()).groups), expected);
 });
 test('real 20-category 5000-item indexed paging keeps initial bodies bounded and every option reachable', async () => {
   const source = require('../../scripts/performance/fixtures').buildDocuments().find(d => d.path === C.LEGACY).data;
@@ -235,7 +248,7 @@ test('large category atomic deletion, add/delete race and re-add never resurrect
   assert.equal((await db.doc(oldPath).get()).exists, true); await assertFails(F.getDoc(F.doc(client('dm'), oldPath)));
   const added = await C.mutateCodex(db, 'dm', request(s, 'category-add', {legacyKey: 'Large', metadataRevision: s.control.metadataRevision}));
   assert.notEqual(added.category.id, g.category.id); assert.ok(added.category.sourceRank > g.category.sourceRank); assert.equal(added.category.itemCount, 0);
-  await action('rollback-freeze'); await action('rollback'); assert.deepEqual((await db.doc(C.LEGACY).get()).data(), {Large: {}});
+  await action('rollback-freeze'); await completeRollback(); assert.deepEqual((await db.doc(C.LEGACY).get()).data(), {Large: {}});
 });
 test('rollback every phase, post-cutover edits/add/delete preserved, overflow blocked then resumes v2', async () => {
   await reset(); assert.equal((await action('rollback')).mode, 'legacy');
@@ -245,20 +258,56 @@ test('rollback every phase, post-cutover edits/add/delete preserved, overflow bl
     await action('rollback'); assert.deepEqual((await db.doc(C.LEGACY).get()).data(), small());
     assert.equal((await action('rollback')).replayed, true);
   }
-  let s = await activate(), g = s.groups.find(g => g.category.legacyKey === 'Razze');
+  let s = await activate({Razze: {Elf: 'elf', Human: 'human'}}), g = s.groups[0];
+  await C.mutateCodex(db, 'dm', request(s, 'item-add', {categoryId: g.category.id, categoryRevision: g.category.revision, legacyKey: 'Dwarf', value: 'new dwarf'}));
+  await action('rollback-freeze'); await assert.rejects(action('rollback'), /cannot be represented/);
+  assert.deepEqual((await db.doc(C.LEGACY).get()).data(), {Razze: {Elf: 'elf', Human: 'human'}});
+  await action('resume-v2');
+  s = await activate({Razze: {Elf: 'elf', Human: 'human'}}); g = s.groups[0];
   await C.mutateCodex(db, 'dm', edit(s, g, 'post-cutover edit'));
   s = await current(); g = s.groups.find(g => g.category.legacyKey === 'Razze');
-  await C.mutateCodex(db, 'dm', request(s, 'item-add', {categoryId: g.category.id, categoryRevision: g.category.revision, legacyKey: 'Dwarf', value: 'new dwarf'}));
+  await C.mutateCodex(db, 'dm', request(s, 'item-add', {categoryId: g.category.id, categoryRevision: g.category.revision, legacyKey: 'Orc', value: 'new orc'}));
   s = await current(); g = s.groups.find(g => g.category.legacyKey === 'Razze'); const item = g.items.find(i => i.legacyKey === 'Human');
   await C.mutateCodex(db, 'dm', request(s, 'item-delete', {categoryId: g.category.id, categoryRevision: g.category.revision, itemId: item.id, itemRevision: item.revision}));
   s = await current(); const expected = C.M.restoreLegacyCodex(s.groups);
-  await action('rollback-freeze'); const result = await action('rollback');
+  await action('rollback-freeze'); const result = await completeRollback();
   const restored = (await db.doc(C.LEGACY).get()).data(); assert.deepEqual(restored, expected);
-  console.log('Task12 rollback persisted ordering ' + JSON.stringify({before: Object.keys(expected.Razze), after: Object.keys(restored.Razze), digestMatches: C.sourceHash(restored) === result.digest}));
+  assert.equal(C.sourceHash(restored), result.digest);
+  assert.deepEqual(Object.keys(restored.Razze), ['Elf', 'Orc']);
   s = await activate({A: {a: 'a'}, B: {b: 'b'}});
   await Promise.all(s.groups.map(g => C.mutateCodex(db, 'dm', edit(s, g, 'x'.repeat(550000)))));
   await action('rollback-freeze'); await assert.rejects(action('rollback'), e => e.code === 'resource-exhausted');
   assert.deepEqual((await db.doc(C.LEGACY).get()).data(), {A: {a: 'a'}, B: {b: 'b'}});
   assert.equal((await db.doc(C.CONTROL).get()).get('mode'), 'rollback-frozen');
   assert.equal((await action('resume-v2')).mode, 'v2');
+});
+
+test('private rollback candidates deny all client roles; persisted corruption never enables legacy', async () => {
+  let s = await activate({A: {Elf: 'elf', Human: 'human'}});
+  await C.mutateCodex(db, 'dm', edit(s, s.groups[0], 'current edit'));
+  await action('rollback-freeze');
+  assert.equal((await action('rollback')).stage, 'candidate-persisted');
+  const candidateRef = db.doc(C.rollbackCandidatePath(generation)), saved = (await candidateRef.get()).data();
+  for (const uid of [null, 'player', 'dm', 'webmaster']) {
+    const ref = F.doc(client(uid), candidateRef.path);
+    await assertFails(F.getDoc(ref)); await assertFails(F.setDoc(ref, saved)); await assertFails(F.deleteDoc(ref));
+  }
+  const state = await C.readState(db, generation), stale = C.makePlan(state, 'rollback', generation);
+  await candidateRef.update({'source.A.Elf': 'corruption'});
+  await assert.rejects(C.applyPlan(db, stale, stale.fingerprint), /stale/);
+  await assert.rejects(action('rollback'), /candidate/);
+  assert.equal((await db.doc(C.CONTROL).get()).get('mode'), 'rollback-frozen');
+  assert.deepEqual((await db.doc(C.LEGACY).get()).data(), {A: {Elf: 'elf', Human: 'human'}});
+  await action('resume-v2'); assert.equal((await candidateRef.get()).get('source.A.Elf'), 'corruption');
+  await action('rollback-freeze'); await action('rollback');
+  assert.equal((await candidateRef.get()).get('source.A.Elf'), 'current edit');
+  assert.equal((await action('rollback')).stage, 'legacy-persisted');
+  await db.doc(C.LEGACY).update({'A.Elf': 'persisted corruption'});
+  await assert.rejects(action('rollback'), /Persisted legacy/);
+  assert.equal((await db.doc(C.CONTROL).get()).get('mode'), 'rollback-frozen');
+  await action('resume-v2');
+  assert.equal(C.M.restoreLegacyCodex((await current()).groups).A.Elf, 'current edit');
+  await action('rollback-freeze'); await completeRollback();
+  assert.equal((await db.doc(C.LEGACY).get()).get('A.Elf'), 'current edit');
+  assert.equal((await action('rollback')).replayed, true);
 });

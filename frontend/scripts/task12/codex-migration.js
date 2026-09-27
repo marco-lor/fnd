@@ -2,6 +2,8 @@
 'use strict';
 // One explicitly reviewed action per invocation. Re-inspect after a committed
 // batch or an uncertain/crashed invocation; the server marker is authoritative.
+// Active-v2 rollback requires three fresh inspect/apply pairs: private candidate,
+// persisted legacy while frozen, then verified activation without rewriting it.
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const {execFileSync} = require('node:child_process');
 const {createRequire} = require('node:module');
@@ -61,6 +63,22 @@ async function connect(target) {
   try { process.env.GOOGLE_APPLICATION_CREDENTIALS = credential.filePath; app = initializeApp({projectId: target.projectId}, 'task12-' + process.pid); return {db: getFirestore(app), close}; }
   catch (error) { await close(); throw error; }
 }
+function verifyRollbackResult(after, result, generation, scope) {
+  if (result.complete) {
+    if (result.mode !== 'legacy' || result.stage !== 'complete' || result.nextAction !== null || core.M.normalizeControl(after.control).mode !== 'legacy') throw Error('Incomplete rollback activation.');
+    if (result.digest && core.sourceHash(after.source) !== result.digest) throw Error('Persisted rollback content/order verification failed.');
+    return 'committed';
+  }
+  if (result.mode !== 'rollback-frozen' || after.control?.mode !== 'rollback-frozen' || result.nextAction !== 'rollback'
+    || !['candidate-persisted', 'legacy-persisted'].includes(result.stage)) throw Error('Invalid rollback checkpoint.');
+  const checkpoint = after.documents.find(d => d.path === `codex_versions/${generation}`)?.data.rollback;
+  if (checkpoint?.phase !== result.stage) throw Error('Rollback checkpoint changed.');
+  const projected = core.rollbackProjection(after, generation, after.control, scope);
+  core.verifyRollbackCandidate(after.rollbackCandidate, checkpoint, projected, generation);
+  const expectedLegacy = result.stage === 'candidate-persisted' ? checkpoint.priorLegacyDigest : result.digest;
+  if (core.sourceHash(after.source) !== expectedLegacy) throw Error('Persisted rollback source/order verification failed.');
+  return 'in-progress';
+}
 async function run(o, injected = {}) {
   const branch = injected.branch ?? execFileSync('git', ['-c', GIT_SAFE, 'rev-parse', '--abbrev-ref', 'HEAD'], {cwd: FRONTEND_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim();
   const target = guard(o, injected.environment || process.env, branch);
@@ -89,15 +107,16 @@ async function run(o, injected = {}) {
     try {
       const result = await core.applyPlan(connection.db, plan, o.reviewedFingerprint, scope);
       const after = await core.readState(connection.db, o.generation);
-      if (o.action === 'rollback' && result.digest && core.sourceHash(after.source) !== result.digest) throw Error('Persisted rollback content/order verification failed.');
-      writeExclusive(output, {kind: 'task12-checkpoint', status: 'committed', action: o.action, generation: o.generation, fingerprint: plan.fingerprint, result, stateDigest: core.hash(after), scope});
-      return {status: 'committed', ...result};
+      const status = o.action === 'rollback' ? verifyRollbackResult(after, result, o.generation, scope) : 'committed';
+      writeExclusive(output, {kind: 'task12-checkpoint', status, action: o.action, generation: o.generation, fingerprint: plan.fingerprint,
+        stage: result.stage || null, complete: result.complete ?? null, nextAction: result.nextAction || null, result, stateDigest: core.hash(after), scope});
+      return {status, ...result};
     } catch (_) {
       writeExclusive(output, {kind: 'task12-checkpoint', status: 'inspect-required', generation: o.generation, fingerprint: plan.fingerprint, scope,
-        recovery: 'Retain backup. Inspect current state with a fresh output; never reuse a stale plan. Resume backfill with exact generation or review rollback.'});
+        recovery: 'Retain backup. Inspect current state with a fresh output; never reuse a stale plan. Rollback checkpoints remain frozen until persisted verification; review rollback or explicitly resume-v2 for valid canonical data.'});
       throw Error('Action failed or outcome uncertain; retained checkpoint/backup require fresh inspect.');
     }
   } finally { await connection.close(); }
 }
 if (require.main === module) run(parse(process.argv.slice(2))).then(result => console.log(JSON.stringify(result))).catch(() => { console.error('Codex operator stopped. Check explicit target, reviewed fingerprint, checkpoint and retained backup; SDK details suppressed.'); process.exitCode = 1; });
-module.exports = {parse, guard, codeIdentity, run};
+module.exports = {parse, guard, codeIdentity, verifyRollbackResult, run};

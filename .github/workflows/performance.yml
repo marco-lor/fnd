@@ -105,6 +105,7 @@ jobs:
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
       - run: node scripts/performance/rules-emulators.js
+      - run: node scripts/task12/run-emulator-tests.js
 
   hardened-build:
     runs-on: ubuntu-latest
