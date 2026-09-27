@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { assertPerformanceProject, configureOwnedPerformanceEnvironment, projectId } = require('./common');
 const CODEX_FIXTURE_GENERATION = 'task12_performance';
+const CODEX_FIXTURE_REPORT_PREFIX = 'FND_CODEX_FIXTURE_REPORT ';
 
 // Projection follows canonical fixture verification, like catalog preparation.
 // The source fixture and its version/hash remain unchanged; only demo-derived
@@ -72,8 +73,8 @@ async function main() {
   const { initializeApp, deleteApp } = require('firebase-admin/app');
   const { getFirestore } = require('firebase-admin/firestore');
   const app = initializeApp({ projectId }, 'task12-fixture-preparation');
-  try { console.log(JSON.stringify(await prepareCodexFixture({ db: getFirestore(app) }))); }
+  try { console.log(CODEX_FIXTURE_REPORT_PREFIX + JSON.stringify(await prepareCodexFixture({ db: getFirestore(app) }))); }
   finally { await deleteApp(app); }
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { CODEX_FIXTURE_GENERATION, prepareCodexFixture };
+module.exports = { CODEX_FIXTURE_GENERATION, CODEX_FIXTURE_REPORT_PREFIX, prepareCodexFixture };

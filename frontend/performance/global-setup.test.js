@@ -459,7 +459,7 @@ test('Playwright keeps one worker and zero retries', () => {
   assert.equal(playwrightConfig.retries, 0);
 });
 
-const { prepareCodexFixture, CODEX_FIXTURE_GENERATION } = require('../scripts/performance/task12-codex-fixture');
+const { prepareCodexFixture, CODEX_FIXTURE_GENERATION, CODEX_FIXTURE_REPORT_PREFIX } = require('../scripts/performance/task12-codex-fixture');
 const codexCore = require('../functions/lib/codexCore');
 const codexPreparationHarness = ({ items = 2 } = {}) => {
   const source = { categoria_00: Object.fromEntries(Array.from({ length: items }, (_, i) => [`Codex 0-${i}`, `value-${i}`])) };
@@ -570,9 +570,26 @@ test('Codex preparation fails closed on source changes, batch failure and incomp
 
 test('browser setup prepares Codex in a bounded child and rejects incomplete activation reports', async () => {
   const { activateCodexFixture } = require('./global-setup');
-  let call; const report = { mode: 'v2', categories: 20, items: 5000, projectionDocuments: 5020 };
-  assert.deepEqual(await activateCodexFixture(async input => { call = input; return { status: 0, stdout: JSON.stringify(report) }; }), report);
+  let call; const report = { mode: 'v2', generation: CODEX_FIXTURE_GENERATION, categories: 20, items: 5000, projectionDocuments: 5020 };
+  const tagged = value => CODEX_FIXTURE_REPORT_PREFIX + JSON.stringify(value);
+  assert.deepEqual(await activateCodexFixture(async input => { call = input; return { status: 0, stdout: tagged(report) }; }), report);
   assert.match(call.args[0], /task12-codex-fixture\.js$/); assert.equal(call.timeoutMs, 300_000);
   await assert.rejects(activateCodexFixture(async () => ({ status: 1, stderr: 'projection incomplete' })), /Codex fixture activation failed.*projection incomplete/s);
-  await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: JSON.stringify({ ...report, items: 4999 }) })), /incomplete projection/);
+  for (const patch of [{ mode: 'legacy' }, { generation: 'wrong' }, { categories: 19 }, { items: 4999 }, { projectionDocuments: 5019 }]) {
+    await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: tagged({ ...report, ...patch }) })), /incomplete projection/);
+  }
+  await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: tagged(null) })), /incomplete projection/);
+});
+
+test('Codex report protocol accepts surrounding diagnostics but rejects missing, duplicate or malformed reports', async () => {
+  const { activateCodexFixture } = require('./global-setup');
+  const report = { mode: 'v2', generation: CODEX_FIXTURE_GENERATION, categories: 20, items: 5000, projectionDocuments: 5020 };
+  const tagged = CODEX_FIXTURE_REPORT_PREFIX + JSON.stringify(report);
+  const run = stdout => activateCodexFixture(async () => ({ status: 0, stdout }));
+  assert.deepEqual(await run(`dependency diagnostic\r\n${JSON.stringify({ diagnostic: true })}\r\n${tagged}\r\ncleanup complete\n`), report);
+  for (const stdout of ['', 'dependency diagnostic only', JSON.stringify(report), `${tagged}\n${tagged}`]) {
+    await assert.rejects(run(stdout), /exactly one tagged report/);
+  }
+  await assert.rejects(run(CODEX_FIXTURE_REPORT_PREFIX + '{broken'), /malformed tagged report/);
+  await assert.rejects(run(`${tagged}\n${CODEX_FIXTURE_REPORT_PREFIX}{broken`), /exactly one tagged report/);
 });

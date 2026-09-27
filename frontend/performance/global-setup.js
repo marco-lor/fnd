@@ -138,8 +138,14 @@ const activateCodexFixture = async (run = runBoundedChildProcess) => {
   if (result.status !== 0) {
     throw new Error(`Codex fixture activation failed.\n${result.stdout || ''}\n${result.stderr || ''}`);
   }
-  const report = JSON.parse(result.stdout);
-  if (report.mode !== 'v2' || report.categories !== 20 || report.items !== 5000 || report.projectionDocuments !== 5020) {
+  const { CODEX_FIXTURE_REPORT_PREFIX, CODEX_FIXTURE_GENERATION } = require('../scripts/performance/task12-codex-fixture');
+  const reports = String(result.stdout || '').split(/\r?\n/).filter(line => line.startsWith(CODEX_FIXTURE_REPORT_PREFIX));
+  if (reports.length !== 1) throw new Error('Codex fixture activation requires exactly one tagged report.');
+  let report;
+  try { report = JSON.parse(reports[0].slice(CODEX_FIXTURE_REPORT_PREFIX.length)); }
+  catch { throw new Error('Codex fixture activation returned a malformed tagged report.'); }
+  if (report?.mode !== 'v2' || report.generation !== CODEX_FIXTURE_GENERATION
+      || report.categories !== 20 || report.items !== 5000 || report.projectionDocuments !== 5020) {
     throw new Error('Codex fixture activation returned an incomplete projection.');
   }
   return report;
