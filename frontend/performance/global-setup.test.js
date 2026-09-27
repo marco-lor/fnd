@@ -532,12 +532,18 @@ test('Codex preparation rejects corrupt checkpoints and projections before fixtu
 });
 
 test('Codex fixture creates and checkpoint updates fence source order, control and marker changes', async () => {
-  for (const [guardNumber, change] of [[1, 'order'], [1, 'control'], [1, 'marker'], [3, 'marker']]) {
-    const h = codexPreparationHarness({ items: 405 }); const transaction = h.db.runTransaction; let guards = 0;
+  for (const [checkpoint, change] of [[false, 'order'], [false, 'control'], [false, 'marker'], [true, 'marker']]) {
+    const h = codexPreparationHarness({ items: 405 }); const transaction = h.db.runTransaction; let injections = 0;
+    const guardPaths = [codexCore.LEGACY, codexCore.CONTROL, h.root];
+    const source = codexCore.inspectSource(h.source);
+    const projectionCount = source.categories + source.items;
     h.db.runTransaction = work => transaction(async tx => {
       const getAll = tx.getAll;
       tx.getAll = async (...refs) => {
-        if (refs.length === 3 && ++guards === guardNumber) {
+        const isFixtureGuard = refs.length === guardPaths.length && refs.every((ref, index) => ref.path === guardPaths[index]);
+        const projectionComplete = [...h.data.keys()].filter(path => path.startsWith(h.root + '/')).length === projectionCount;
+        if (isFixtureGuard && projectionComplete === checkpoint && injections === 0) {
+          injections++;
           if (change === 'order') h.data.get(codexCore.LEGACY).categoria_00 = Object.fromEntries(Object.entries(h.source.categoria_00).reverse());
           if (change === 'control') h.data.get(codexCore.CONTROL).epoch++;
           if (change === 'marker') h.data.get(h.root).offset++;
@@ -547,6 +553,8 @@ test('Codex fixture creates and checkpoint updates fence source order, control a
       return work(tx);
     });
     await assert.rejects(prepareCodexFixture(h.input), /Frozen Codex fixture changed/);
+    assert.equal(injections, 1, `Fault must reach the ${checkpoint ? 'checkpoint' : 'create'} guard.`);
+    assert.deepEqual(h.creates, checkpoint ? [1, 200, 200, 6] : [1, 200]);
     assert.ok(!h.actions.includes('verify')); assert.ok(!h.actions.includes('activate'));
   }
 });
