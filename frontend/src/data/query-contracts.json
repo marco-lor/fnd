@@ -555,6 +555,87 @@
       "sources": [{ "file": "data/codexRepository.js", "occurrence": 1 }]
     },
     {
+      "id": "task12-codex-control",
+      "kind": "document",
+      "queryKey": "codex.control.subscribe.v2",
+      "ownerTask": "Task 12",
+      "currentScope": "Shared version/freeze control; missing document defaults to legacy",
+      "targetOrdering": [],
+      "cursor": {
+        "version": 1,
+        "status": "none",
+        "fields": []
+      },
+      "realtimePolicy": "Ref-counted control follows mode/epoch/generation and fences old child callbacks",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "data/codexRepository.js",
+          "occurrence": 2
+        }
+      ]
+    },
+    {
+      "id": "task12-codex-bounded-page",
+      "kind": "collection",
+      "queryKey": "codex.items.page.v2",
+      "ownerTask": "Task 12",
+      "currentScope": "Compact categories OR one active category item page; 25 default, maximum 50 plus one lookahead",
+      "targetOrdering": [
+        {
+          "field": "displayRank or sourceRank",
+          "direction": "ASCENDING"
+        },
+        {
+          "field": "__name__",
+          "direction": "ASCENDING"
+        }
+      ],
+      "cursor": {
+        "version": 1,
+        "status": "active",
+        "fields": [
+          "generation",
+          "epoch",
+          "categoryId",
+          "revision",
+          "order",
+          "pageSize",
+          "rank",
+          "id"
+        ]
+      },
+      "realtimePolicy": "Owned by control-following metadata/active-page listener; category revision changes invalidate old page cursors",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "data/codexRepository.js",
+          "occurrence": 3
+        }
+      ]
+    },
+    {
+      "id": "task12-codex-active-category",
+      "kind": "document",
+      "queryKey": "codex.category.get.v2",
+      "ownerTask": "Task 12",
+      "currentScope": "Only active category compact metadata/revision; no unrelated bodies",
+      "targetOrdering": [],
+      "cursor": {
+        "version": 1,
+        "status": "none",
+        "fields": []
+      },
+      "realtimePolicy": "Owned by active category; revision fences previous item-page callbacks",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "data/codexRepository.js",
+          "occurrence": 4
+        }
+      ]
+    },
+    {
       "id": "user-directory-first-page",
       "kind": "collection",
       "queryKey": "directory.users.page.v1",
@@ -568,6 +649,7 @@
     }
   ],
   "repositoryQueries": [
+    {"id": "task12-codex-rank-pages", "ownerTask": "Task 12", "activation": "active", "indexMode": "automatic", "currentScope": "Generation/category path scoped, one ascending rank field plus ascending document ID; no composite filter. Verified by Task12 emulator bounded-query and full-reachability tests."},
     { "id": "task09-catalog-revision-and-detail", "ownerTask": "Task 09", "activation": "active", "indexMode": "automatic" },
     { "id": "task09-catalog-dm-page", "ownerTask": "Task 09", "activation": "active", "requiredIndexId": "catalog-generation-rank", "currentScope": "Active generation ordered by unique rank; default limit 50 with signed revision-bound startAfter cursor; advanced filters and facets scan all visible summaries" },
     { "id": "task09-catalog-public-page", "ownerTask": "Task 09", "activation": "active", "requiredIndexId": "catalog-generation-visibility-rank", "currentScope": "Public visibility branch of the player OR query; same default page and advanced scan policy as the DM query" },

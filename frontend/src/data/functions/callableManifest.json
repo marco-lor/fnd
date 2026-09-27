@@ -280,6 +280,12 @@
       "region": "europe-west8",
       "owner": "bazaar",
       "compatibilityAliasOf": null
+    },
+    "task12MutateCodex": {
+      "functionId": "task12MutateCodex",
+      "compatibilityAliasOf": null,
+      "owner": "codex",
+      "region": "europe-west8"
     }
   }
 }

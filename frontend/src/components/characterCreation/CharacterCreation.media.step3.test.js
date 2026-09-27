@@ -2,7 +2,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import CharacterCreation from "./CharacterCreation";
-import { getCodex } from "../../data/codexRepository";
+import { getCodexCategories } from "../../data/codexRepository";
 import { getVarie } from "../../data/configRepository";
 import { updateCharacterCreation } from "../../data/userData/userDataCommands";
 import { uploadLegacyImage, deleteLegacyStoragePath } from "../common/legacyMediaStorage";
@@ -20,7 +20,7 @@ const mockOwner = {
 const mockCreateTask07MediaOperationOwner = jest.fn();
 const mockBeginTask08Transition = jest.fn();
 const mockRecordTask08Event = jest.fn();
-const mockGetCodex = getCodex;
+const mockGetCodexCategories = getCodexCategories;
 const mockGetVarie = getVarie;
 const mockUpdateCharacterCreation = updateCharacterCreation;
 const mockUploadLegacyImage = uploadLegacyImage;
@@ -71,7 +71,7 @@ jest.mock("../../AuthContext", () => ({
   useProfileState: () => mockProfileState,
 }));
 jest.mock("../../data/codexRepository", () => ({
-  getCodex: jest.fn(() => Promise.resolve({ Razze: { Human: "A balanced race." } })),
+  getCodexCategories: jest.fn(() => Promise.resolve({ Razze: { Human: "A balanced race." } })),
   invalidateCodex: jest.fn(),
 }));
 jest.mock("../../data/configRepository", () => ({
@@ -169,7 +169,7 @@ describe("Character Creation avatar preview and owner cleanup", () => {
     mockCreateTask07MediaOperationOwner.mockReset().mockReturnValue(mockOwner);
     mockBeginTask08Transition.mockReset().mockImplementation(() => jest.fn());
     mockRecordTask08Event.mockReset();
-    mockGetCodex.mockReset().mockResolvedValue({ Razze: { Human: "A balanced race." } });
+    mockGetCodexCategories.mockReset().mockResolvedValue({ Razze: { Human: "A balanced race." } });
     mockGetVarie.mockReset().mockResolvedValue({
       modAnima: { Fire: { Forza: 1 } },
       levelUpAnimaBonus: { Fire: { Salute: 1 } },

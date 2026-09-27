@@ -6,11 +6,11 @@ import {
   useCharacterCreationData,
 } from './characterCreationData';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { getCodex } from '../../data/codexRepository';
+import { getCodexCategories } from '../../data/codexRepository';
 import { getVarie } from '../../data/configRepository';
 
 jest.mock('../../data/codexRepository', () => ({
-  getCodex: jest.fn(),
+  getCodexCategories: jest.fn(),
   invalidateCodex: jest.fn(),
 }));
 jest.mock('../../data/configRepository', () => ({
@@ -30,18 +30,19 @@ const deferred = () => {
 
 describe('Character Creation route data resource', () => {
   beforeEach(() => {
-    getCodex.mockReset();
+    getCodexCategories.mockReset();
     getVarie.mockReset();
   });
 
   test('starts Codex and Varie reads before either deferred result settles', async () => {
     const codex = deferred();
     const varie = deferred();
-    getCodex.mockReturnValue(codex.promise);
+    getCodexCategories.mockReturnValue(codex.promise);
     getVarie.mockReturnValue(varie.promise);
 
     const snapshotPromise = loadCharacterCreationData();
-    expect(getCodex).toHaveBeenCalledTimes(1);
+    expect(getCodexCategories).toHaveBeenCalledTimes(1);
+    expect(getCodexCategories).toHaveBeenCalledWith(['Razze']);
     expect(getVarie).toHaveBeenCalledTimes(1);
 
     codex.resolve({ Razze: { Elfo: 'Agile and perceptive.' } });
@@ -56,7 +57,7 @@ describe('Character Creation route data resource', () => {
 
   test('propagates transport failure while classifying valid missing and malformed payloads', async () => {
     const failure = new Error('read denied');
-    getCodex.mockRejectedValue(failure);
+    getCodexCategories.mockRejectedValue(failure);
     getVarie.mockResolvedValue({ modAnima: { Spirito: { Saggezza: 2 } } });
 
     await expect(loadCharacterCreationData()).rejects.toBe(failure);
@@ -70,7 +71,7 @@ describe('Character Creation route data resource', () => {
   test('publishes Codex as usable while Varie remains pending', async () => {
     const codex = deferred();
     const varie = deferred();
-    getCodex.mockReturnValue(codex.promise);
+    getCodexCategories.mockReturnValue(codex.promise);
     getVarie.mockReturnValue(varie.promise);
     const { result } = renderHook(() => useCharacterCreationData({
       uid: 'player-a',
@@ -78,7 +79,7 @@ describe('Character Creation route data resource', () => {
       enabled: true,
     }));
 
-    await waitFor(() => expect(getCodex).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getCodexCategories).toHaveBeenCalledTimes(1));
     expect(getVarie).toHaveBeenCalledTimes(1);
     await act(async () => {
       codex.resolve({ Razze: { Elfo: 'Agile and perceptive.' } });
@@ -98,7 +99,7 @@ describe('Character Creation route data resource', () => {
 
   test('retries only a rejected Varie dependency and preserves fulfilled Codex', async () => {
     const varieFailure = new Error('varie unavailable');
-    getCodex.mockResolvedValue({ Razze: { Elfo: 'Agile and perceptive.' } });
+    getCodexCategories.mockResolvedValue({ Razze: { Elfo: 'Agile and perceptive.' } });
     getVarie
       .mockRejectedValueOnce(varieFailure)
       .mockResolvedValueOnce({ modAnima: { Spirito: { Saggezza: 2 } } });
@@ -117,14 +118,14 @@ describe('Character Creation route data resource', () => {
       result.current.retryVarie();
     });
     await waitFor(() => expect(result.current.varieStatus).toBe('ready'));
-    expect(getCodex).toHaveBeenCalledTimes(1);
+    expect(getCodexCategories).toHaveBeenCalledTimes(1);
     expect(getVarie).toHaveBeenCalledTimes(2);
     expect(result.current.codex).toEqual({ Razze: { Elfo: 'Agile and perceptive.' } });
   });
 
   test('retries only a rejected Codex dependency while Varie remains fulfilled', async () => {
     const codexFailure = new Error('codex unavailable');
-    getCodex
+    getCodexCategories
       .mockRejectedValueOnce(codexFailure)
       .mockResolvedValueOnce({ Razze: { Elfo: 'Agile and perceptive.' } });
     getVarie.mockResolvedValue({ modAnima: { Spirito: { Saggezza: 2 } } });
@@ -142,7 +143,7 @@ describe('Character Creation route data resource', () => {
       result.current.retryCodex();
     });
     await waitFor(() => expect(result.current.codexStatus).toBe('ready'));
-    expect(getCodex).toHaveBeenCalledTimes(2);
+    expect(getCodexCategories).toHaveBeenCalledTimes(2);
     expect(getVarie).toHaveBeenCalledTimes(1);
   });
 
@@ -151,7 +152,7 @@ describe('Character Creation route data resource', () => {
     const actorAVarie = deferred();
     const actorBCodex = deferred();
     const actorBVarie = deferred();
-    getCodex
+    getCodexCategories
       .mockReturnValueOnce(actorACodex.promise)
       .mockReturnValueOnce(actorBCodex.promise);
     getVarie
@@ -166,9 +167,9 @@ describe('Character Creation route data resource', () => {
       { initialProps: { uid: 'player-a', generation: 1 } }
     );
 
-    await waitFor(() => expect(getCodex).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getCodexCategories).toHaveBeenCalledTimes(1));
     rerender({ uid: 'player-b', generation: 2 });
-    await waitFor(() => expect(getCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getCodexCategories).toHaveBeenCalledTimes(2));
     await act(async () => {
       actorACodex.resolve({ Razze: { Stale: 'stale' } });
       actorAVarie.resolve({ modAnima: { Stale: {} } });
@@ -186,7 +187,7 @@ describe('Character Creation route data resource', () => {
   test('does not dispatch a pending resource completion after the hook unmounts', async () => {
     const codex = deferred();
     const varie = deferred();
-    getCodex.mockReturnValue(codex.promise);
+    getCodexCategories.mockReturnValue(codex.promise);
     getVarie.mockReturnValue(varie.promise);
     const setterSpies = [];
     const originalUseState = React.useState;
@@ -204,7 +205,7 @@ describe('Character Creation route data resource', () => {
         enabled: true,
       }));
 
-      await waitFor(() => expect(getCodex).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(getCodexCategories).toHaveBeenCalledTimes(1));
       const callsBeforeUnmount = setterSpies.map((setter) => setter.mock.calls.length);
       unmount();
 

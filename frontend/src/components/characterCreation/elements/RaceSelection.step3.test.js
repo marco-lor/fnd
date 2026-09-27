@@ -1,16 +1,16 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import RaceSelection from "./RaceSelection";
-import { getCodex } from "../../../data/codexRepository";
+import { getCodexCategories } from "../../../data/codexRepository";
 
 jest.mock("../../../data/codexRepository", () => ({
-  getCodex: jest.fn(),
+  getCodexCategories: jest.fn(),
 }));
 
 describe("RaceSelection shared-data boundary", () => {
   beforeEach(() => {
-    getCodex.mockReset();
-    getCodex.mockReturnValue(new Promise(() => {}));
+    getCodexCategories.mockReset();
+    getCodexCategories.mockReturnValue(new Promise(() => {}));
   });
 
   test("renders the injected codex without starting a child-owned read", () => {
@@ -25,7 +25,7 @@ describe("RaceSelection shared-data boundary", () => {
 
     expect(screen.getByText("Elfo")).toBeInTheDocument();
     expect(screen.getByText("Evocazione Permanente")).toBeInTheDocument();
-    expect(getCodex).not.toHaveBeenCalled();
+    expect(getCodexCategories).not.toHaveBeenCalled();
   });
 
   test("keeps the legacy placeholder behavior for absent codex data", () => {
@@ -40,6 +40,6 @@ describe("RaceSelection shared-data boundary", () => {
     );
 
     expect(screen.getByText("Evocazione Permanente")).toBeInTheDocument();
-    expect(getCodex).not.toHaveBeenCalled();
+    expect(getCodexCategories).not.toHaveBeenCalled();
   });
 });

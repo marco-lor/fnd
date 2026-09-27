@@ -206,7 +206,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
 test('manifest selection is exact and owner-validated in every audit region', () => {
   const manifest = addRegionCallables(createManifest(), 'europe-west1');
   const selected = selectManagedCallables(manifest);
-  assert.equal(selected.length, 41);
+  assert.equal(selected.length, 42);
   assert.deepEqual(
     selected.map(({logicalKey}) => logicalKey),
     REQUIRED_CALLABLES.map(({logicalKey}) => logicalKey)
@@ -217,6 +217,21 @@ test('manifest selection is exact and owner-validated in every audit region', ()
   );
   manifest.callables.task05AdjustGold.owner = 'admin';
   assert.throws(() => selectManagedCallables(manifest), /unexpected owner/);
+});
+test('Codex callable is explicitly managed and IAM drift remains subject to exact owner/alias guards', async () => {
+  assert.deepEqual(REQUIRED_CALLABLES.find(entry => entry.logicalKey === 'task12MutateCodex'),
+    {logicalKey: 'task12MutateCodex', owner: 'codex', compatibilityAliasOf: null});
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../src/data/functions/callableManifest.json'), 'utf8'));
+  const backend = createBackend({policies: allPolicies({task12MutateCodex: privatePolicy()})});
+  const plan = await buildPolicyPlan({backend, manifest, projectId: PROJECT_ID, region: REGION});
+  const entry = plan.entries.find(entry => entry.functionId === 'task12MutateCodex');
+  assert.equal(entry.state, 'repair'); assert.equal(entry.serviceName, serviceNameFor('task12MutateCodex'));
+  assert.equal(plan.counts.repair, 1); assert.equal(backend.calls.length, 0);
+  manifest.callables.task12MutateCodex.owner = 'admin';
+  assert.throws(() => selectManagedCallables(manifest), /unexpected owner/);
+  manifest.callables.task12MutateCodex.owner = 'codex';
+  manifest.callables.task12MutateCodex.compatibilityAliasOf = 'task09CatalogPage';
+  assert.throws(() => selectManagedCallables(manifest), /unexpected compatibility alias/);
 });
 
 test('secondary-region plans are read-only and execution remains west8-only', async () => {
@@ -296,7 +311,7 @@ test('dry-run plan is deterministic and reports only the one repairable managed 
     region: REGION,
   });
   assert.equal(first.planFingerprint, second.planFingerprint);
-  assert.deepEqual(first.counts, {blocked: 0, ready: 40, repair: 1});
+  assert.deepEqual(first.counts, {blocked: 0, ready: 41, repair: 1});
   assert.equal(first.clean, false);
   assert.equal(first.entries.find(({functionId}) => (
     functionId === 'task05AdjustGold'
@@ -381,7 +396,7 @@ test('execution updates only planned drift, preserves unrelated IAM, and fully r
     unrelated
   );
   assert.equal(result.finalPlan.clean, true);
-  assert.deepEqual(result.finalPlan.counts, {blocked: 0, ready: 41, repair: 0});
+  assert.deepEqual(result.finalPlan.counts, {blocked: 0, ready: 42, repair: 0});
 });
 
 test('execution refuses stale IAM and verifies the write result', async () => {
