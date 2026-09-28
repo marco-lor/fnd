@@ -108,8 +108,9 @@ const sameControl = (left, right) => ['epoch', 'generation', 'mode', 'metadataRe
 // Share concurrent acquisitions, but do not retain control/metadata across
 // acquisitions: a stopped listener must not leave a cached cutover decision.
 const fresh = async (metricKey, instanceKey, load) => {
-  try { return await getCached({ metricKey, instanceKey, load }); }
-  finally { invalidate(instanceKey); }
+  const acquisition = getCached({ metricKey, instanceKey, load });
+  try { return await acquisition; }
+  finally { invalidate(instanceKey, acquisition); }
 };
 
 export const getCodexControl = () => fresh(V2_KEYS.control, 'codex:control:get', async () => (

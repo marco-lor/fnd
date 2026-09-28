@@ -168,8 +168,11 @@ export const getCached = ({
   return entry.promise;
 };
 
-export const invalidate = (instanceKey) => {
+// Supplying the acquired promise limits cleanup to that entry. Omitting it
+// retains unconditional invalidation for explicit data changes.
+export const invalidate = (instanceKey, expectedPromise) => {
   assertInstanceKey(instanceKey);
+  if (expectedPromise !== undefined && cacheEntries.get(instanceKey)?.promise !== expectedPromise) return false;
   return cacheEntries.delete(instanceKey);
 };
 
