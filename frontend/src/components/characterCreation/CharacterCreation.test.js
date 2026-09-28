@@ -53,7 +53,7 @@ jest.mock("../../AuthContext", () => ({
 }));
 
 jest.mock("../../data/codexRepository", () => ({
-  getCodex: jest.fn(() => Promise.resolve({ Razze: { Human: "A balanced race." } })),
+  getCodexCategories: jest.fn(() => Promise.resolve({ Razze: { Human: "A balanced race." } })),
   invalidateCodex: jest.fn(),
 }));
 jest.mock("../../data/configRepository", () => ({

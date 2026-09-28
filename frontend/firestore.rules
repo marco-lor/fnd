@@ -1879,10 +1879,42 @@ service cloud.firestore {
       allow write: if isDM() || isWebmaster();
     }
 
+    // Task12 single-authority fence. Missing control is the legacy rollout default.
+    function codexLegacyWritable() {
+      return !exists(/databases/$(database)/documents/utils/codex_control)
+        || get(/databases/$(database)/documents/utils/codex_control).data.mode == "legacy";
+    }
+    function codexActiveGeneration(generation) {
+      let control = get(/databases/$(database)/documents/utils/codex_control).data;
+      return isSignedIn() && control.schemaVersion == 2
+        && control.mode in ["v2", "rollback-frozen"] && control.generation == generation;
+    }
+    function codexBoundedPage() {
+      return request.query.limit != null && request.query.limit <= 51
+        && request.query.limit > 0
+        && (request.query.orderBy == {"sourceRank": "ASC", "__name__": "ASC"}
+          || request.query.orderBy == {"displayRank": "ASC", "__name__": "ASC"});
+    }
+    match /codex_versions/{generation}/categories/{categoryId} {
+      allow get: if codexActiveGeneration(generation);
+      allow list: if codexActiveGeneration(generation) && codexBoundedPage();
+      allow write: if false;
+      match /items/{itemId} {
+        allow get: if codexActiveGeneration(generation)
+          && exists(/databases/$(database)/documents/codex_versions/$(generation)/categories/$(categoryId));
+        allow list: if codexActiveGeneration(generation) && codexBoundedPage()
+          && exists(/databases/$(database)/documents/codex_versions/$(generation)/categories/$(categoryId));
+        allow write: if false;
+      }
+    }
+
     // Utils
     match /utils/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isWebmaster() || (isDM() && docId == "codex");
+      allow read: if isSignedIn() && (docId != "codex"
+        || !exists(/databases/$(database)/documents/utils/codex_control)
+        || get(/databases/$(database)/documents/utils/codex_control).data.mode in ["legacy", "frozen"]);
+      allow write: if docId != "codex_control"
+        && (docId == "codex" ? (isDMOrWebmaster() && codexLegacyWritable()) : isWebmaster());
       match /Razze/{raceId} {
         allow read: if isSignedIn();
         allow write: if isWebmaster();

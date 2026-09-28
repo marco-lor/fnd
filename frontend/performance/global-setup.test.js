@@ -458,3 +458,146 @@ test('Playwright keeps one worker and zero retries', () => {
   assert.equal(playwrightConfig.workers, 1);
   assert.equal(playwrightConfig.retries, 0);
 });
+
+const { prepareCodexFixture, CODEX_FIXTURE_GENERATION, CODEX_FIXTURE_REPORT_PREFIX } = require('../scripts/performance/task12-codex-fixture');
+const codexCore = require('../functions/lib/codexCore');
+const codexPreparationHarness = ({ items = 2 } = {}) => {
+  const source = { categoria_00: Object.fromEntries(Array.from({ length: items }, (_, i) => [`Codex 0-${i}`, `value-${i}`])) };
+  const data = new Map([[codexCore.LEGACY, structuredClone(source)]]);
+  const actions = [], creates = [];
+  const doc = path => ({ path, listCollections: async () => [...new Set([...data.keys()]
+    .filter(key => key.startsWith(path + '/')).map(key => key.slice(path.length + 1).split('/')[0]))]
+    .map(name => ({ listDocuments: async () => [...new Set([...data.keys()].filter(key => key.startsWith(path + '/' + name + '/'))
+      .map(key => key.split('/').slice(0, path.split('/').length + 2).join('/')))].map(doc) })) });
+  const db = { doc, runTransaction: async work => {
+    const writes = []; let count = 0;
+    const result = await work({
+      getAll: async (...refs) => refs.map(ref => ({ ref, exists: data.has(ref.path), data: () => structuredClone(data.get(ref.path)) })),
+      create: (ref, value) => { assert.equal(data.has(ref.path), false); count++; writes.push([ref.path, structuredClone(value)]); },
+      set: (ref, value) => writes.push([ref.path, structuredClone(value)]),
+      update: (ref, value) => { assert.ok(data.has(ref.path)); writes.push([ref.path, { ...data.get(ref.path), ...structuredClone(value) }]); },
+    });
+    writes.forEach(([path, value]) => data.set(path, value)); if (count) creates.push(count); return result;
+  } };
+  const core = { ...codexCore, applyPlan: async (...args) => { actions.push(args[1].action); return codexCore.applyPlan(...args); } };
+  const input = { db, core, expectedSource: structuredClone(source) };
+  const apply = async action => { const state = await core.readState(db, CODEX_FIXTURE_GENERATION);
+    const plan = core.makePlan(state, action, CODEX_FIXTURE_GENERATION); return core.applyPlan(db, plan, plan.fingerprint); };
+  return { input, core, db, data, source, actions, creates, apply, root: `codex_versions/${CODEX_FIXTURE_GENERATION}` };
+};
+test('Codex preparation uses bounded fixture creates with real activation verification; active repeats are read-only', async () => {
+  const h = codexPreparationHarness({ items: 405 });
+  const first = await prepareCodexFixture(h.input);
+  assert.deepEqual(h.actions, ['freeze', 'backfill', 'verify', 'activate']);
+  assert.deepEqual(h.creates, [1, 200, 200, 6]);
+  assert.deepEqual({ mode: first.mode, categories: first.categories, items: first.items, projectionDocuments: first.projectionDocuments },
+    { mode: 'v2', categories: 1, items: 405, projectionDocuments: 406 });
+  const before = structuredClone([...h.data]); h.actions.length = 0; h.creates.length = 0;
+  assert.equal((await prepareCodexFixture(h.input)).alreadyActive, true);
+  assert.deepEqual(h.actions, []); assert.deepEqual(h.creates, []); assert.deepEqual([...h.data], before);
+  assert.deepEqual(h.data.get(codexCore.LEGACY), h.source);
+});
+
+test('Codex preparation resumes a partial frozen fixture without rewriting existing documents or source', async () => {
+  const h = codexPreparationHarness({ items: 405 });
+  await h.apply('freeze'); await h.apply('backfill');
+  const existing = [...h.data].filter(([path]) => path.startsWith(h.root + '/'));
+  h.actions.length = 0; h.creates.length = 0;
+  await prepareCodexFixture(h.input);
+  assert.deepEqual(h.actions, ['backfill', 'verify', 'activate']); assert.deepEqual(h.creates, [200, 6]);
+  for (const [path, value] of existing) assert.deepEqual(h.data.get(path), value);
+  assert.deepEqual(h.data.get(codexCore.LEGACY), h.source);
+});
+
+test('Codex preparation refuses non-demo targets and noncanonical source before mutation', async () => {
+  const h = codexPreparationHarness();
+  await assert.rejects(prepareCodexFixture({ ...h.input, lifecycleProjectId: 'fatin-test' }), /non-demo/);
+  await assert.rejects(prepareCodexFixture({ ...h.input, expectedSource: { changed: {} } }), /canonical fixture/);
+  assert.deepEqual(h.actions, []); assert.equal(h.data.size, 1);
+});
+
+test('Codex preparation rejects corrupt checkpoints and projections before fixture writes', async () => {
+  for (const patch of [{ offset: -1 }, { offset: 9999 }, { status: 'corrupt' }, { runtime: {} }, { sourceDigest: 'wrong' },
+    { schemaVersion: 1 }, { generation: 'wrong' }, { categories: 9 }, { items: 9999 }]) {
+    const h = codexPreparationHarness(); await h.apply('freeze');
+    h.data.set(h.root, { ...h.data.get(h.root), ...patch }); const before = structuredClone([...h.data]);
+    await assert.rejects(prepareCodexFixture(h.input)); assert.deepEqual([...h.data], before);
+    assert.ok(!h.actions.includes('activate'));
+  }
+  const h = codexPreparationHarness(); await h.apply('freeze'); await h.apply('backfill');
+  const itemPath = [...h.data.keys()].find(path => path.includes('/items/'));
+  h.data.set(itemPath, { ...h.data.get(itemPath), value: 'corrupt' });
+  const before = structuredClone([...h.data]);
+  await assert.rejects(prepareCodexFixture(h.input), /Corrupt target projection/); assert.deepEqual([...h.data], before);
+});
+
+test('Codex fixture creates and checkpoint updates fence source order, control and marker changes', async () => {
+  for (const [checkpoint, change] of [[false, 'order'], [false, 'control'], [false, 'marker'], [true, 'marker']]) {
+    const h = codexPreparationHarness({ items: 405 }); const transaction = h.db.runTransaction; let injections = 0;
+    const guardPaths = [codexCore.LEGACY, codexCore.CONTROL, h.root];
+    const source = codexCore.inspectSource(h.source);
+    const projectionCount = source.categories + source.items;
+    h.db.runTransaction = work => transaction(async tx => {
+      const getAll = tx.getAll;
+      tx.getAll = async (...refs) => {
+        const isFixtureGuard = refs.length === guardPaths.length && refs.every((ref, index) => ref.path === guardPaths[index]);
+        const projectionComplete = [...h.data.keys()].filter(path => path.startsWith(h.root + '/')).length === projectionCount;
+        if (isFixtureGuard && projectionComplete === checkpoint && injections === 0) {
+          injections++;
+          if (change === 'order') h.data.get(codexCore.LEGACY).categoria_00 = Object.fromEntries(Object.entries(h.source.categoria_00).reverse());
+          if (change === 'control') h.data.get(codexCore.CONTROL).epoch++;
+          if (change === 'marker') h.data.get(h.root).offset++;
+        }
+        return getAll(...refs);
+      };
+      return work(tx);
+    });
+    await assert.rejects(prepareCodexFixture(h.input), /Frozen Codex fixture changed/);
+    assert.equal(injections, 1, `Fault must reach the ${checkpoint ? 'checkpoint' : 'create'} guard.`);
+    assert.deepEqual(h.creates, checkpoint ? [1, 200, 200, 6] : [1, 200]);
+    assert.ok(!h.actions.includes('verify')); assert.ok(!h.actions.includes('activate'));
+  }
+});
+
+test('Codex preparation fails closed on source changes, batch failure and incomplete or corrupt active projections', async () => {
+  const changed = codexPreparationHarness(); const readState = changed.core.readState; let read = 0;
+  changed.core.readState = async (...args) => { if (++read > 1) changed.data.get(codexCore.LEGACY).categoria_00['Codex 0-0'] = 'changed'; return readState(...args); };
+  await assert.rejects(prepareCodexFixture(changed.input), /source changed/); assert.deepEqual(changed.actions, []);
+  const failed = codexPreparationHarness({ items: 405 }); const transaction = failed.db.runTransaction;
+  failed.db.runTransaction = async work => transaction(async tx => { const create = tx.create;
+    tx.create = (...args) => { if (failed.actions.at(-1) === 'backfill' && failed.creates.includes(200)) throw new Error('fixture batch failure'); return create(...args); };
+    return work(tx); });
+  await assert.rejects(prepareCodexFixture(failed.input), /fixture batch failure/); assert.ok(!failed.actions.includes('activate'));
+  for (const corrupt of [false, true]) {
+    const h = codexPreparationHarness(); await prepareCodexFixture(h.input);
+    const itemPath = [...h.data.keys()].find(path => path.includes('/items/'));
+    if (corrupt) h.data.set(itemPath, { ...h.data.get(itemPath), value: 'corrupt' }); else h.data.delete(itemPath);
+    h.actions.length = 0; await assert.rejects(prepareCodexFixture(h.input), /target projection/); assert.deepEqual(h.actions, []);
+  }
+});
+
+test('browser setup prepares Codex in a bounded child and rejects incomplete activation reports', async () => {
+  const { activateCodexFixture } = require('./global-setup');
+  let call; const report = { mode: 'v2', generation: CODEX_FIXTURE_GENERATION, categories: 20, items: 5000, projectionDocuments: 5020 };
+  const tagged = value => CODEX_FIXTURE_REPORT_PREFIX + JSON.stringify(value);
+  assert.deepEqual(await activateCodexFixture(async input => { call = input; return { status: 0, stdout: tagged(report) }; }), report);
+  assert.match(call.args[0], /task12-codex-fixture\.js$/); assert.equal(call.timeoutMs, 300_000);
+  await assert.rejects(activateCodexFixture(async () => ({ status: 1, stderr: 'projection incomplete' })), /Codex fixture activation failed.*projection incomplete/s);
+  for (const patch of [{ mode: 'legacy' }, { generation: 'wrong' }, { categories: 19 }, { items: 4999 }, { projectionDocuments: 5019 }]) {
+    await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: tagged({ ...report, ...patch }) })), /incomplete projection/);
+  }
+  await assert.rejects(activateCodexFixture(async () => ({ status: 0, stdout: tagged(null) })), /incomplete projection/);
+});
+
+test('Codex report protocol accepts surrounding diagnostics but rejects missing, duplicate or malformed reports', async () => {
+  const { activateCodexFixture } = require('./global-setup');
+  const report = { mode: 'v2', generation: CODEX_FIXTURE_GENERATION, categories: 20, items: 5000, projectionDocuments: 5020 };
+  const tagged = CODEX_FIXTURE_REPORT_PREFIX + JSON.stringify(report);
+  const run = stdout => activateCodexFixture(async () => ({ status: 0, stdout }));
+  assert.deepEqual(await run(`dependency diagnostic\r\n${JSON.stringify({ diagnostic: true })}\r\n${tagged}\r\ncleanup complete\n`), report);
+  for (const stdout of ['', 'dependency diagnostic only', JSON.stringify(report), `${tagged}\n${tagged}`]) {
+    await assert.rejects(run(stdout), /exactly one tagged report/);
+  }
+  await assert.rejects(run(CODEX_FIXTURE_REPORT_PREFIX + '{broken'), /malformed tagged report/);
+  await assert.rejects(run(`${tagged}\n${CODEX_FIXTURE_REPORT_PREFIX}{broken`), /exactly one tagged report/);
+});

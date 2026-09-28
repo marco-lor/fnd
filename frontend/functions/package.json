@@ -2,7 +2,7 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint --ext .js,.ts src",
-    "build": "node scripts/clean-lib.js && tsc && node scripts/verify-runtime-retirement.js",
+    "build": "node scripts/clean-lib.js && tsc && node scripts/package-codex.js && node scripts/verify-runtime-retirement.js",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.js",
     "build:watch": "tsc --watch",
     "serve": "npm run build && node ../scripts/firebase-functions-command.js --command serve --environment performance --project demo-fnd-perf --site demo-fnd-perf --bucket demo-fnd-perf.appspot.com",

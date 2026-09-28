@@ -1,7 +1,7 @@
 // ./buttons/addLinguaPersonale.js
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { getCodex } from '../../../../data/codexRepository';
+import { getCodexCategories } from '../../../../data/codexRepository';
 import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 import SavingButtonContent from './SavingButtonContent';
 
@@ -42,7 +42,7 @@ export function AddLinguaPersonaleOverlay({
     const fetchData = async () => {
       try {
         // Fetch codex data (lingue)
-        const codexData = await getCodex();
+        const codexData = await getCodexCategories(['lingue']);
 
         if (codexData) {
           if (codexData.lingue) {

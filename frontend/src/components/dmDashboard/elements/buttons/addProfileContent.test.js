@@ -4,11 +4,11 @@ import { AddLinguaPersonaleOverlay } from './addLinguaPersonale';
 import { AddConoscenzaPersonaleOverlay } from './addConoscenzaPersonale';
 import { AddProfessionePersonaleOverlay } from './addProfessionePersonale';
 
-const mockGetCodex = jest.fn();
+const mockGetCodexCategories = jest.fn();
 const mockPersistProfileContentMap = jest.fn();
 
 jest.mock('../../../../data/codexRepository', () => ({
-  getCodex: (...args) => mockGetCodex(...args),
+  getCodexCategories: (...args) => mockGetCodexCategories(...args),
 }));
 
 jest.mock('../../../../data/userData/managerProfileContent', () => ({
@@ -56,7 +56,7 @@ describe('DM profile-content add save state', () => {
     jest.clearAllMocks();
     alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    mockGetCodex.mockResolvedValue({
+    mockGetCodexCategories.mockResolvedValue({
       lingue: { Elfico: 'Descrizione lingua' },
       conoscenze: { Arcano: 'Descrizione conoscenza' },
       professioni: { Alchimista: 'Descrizione professione' },
@@ -79,6 +79,7 @@ describe('DM profile-content add save state', () => {
 
       renderOverlay(Component, onClose);
       fireEvent.click(await screen.findByText(selectedName));
+      expect(mockGetCodexCategories).toHaveBeenCalledWith([field]);
 
       const addButton = screen.getByRole('button', { name: 'Aggiungi' });
       fireEvent.click(addButton);

@@ -2,7 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import CharacterCreation from "./CharacterCreation";
-import { getCodex } from "../../data/codexRepository";
+import { getCodexCategories } from "../../data/codexRepository";
 import { getVarie } from "../../data/configRepository";
 import { updateCharacterCreation } from "../../data/userData/userDataCommands";
 import { uploadLegacyImage, deleteLegacyStoragePath } from "../../components/common/legacyMediaStorage";
@@ -12,7 +12,7 @@ let mockSessionState;
 let mockProfileState;
 const mockUseAuth = jest.fn();
 const mockNavigate = jest.fn();
-const mockGetCodex = getCodex;
+const mockGetCodexCategories = getCodexCategories;
 const mockGetVarie = getVarie;
 const mockUpdateCharacterCreation = updateCharacterCreation;
 const mockBeginTask08Transition = jest.fn();
@@ -79,7 +79,7 @@ jest.mock("../../AuthContext", () => ({
   useProfileState: () => mockProfileState,
 }));
 jest.mock("../../data/codexRepository", () => ({
-  getCodex: jest.fn(),
+  getCodexCategories: jest.fn(),
   invalidateCodex: jest.fn(),
 }));
 jest.mock("../../data/configRepository", () => ({
@@ -179,7 +179,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
       userData: mockProfileState.userData,
     });
     mockNavigate.mockReset();
-    mockGetCodex.mockReset();
+    mockGetCodexCategories.mockReset();
     mockGetVarie.mockReset();
     mockUpdateCharacterCreation.mockReset();
     mockUpdateCharacterCreation.mockResolvedValue(undefined);
@@ -192,7 +192,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
   });
 
   const resolveSharedData = () => {
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
   };
 
@@ -221,12 +221,12 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
   test("starts both read-only loads before either promise settles", async () => {
     const codex = deferred();
     const varie = deferred();
-    mockGetCodex.mockReturnValue(codex.promise);
+    mockGetCodexCategories.mockReturnValue(codex.promise);
     mockGetVarie.mockReturnValue(varie.promise);
 
     renderCharacterCreation();
 
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(1));
     expect(mockGetVarie).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Loading race data...")).toBeInTheDocument();
 
@@ -240,12 +240,12 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("renders Step 1 after Codex settles while Varie is still pending or fails", async () => {
     const varie = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockReturnValue(varie.promise);
     renderCharacterCreation();
 
     expect(await screen.findByRole("button", { name: "Choose race" })).toBeInTheDocument();
-    expect(mockGetCodex).toHaveBeenCalledTimes(1);
+    expect(mockGetCodexCategories).toHaveBeenCalledTimes(1);
     expect(mockGetVarie).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -258,7 +258,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
   });
 
   test("shows explicit retry UI after a rejected load and retries the read", async () => {
-    mockGetCodex
+    mockGetCodexCategories
       .mockRejectedValueOnce(new Error("codex unavailable"))
       .mockResolvedValueOnce(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
@@ -267,7 +267,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("button", { name: "Choose race" })).toBeInTheDocument();
   });
 
@@ -290,7 +290,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose race" })).toBeInTheDocument());
 
-    expect(mockGetCodex).toHaveBeenCalledTimes(1);
+    expect(mockGetCodexCategories).toHaveBeenCalledTimes(1);
     expect(mockGetVarie).toHaveBeenCalledTimes(1);
   });
 
@@ -391,7 +391,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("locks a deferred Next transition synchronously and sends one race command", async () => {
     const command = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
     mockUpdateCharacterCreation.mockReturnValue(command.promise);
     renderCharacterCreation();
@@ -416,7 +416,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("releases the Next lock after a command failure so the same step can retry", async () => {
     const failure = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
     mockUpdateCharacterCreation
       .mockReturnValueOnce(failure.promise)
@@ -543,14 +543,14 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
     const accountAVarie = deferred();
     const accountBCodex = deferred();
     const accountBVarie = deferred();
-    mockGetCodex
+    mockGetCodexCategories
       .mockReturnValueOnce(accountACodex.promise)
       .mockReturnValueOnce(accountBCodex.promise);
     mockGetVarie
       .mockReturnValueOnce(accountAVarie.promise)
       .mockReturnValueOnce(accountBVarie.promise);
     const view = renderCharacterCreation();
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(1));
 
     mockSessionState = {
       ...mockSessionState,
@@ -568,7 +568,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
         <CharacterCreation />
       </MemoryRouter>
     );
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
 
     await act(async () => {
       accountACodex.resolve({ Razze: { Stale: "stale" } });
@@ -616,7 +616,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
     expect(await screen.findByText("Waiting for character profile...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose race" })).not.toBeInTheDocument();
-    expect(mockGetCodex).not.toHaveBeenCalled();
+    expect(mockGetCodexCategories).not.toHaveBeenCalled();
     expect(mockGetVarie).not.toHaveBeenCalled();
   });
 
@@ -739,7 +739,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("keeps Step 2 usable during a same-uid Codex refresh that is pending or failed", async () => {
     const refreshedCodex = deferred();
-    mockGetCodex
+    mockGetCodexCategories
       .mockResolvedValueOnce(codexFixture)
       .mockReturnValueOnce(refreshedCodex.promise);
     mockGetVarie.mockResolvedValue(varieFixture);
@@ -760,7 +760,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("button", { name: "Choose anima" })).toBeInTheDocument();
 
     await act(async () => {
@@ -807,7 +807,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("does not apply a stale race rejection after ownership changes", async () => {
     const raceCommand = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
     mockUpdateCharacterCreation.mockReturnValueOnce(raceCommand.promise);
     const view = renderCharacterCreation();
@@ -816,7 +816,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
     rerenderAs(view, "player-b", "other@example.com");
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
     await act(async () => {
       raceCommand.reject(new Error("stale race failure"));
       await expect(raceCommand.promise).rejects.toThrow("stale race failure");
@@ -842,7 +842,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
     rerenderAs(view, "player-b", "other@example.com");
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
     await act(async () => {
       animaCommand.resolve(undefined);
       await animaCommand.promise;
@@ -855,7 +855,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("fences same-uid generation rejection without wiping legitimate wizard selection", async () => {
     const raceCommand = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
     mockUpdateCharacterCreation.mockReturnValueOnce(raceCommand.promise);
     const view = renderCharacterCreation();
@@ -884,7 +884,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
 
   test("guards a same-tick race selection while its command is pending", async () => {
     const raceCommand = deferred();
-    mockGetCodex.mockResolvedValue(codexFixture);
+    mockGetCodexCategories.mockResolvedValue(codexFixture);
     mockGetVarie.mockResolvedValue(varieFixture);
     mockUpdateCharacterCreation.mockReturnValue(raceCommand.promise);
     renderCharacterCreation();
@@ -969,7 +969,7 @@ describe("Character Creation Step 3 shared loading and navigation", () => {
         <CharacterCreation />
       </MemoryRouter>
     );
-    await waitFor(() => expect(mockGetCodex).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetCodexCategories).toHaveBeenCalledTimes(2));
     await act(async () => {
       completion.reject(new Error("stale completion failure"));
       await expect(completion.promise).rejects.toThrow("stale completion failure");

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCodex, invalidateCodex } from '../../data/codexRepository';
+import { getCodexCategories, invalidateCodex } from '../../data/codexRepository';
 import { getVarie, invalidateConfig } from '../../data/configRepository';
+
+const getRaceCodex = () => getCodexCategories(['Razze']);
 
 const isRecord = (value) => (
   value !== null
@@ -46,7 +48,7 @@ export const loadCharacterCreationData = () => {
   // Invoke both repository boundaries before awaiting either result. The
   // repositories retain actor scoping, single-flight, cache, and transition
   // retry behavior; this layer owns only the route-level join and snapshot.
-  const codexPromise = startRead(getCodex);
+  const codexPromise = startRead(getRaceCodex);
   const variePromise = startRead(getVarie);
 
   return Promise.all([codexPromise, variePromise]).then(([codex, varie]) => {
@@ -173,7 +175,7 @@ export const useCharacterCreationData = ({
     // Start both approved repository reads before either promise is awaited.
     // Each resource settles into its own state so Step 1 is not held hostage
     // by later-step configuration.
-    runResource('codex', getCodex, classifyCodex, scopeGeneration);
+    runResource('codex', getRaceCodex, classifyCodex, scopeGeneration);
     runResource('varie', getVarie, classifyVarie, scopeGeneration);
 
     return () => {
@@ -215,7 +217,7 @@ export const useCharacterCreationData = ({
     });
     runResource(
       resource,
-      resource === 'codex' ? getCodex : getVarie,
+      resource === 'codex' ? getRaceCodex : getVarie,
       resource === 'codex' ? classifyCodex : classifyVarie,
       scopeGeneration
     );

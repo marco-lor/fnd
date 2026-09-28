@@ -1,7 +1,7 @@
 // ./buttons/addProfessionePersonale.js
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { getCodex } from '../../../../data/codexRepository';
+import { getCodexCategories } from '../../../../data/codexRepository';
 import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 import SavingButtonContent from './SavingButtonContent';
 
@@ -43,7 +43,7 @@ export function AddProfessionePersonaleOverlay({
     const fetchData = async () => {
       try {
         // Fetch codex data (professioni)
-        const codexData = await getCodex();
+        const codexData = await getCodexCategories(['professioni']);
 
         if (codexData) {
           if (codexData.professioni) {

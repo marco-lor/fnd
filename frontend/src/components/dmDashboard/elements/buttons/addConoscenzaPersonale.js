@@ -1,7 +1,7 @@
 // ./buttons/AddConoscenzaPersonale.js
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { getCodex } from '../../../../data/codexRepository';
+import { getCodexCategories } from '../../../../data/codexRepository';
 import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 import SavingButtonContent from './SavingButtonContent';
 
@@ -43,7 +43,7 @@ export function AddConoscenzaPersonaleOverlay({
     const fetchData = async () => {
       try {
         // Fetch codex data (conoscenze)
-        const codexData = await getCodex();
+        const codexData = await getCodexCategories(['conoscenze']);
 
         if (codexData) {
           if (codexData.conoscenze) {

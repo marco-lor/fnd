@@ -1,16 +1,16 @@
 /* Codex page cosmic background: nebulas + quasar pulses */
 
 @keyframes nebulaDrift {
-	0% { transform: translate(-50%, -50%) rotate(0deg) scale(1); filter: hue-rotate(0deg) saturate(1); }
-	50% { transform: translate(-48%, -52%) rotate(6deg) scale(1.05); filter: hue-rotate(10deg) saturate(1.15); }
-	100% { transform: translate(-50%, -50%) rotate(0deg) scale(1); filter: hue-rotate(0deg) saturate(1); }
+	0% { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+	50% { transform: translate(-48%, -52%) rotate(6deg) scale(1.05); }
+	100% { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
 }
 
 @keyframes quasarPulse {
-	0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); filter: brightness(1.2); }
-	15% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: brightness(1.6); }
-	70% { opacity: 0.85; filter: brightness(1.1); }
-	100% { opacity: 0; transform: translate(-50%, -50%) scale(1.25); filter: brightness(0.9); }
+	0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--q-angle)) scale(0.6); }
+	15% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--q-angle)) scale(1); }
+	70% { opacity: 0.85; }
+	100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--q-angle)) scale(1.25); }
 }
 
 @keyframes beamSweep {
@@ -95,4 +95,9 @@
 }
 .codex-quasar__beam--a { transform: translate(-50%, -50%) rotate(0deg); }
 .codex-quasar__beam--b { transform: translate(-50%, -50%) rotate(90deg); }
+
+
+.codex-background > * { pointer-events: none; }
+.codex-background[data-paused='true'] * { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .codex-background * { animation: none !important; } }
 

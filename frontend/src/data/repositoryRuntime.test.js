@@ -76,6 +76,44 @@ test('failed reads share bounded retry windows and success resets retry state', 
   expect(load).toHaveBeenCalledTimes(3);
 });
 
+test('conditional invalidation releases its own result but preserves a pending replacement', async () => {
+  const request = (load) => getCached({
+    metricKey: 'config.varie.get.v1', instanceKey: 'config:varie', load,
+  });
+  const original = request(() => 'original');
+  await expect(original).resolves.toBe('original');
+  expect(invalidate('config:varie', original)).toBe(true);
+  let resolveReplacement;
+  const replacement = request(() => new Promise(resolve => { resolveReplacement = resolve; }));
+  const replacementResult = replacement.catch(error => error);
+  await flushMicrotasks();
+  const removedReplacement = invalidate('config:varie', original);
+  resolveReplacement('replacement');
+  expect(await replacementResult).toBe('replacement');
+  expect(removedReplacement).toBe(false);
+  expect(request(() => 'unexpected reload')).toBe(replacement);
+  expect(invalidate('config:varie', replacement)).toBe(true);
+  await expect(request(() => 'fresh')).resolves.toBe('fresh');
+});
+
+test('cleanup of an expired failure cannot evict the retry after its backoff', async () => {
+  jest.useFakeTimers();
+  const failure = new Error('offline');
+  const request = (load) => getCached({
+    metricKey: 'config.varie.get.v1', instanceKey: 'config:varie', load,
+  });
+  const original = request(() => { throw failure; });
+  await expect(original).rejects.toBe(failure);
+  expect(request(() => 'too early')).toBe(original);
+  jest.advanceTimersByTime(250);
+  const retry = request(() => 'recovered');
+  const removedRetry = invalidate('config:varie', original);
+  await expect(retry).resolves.toBe('recovered');
+  expect(removedRetry).toBe(false);
+  expect(invalidate('config:varie')).toBe(true);
+  await expect(request(() => 'after explicit invalidation')).resolves.toBe('after explicit invalidation');
+});
+
 test('actor changes clear resources and reject late results from the previous account', async () => {
   let resolveLoad;
   const pending = getCached({

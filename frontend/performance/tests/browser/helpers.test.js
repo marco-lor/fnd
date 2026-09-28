@@ -1765,3 +1765,29 @@ test('profiling warmup requires an explicit opt-in and refuses mixed build modes
   assert.equal(createStaticAssetWarmupBatches(report, { profiling: true }).flat().length, 1);
   assert.throws(() => createStaticAssetWarmupBatches({ ...report, buildMode: 'performance' }, { profiling: true }), /performance build report/);
 });
+
+test('Codex traversal visits all ten exact ordered pages then returns to the original off-page target', async () => {
+  const { codexFixturePages, traverseCodexFixturePages } = require('./helpers');
+  const pages = codexFixturePages();
+  assert.equal(pages.length, 10); assert.equal(pages.flat().length, 250); assert.equal(new Set(pages.flat()).size, 250);
+  assert.equal(pages.findIndex(keys => keys.includes('Codex 0-42')), 7);
+  let current = 0; const visited = []; const actions = [];
+  await traverseCodexFixturePages({ pages,
+    verifyPage: async (keys, index) => { assert.equal(index, current); assert.deepEqual(keys, pages[current]); visited.push(index); },
+    nextPage: async () => { current++; actions.push('next'); },
+    previousPage: async () => { current--; actions.push('previous'); },
+  });
+  assert.deepEqual(visited, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 8, 7]);
+  assert.deepEqual(actions, [...Array(9).fill('next'), 'previous', 'previous']);
+  await assert.rejects(traverseCodexFixturePages({ pages: [['Codex 0-42']] }), /beyond the first page/);
+});
+test('Codex smoke rejects legacy fallback, missing v2 delivery and unbounded pages', () => {
+  const { assertCodexV2PageTelemetry } = require('./helpers');
+  const delivery = (target, value) => ({ category: 'firestore', metric: 'initial-documents-delivered', value, tags: { target } });
+  const valid = [delivery('codex.categories.page.v2', 20), delivery('codex.items.page.v2', 26)];
+  assert.doesNotThrow(() => assertCodexV2PageTelemetry(valid, { initial: true }));
+  assert.throws(() => assertCodexV2PageTelemetry([...valid, delivery('codex.document.subscribe.v1', 1)]), /legacy aggregate/);
+  assert.throws(() => assertCodexV2PageTelemetry([]), /Missing v2/);
+  assert.throws(() => assertCodexV2PageTelemetry([delivery('codex.items.page.v2', 250)]), /Unbounded/);
+  assert.throws(() => assertCodexV2PageTelemetry([...valid, delivery('codex.items.page.v2', 26)], { initial: true }));
+});
