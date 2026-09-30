@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import {usePerformanceRenderProbe} from '../../../performance/PerformanceProfiler';
 
 // Lightweight, dependency-free Radar chart using SVG
 // Props:
@@ -20,7 +21,8 @@ const COLOR_RGB = {
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
-function RadarChart({ title, labels = [], values = [], color = 'sky', size = 300, maxValue }) {
+function RadarChart({ title, labels = [], values = [], color = 'sky', size = 300, maxValue, probeId }) {
+  usePerformanceRenderProbe(probeId, {enabled: Boolean(probeId)});
   const LABEL_MAP = {
     Costituzione: 'Costituzione',
     Destrezza: 'Destrezza',

@@ -16,6 +16,7 @@ import {
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import RadarChart from './elements/RadarChart';
+import {usePerformanceRenderProbe} from '../../performance/PerformanceProfiler';
 import useFoePage from './useFoePage';
 import {validateFoeUploads} from './foeUploadValidation';
 import { FoeFormModal } from './elements/lazyFoeEditors';
@@ -82,6 +83,7 @@ const persistedImagePath = (item = {}) => {
 
 
 export const FoeRow = React.memo(({ foe, onEdit, onDelete, onDuplicate }) => {
+  usePerformanceRenderProbe(`FoeRow:${foe.id}`);
   const [open, setOpen] = useState(false);
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
   const chartModels = useMemo(() => ['Base', 'Combattimento'].map(group => {
@@ -173,6 +175,7 @@ export const FoeRow = React.memo(({ foe, onEdit, onDelete, onDuplicate }) => {
           {/* Radar charts */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <RadarChart
+                probeId={`FoeRadar:${foe.id}:base`}
                 title="Parametri Base"
                 labels={chartModels[0].labels}
                 values={chartModels[0].values}
@@ -180,6 +183,7 @@ export const FoeRow = React.memo(({ foe, onEdit, onDelete, onDuplicate }) => {
                 size={300}
               />
               <RadarChart
+                probeId={`FoeRadar:${foe.id}:combat`}
                 title="Parametri Combattimento"
                 labels={chartModels[1].labels}
                 values={chartModels[1].values}

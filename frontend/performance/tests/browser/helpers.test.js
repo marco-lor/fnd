@@ -47,6 +47,42 @@ const {
   waitForKonvaTokenMove,
 } = require('./helpers');
 
+const foeRenderCapture = (updates = []) => ({
+  snapshot: {routeState: {routeId: '/foes-hub'}, events: [
+    {category: 'task08', metric: 'render', tags: {component: 'FoeRow:foe-0042', committed: true, authoritative: true}},
+    {category: 'task08', metric: 'render', tags: {component: 'FoeRadar:foe-0042:base', committed: true, authoritative: true}},
+    {category: 'task08', metric: 'render', tags: {component: 'FoeRadar:foe-0041:base', committed: true, authoritative: true}},
+    {category: 'custom', metric: 'task13-foe-update-start', tags: {foeId: 'foe-0042'}},
+    {category: 'task08', metric: 'render', tags: {component: 'FoeRow:foe-0042', committed: true, authoritative: true}},
+    ...updates,
+    {category: 'custom', metric: 'task13-foe-update-end', tags: {foeId: 'foe-0042'}},
+  ]}, diagnostics: {consoleErrors: [], unhandledErrors: [], failedRequests: []}, resources: {},
+});
+const emptyFoeCleanup = {activeListeners: {}, activeResources: {}, media: {activeSources: 0}};
+
+test('foe render budget counts real committed probes inside a verified name-update window', () => {
+  assert.equal(aggregateMetrics(foeRenderCapture(), emptyFoeCleanup)['react.unaffectedRowChartCommits'], 0);
+  const update = component => ({category: 'task08', metric: 'render',
+    tags: {component, committed: true, authoritative: true}});
+  const metrics = aggregateMetrics(foeRenderCapture([
+    update('FoeRow:foe-0041'), update('FoeRadar:foe-0042:base'), update('FoeRadar:foe-0041:base'),
+  ]), emptyFoeCleanup);
+  assert.equal(metrics['react.unaffectedRowChartCommits'], 3);
+});
+
+test('foe render budget stays missing if probes, a changed-row commit or the end marker are missing', () => {
+  for (const reject of [
+    event => event.metric === 'render',
+    event => event.metric === 'task13-foe-update-end',
+    event => event.tags?.component === 'FoeRow:foe-0042',
+    event => event.tags?.component === 'FoeRadar:foe-0041:base',
+  ]) {
+    const capture = foeRenderCapture();
+    capture.snapshot.events = capture.snapshot.events.filter(event => !reject(event));
+    assert.equal(aggregateMetrics(capture, emptyFoeCleanup)['react.unaffectedRowChartCommits'], undefined);
+  }
+});
+
 test('Foes Hub settles page assets before scrolling, settles the new viewport, then expands', async () => {
   const calls = [];
   const row = {

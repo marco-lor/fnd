@@ -1472,6 +1472,36 @@ const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
       const row = page.locator('[role="button"]').filter({ hasText: 'Fixture foe 42' }).first();
       await expect(row).toBeVisible();
       await runFoesHubRowInteraction(row, { settleFiniteAssets });
+      const otherRow = page.locator('[role="button"]').filter({hasText: 'Fixture foe 41'}).first();
+      await runFoesHubRowInteraction(otherRow, {settleFiniteAssets});
+      await settleFiniteAssets('before Foes Hub single-row update');
+      await page.waitForFunction(() => {
+        const events = window.__FND_PERF__.snapshot().events;
+        return ['FoeRow:foe-0042', 'FoeRadar:foe-0042:base', 'FoeRadar:foe-0041:base'].every(component =>
+          events.some(event => event.category === 'task08' && event.metric === 'render'
+            && event.tags?.component === component && event.tags?.authoritative === true));
+      });
+      configureOwnedPerformanceEnvironment();
+      const {initializeApp, deleteApp} = require('firebase-admin/app');
+      const {getFirestore} = require('firebase-admin/firestore');
+      const app = initializeApp({projectId}, 'task13-render-isolation');
+      const foeRef = getFirestore(app).doc('foes/foe-0042');
+      const originalName = (await foeRef.get()).get('name');
+      try {
+        await page.evaluate(() => window.__FND_PERF__.mark('task13-foe-update-start', {foeId: 'foe-0042'}));
+        await foeRef.update({name: 'Fixture foe 42 updated'});
+        await expect(page.getByText('Fixture foe 42 updated', {exact: true})).toBeVisible();
+        await page.waitForFunction(() => {
+          const events = window.__FND_PERF__.snapshot().events;
+          const start = events.findIndex(event => event.metric === 'task13-foe-update-start');
+          return events.slice(start + 1).some(event => event.category === 'task08' && event.metric === 'render'
+            && event.tags?.component === 'FoeRow:foe-0042' && event.tags?.authoritative === true);
+        });
+        await settleFiniteAssets('after Foes Hub single-row update');
+        await page.evaluate(() => window.__FND_PERF__.mark('task13-foe-update-end', {foeId: 'foe-0042'}));
+      } finally {
+        try {await foeRef.update({name: originalName});} finally {await deleteApp(app);}
+      }
       break;
     }
     case 'admin': {
@@ -1711,6 +1741,28 @@ const measurePeerTransitionTimings = async ({
 const aggregateMetrics = (capture, cleanup) => {
   const metrics = {};
   const events = capture.snapshot.events;
+  const start = events.findIndex(event => event.category === 'custom'
+    && event.metric === 'task13-foe-update-start');
+  const end = events.findIndex((event, index) => index > start && event.category === 'custom'
+    && event.metric === 'task13-foe-update-end');
+  if (start >= 0 && end > start && events[start].tags?.foeId === events[end].tags?.foeId) {
+    const changedRow = `FoeRow:${events[start].tags.foeId}`;
+    const probe = event => event.category === 'task08' && event.metric === 'render'
+      && event.tags?.committed === true && event.tags?.authoritative === true;
+    const before = events.slice(0, start).filter(probe);
+    const updates = events.slice(start + 1, end).filter(probe);
+    const charts = new Set(before.filter(event => event.tags.component?.startsWith('FoeRadar:'))
+      .map(event => event.tags.component.split(':')[1]));
+    // Missing instrumentation or an unobserved mutation must stay missing,
+    // never silently become a passing zero.
+    if (before.some(event => event.tags.component === changedRow) && charts.size >= 2
+      && charts.has(events[start].tags.foeId)
+      && updates.some(event => event.tags.component === changedRow)) {
+      metrics['react.unaffectedRowChartCommits'] = updates.filter(event =>
+        event.tags.component?.startsWith('FoeRadar:')
+        || (event.tags.component?.startsWith('FoeRow:') && event.tags.component !== changedRow)).length;
+    }
+  }
   const latest = (category, metric) => [...events].reverse().find((event) => (
     event.category === category && event.metric === metric
   ))?.value;
