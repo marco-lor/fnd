@@ -11,6 +11,9 @@ configureOwnedPerformanceEnvironment();
 const migration = require('../../scripts/task13/foe-order-migration');
 const {reconcileFoeOrder, foeOrderSeconds} = require('../../functions/lib/foeOrder');
 const {duplicateFoeWithAssets, duplicateFoeWithAssetsV2} = require('../../functions/lib/duplicateFoeWithAssets');
+const {task07PrepareFoeMediaRetirement, task07CommitFoeMediaRetirement} = require('../../functions/lib/foeMediaRetirement');
+const {buildTask07MediaUploadPlan} = require('../../functions/lib/mediaAssetLifecycleCore');
+const {hashValue, operationReceiptId} = require('../../functions/lib/userDataV2');
 const projectId = 'demo-fnd-perf';
 let env, app, db;
 before(async () => {
@@ -136,4 +139,48 @@ test('legacy no-media alias retries one durable intent without V2 enablement; V2
   const a = await duplicateFoeWithAssetsV2.run(v2), b = await duplicateFoeWithAssetsV2.run(v2);
   assert.equal(a.newFoeId, b.newFoeId); assert.equal((await duplicateFoeWithAssets.run(v2)).newFoeId, a.newFoeId); assert.equal((await db.collection('foes').get()).size, 3);
   assert.equal(typeof (await db.doc('foes/' + a.newFoeId).get()).get('task13OrderSeconds'), 'number');
+});
+
+test('foe retirement survives additive order maintenance and old receipts while real edits remain fenced', async () => {
+  for (const legacyReceipt of [true, false]) {
+    await reset(1);
+    const plan = buildTask07MediaUploadPlan({actorUid: 'dm', ownerUid: 'dm', entityId: 'f000',
+      operationId: 'task13-retirement-media-0001', kind: 'foe', sourceContentType: 'image/png', sourceBytes: 1024});
+    const foeRef = db.doc('foes/f000');
+    await foeRef.update({media: {assetId: plan.assetId}, task07MediaRevision: 1});
+    await db.doc('media_assets/' + plan.assetId).set({state: 'attached', plan});
+    const operationId = 'task13-retirement-operation-0001';
+    const request = {auth: {uid: 'dm'}, data: {schemaVersion: 1, operationId, assetId: plan.assetId}};
+    if (!legacyReceipt) await foeRef.update({task13OrderSeconds: 99});
+    const original = (await foeRef.get()).data();
+    await task07PrepareFoeMediaRetirement.run({...request, data: {...request.data,
+      expectedRevision: 1, expectedUpdatedAt: null, mutation: {fields: {name: 'Retired foe'}, tecniche: [], spells: []}}});
+    const receiptRef = db.doc('task07_foe_media_operations/' + operationReceiptId('dm', operationId));
+    // A receipt created by the currently deployed code has the full old hash.
+    if (legacyReceipt) await receiptRef.update({targetHash: hashValue(original)});
+    await reconcileFoeOrder(db, 'f000');
+    await task07CommitFoeMediaRetirement.run(request);
+    assert.equal((await foeRef.get()).get('media'), undefined);
+    assert.equal((await foeRef.get()).get('name'), 'Retired foe');
+    assert.equal((await receiptRef.get()).get('status'), 'completed');
+    assert.equal((await db.doc('media_assets/' + plan.assetId).get()).get('state'), 'superseded');
+    assert.equal((await db.doc('media_asset_cleanup/' + plan.assetId).get()).get('state'), 'pending');
+    await task07CommitFoeMediaRetirement.run(request);
+  }
+
+  await reset(1);
+  const plan = buildTask07MediaUploadPlan({actorUid: 'dm', ownerUid: 'dm', entityId: 'f000',
+    operationId: 'task13-retirement-media-0002', kind: 'foe', sourceContentType: 'image/png', sourceBytes: 1024});
+  const foeRef = db.doc('foes/f000');
+  await foeRef.update({media: {assetId: plan.assetId}, task07MediaRevision: 1});
+  await db.doc('media_assets/' + plan.assetId).set({state: 'attached', plan});
+  const request = {auth: {uid: 'dm'}, data: {schemaVersion: 1,
+    operationId: 'task13-retirement-operation-0002', assetId: plan.assetId}};
+  await task07PrepareFoeMediaRetirement.run({...request, data: {...request.data,
+    expectedRevision: 1, expectedUpdatedAt: null, mutation: {fields: {name: 'Must not overwrite'}, tecniche: [], spells: []}}});
+  await foeRef.update({notes: 'Concurrent content edit'});
+  await reconcileFoeOrder(db, 'f000');
+  await assert.rejects(task07CommitFoeMediaRetirement.run(request), /changed before retirement commit/);
+  assert.equal((await foeRef.get()).get('media.assetId'), plan.assetId);
+  assert.equal((await foeRef.get()).get('notes'), 'Concurrent content edit');
 });
