@@ -60,6 +60,7 @@ const NON_BACKGROUND_HTTP_FUNCTIONS = new Set([
   'europe-west8-task07AbandonFoeMediaRetirement',
 ]);
 const READINESS_BACKGROUND_TRIGGERS = new Set([
+  'europe-west8-syncFoeOrder',
   'europe-west8-syncUserDirectory',
   'europe-west8-syncManagerUserSummary',
   'europe-west8-syncManagerUserSummaryShell',
@@ -551,6 +552,13 @@ module.exports = async () => {
     // document. Cut over only after those checks, before browser measurement.
     stage = 'codex-fixture-activation';
     report.codex = await activateCodexFixture();
+
+    stage = 'foes-fixture-activation';
+    const foes = await runBoundedChildProcess({command: process.execPath,
+      args: [path.join(frontendRoot, 'scripts/performance/task13b-activate-fixture.js')],
+      cwd: frontendRoot, environment: process.env, timeoutMs: 120000, label: 'Foe paging fixture activation'});
+    if (foes.status !== 0) throw new Error('Foe paging activation failed: ' + foes.stderr);
+    process.stdout.write(foes.stdout || '');
 
     stage = 'measurement-health';
     report.measurementWindow.health = await collectEmulatorHealth('measurement-ready');

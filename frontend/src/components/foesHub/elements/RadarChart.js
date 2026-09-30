@@ -20,7 +20,7 @@ const COLOR_RGB = {
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
-export default function RadarChart({ title, labels = [], values = [], color = 'sky', size = 300, maxValue }) {
+function RadarChart({ title, labels = [], values = [], color = 'sky', size = 300, maxValue }) {
   const LABEL_MAP = {
     Costituzione: 'Costituzione',
     Destrezza: 'Destrezza',
@@ -140,3 +140,5 @@ export default function RadarChart({ title, labels = [], values = [], color = 's
     </div>
   );
 }
+
+export default React.memo(RadarChart);

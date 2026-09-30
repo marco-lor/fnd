@@ -94,6 +94,12 @@ const writePerformanceFirebaseConfig = ({
     throw new Error('Firebase config must define emulators.hosting.');
   }
   const generated = JSON.parse(JSON.stringify(source));
+  // Performance consumes a completed Functions build. Firebase's file watcher
+  // reloads disabled trigger records as enabled; freeze this emulator-only
+  // input so unrelated filesystem events cannot reactivate background work.
+  const freezeFunctions = config => ({...config, ignore: [...(config.ignore || []), '**']});
+  if (Array.isArray(generated.functions)) generated.functions = generated.functions.map(freezeFunctions);
+  else if (generated.functions) generated.functions = freezeFunctions(generated.functions);
   generated.emulators.hosting = {
     ...generated.emulators.hosting,
     host: '127.0.0.1',

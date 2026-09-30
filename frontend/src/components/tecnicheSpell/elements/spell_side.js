@@ -5,8 +5,11 @@ import { getVarie } from '../../../data/configRepository';
 import { updateResource } from '../../../data/userData/userDataCommands';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import MediaVideo from '../../common/MediaVideo';
+import IncrementalCardGrid from './IncrementalCardGrid';
+import { sortEntries } from '../searchEntries';
+import { getManaState } from './manaState';
 
-const SpellCard = ({ spellName, spell, userData, onEdit }) => {
+const SpellCard = React.memo(({ spellName, spell, userData, onEdit }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
@@ -32,64 +35,23 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
 
   // Fetch shared dadiAnimaByLevel data when the component mounts.
   useEffect(() => {
+    let active = true;
     const fetchDadiAnima = async () => {
       try {
         const varie = await getVarie();
-        if (varie) setDadiAnima(varie.dadiAnimaByLevel || []);
+        if (active && varie) setDadiAnima(varie.dadiAnimaByLevel || []);
       } catch (error) {
         console.error("Error fetching dadi anima data:", error);
       }
     };
     fetchDadiAnima();
+    return () => { active = false; };
   }, []);
 
-  // --- Mana validation logic with special reduction (ridCostoSpell) ---
-  const extractOriginalCost = () => {
-    const costStr = spell.Costo?.toString() || "0";
-    const match = costStr.match(/(\d+)/);
-    return match ? parseInt(match[1], 10) : 0;
-  };
-
-  const getCurrentMana = () => userData?.stats?.manaCurrent || 0;
-
-  const getSpecialReduction = (specialObj, desiredKey) => {
-    if (!specialObj) return 0;
-    const extractVal = (node) => {
-      if (typeof node === 'number') return node;
-      if (node && typeof node === 'object') {
-        return Number(node.Tot ?? node.tot ?? node.value ?? 0) || 0;
-      }
-      return Number(node) || 0;
-    };
-    // exact
-    if (specialObj[desiredKey] !== undefined) {
-      const v = extractVal(specialObj[desiredKey]);
-      if (!isNaN(v) && v) return v;
-    }
-    const norm = (s) => s.toLowerCase().replace(/\s|_/g, '');
-    const desired = norm(desiredKey);
-    // normalized equality
-    for (const k of Object.keys(specialObj)) {
-      if (norm(k) === desired) {
-        const v = extractVal(specialObj[k]);
-        if (!isNaN(v) && v) return v;
-      }
-    }
-    // substring match
-    for (const k of Object.keys(specialObj)) {
-      if (norm(k).includes(desired)) {
-        const v = extractVal(specialObj[k]);
-        if (!isNaN(v) && v) return v;
-      }
-    }
-    return 0;
-  };
-
-  const originalCost = extractOriginalCost();
-  const costReduction = getSpecialReduction(userData?.Parametri?.Special, 'ridCostoSpell');
-  const manaCost = originalCost > 0 ? Math.max(1, originalCost - costReduction) : 0;
-  const currentMana = getCurrentMana();
-  const hasSufficientMana = currentMana >= manaCost;
+  const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(
+    () => getManaState(spell.Costo, userData, 'ridCostoSpell'),
+    [ spell.Costo, userData ]
+  );
 
   // Save initial card position for animation
   useEffect(() => {
@@ -637,39 +599,20 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
       )}
     </div>
   );
-};
+});
 
-const SpellSide = ({ personalSpells = {}, userData = {}, onEditPersonalSpell }) => {
+const EMPTY_SPELLS = Object.freeze({});
+const SpellSide = ({ personalSpells = EMPTY_SPELLS, entries, filterKey, userData = {}, onEditPersonalSpell }) => {
+  const sorted = useMemo(() => entries || sortEntries(personalSpells), [entries, personalSpells]);
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <h1 className="text-2xl text-white font-bold mb-4">Spellbook</h1>
-      
-      {Object.keys(personalSpells).length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(personalSpells)
-            .sort((a, b) => {
-              const nameA = (a[1]?.Nome || a[0] || "").toString();
-              const nameB = (b[1]?.Nome || b[0] || "").toString();
-              return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
-            })
-            .map(([spellName, spell]) => (
-              <SpellCard
-                key={spellName}
-                spellName={spellName}
-                spell={spell}
-                userData={userData}
-                onEdit={onEditPersonalSpell}
-              />
-            ))}
-        </div>
-      ) : (
-        <div className="h-48 flex justify-center items-center">
-          <p className="text-gray-400">Il contenuto del tuo grimorio apparirà qui.</p>
-        </div>
-      )}
+      {sorted.length ? <IncrementalCardGrid entries={sorted} label="Spellbook" filterKey={filterKey}
+        renderCard={([spellName, spell]) => <SpellCard key={spellName} spellName={spellName} spell={spell}
+          userData={userData} onEdit={onEditPersonalSpell} />} /> :
+        <div className="h-48 flex justify-center items-center"><p className="text-gray-400">Il contenuto del tuo grimorio apparirà qui.</p></div>}
     </div>
   );
 };
-
-export default SpellSide;
+export default React.memo(SpellSide);
 

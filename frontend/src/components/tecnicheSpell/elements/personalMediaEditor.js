@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom";
+import { getTask07MediaPurpose, validateTask07UploadCandidate } from "../../../data/media/mediaPolicy";
 import { saveSpellForUser, saveTecnicaForUser } from "../../common/userOwnedMedia";
 import useObjectUrl from "../../common/useObjectUrl";
 import MediaImage from "../../common/MediaImage";
@@ -85,6 +86,9 @@ export default function PersonalMediaEditor({
   onClose,
 }) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
+  const [mediaErrors, setMediaErrors] = useState({});
+  const mediaPurpose = itemType === "spell" ? "spell" : "technique";
+  const hasMediaError = Object.values(mediaErrors).some(Boolean);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(itemData?.image_url || null);
   const [videoFile, setVideoFile] = useState(null);
@@ -101,6 +105,7 @@ export default function PersonalMediaEditor({
   const config = useMemo(() => MEDIA_CONFIG[itemType], [itemType]);
 
   useEffect(() => {
+    setMediaErrors({});
     setImageFile(null);
     setVideoFile(null);
     setImagePreviewUrl(itemData?.image_url || null);
@@ -112,6 +117,15 @@ export default function PersonalMediaEditor({
   const updatePreview = (event, mediaType) => {
     const file = event.target.files?.[0];
     if (!file) {
+      return;
+    }
+
+    const validation = validateTask07UploadCandidate({
+      file, purpose: mediaType === "image" ? mediaPurpose : `${mediaPurpose}-video`,
+    });
+    setMediaErrors(previous => ({ ...previous, [mediaType]: validation.message }));
+    if (!validation.ok) {
+      event.target.value = "";
       return;
     }
 
@@ -128,18 +142,21 @@ export default function PersonalMediaEditor({
   };
 
   const clearImage = () => {
+    setMediaErrors(previous => ({ ...previous, image: "" }));
     setImageFile(null);
     setImagePreviewUrl(null);
     setImageRemoved(true);
   };
 
   const clearVideo = () => {
+    setMediaErrors(previous => ({ ...previous, video: "" }));
     setVideoFile(null);
     setVideoPreviewUrl(null);
     setVideoRemoved(true);
   };
 
   const handleSave = async () => {
+    if (hasMediaError) return;
     if (!config) {
       onClose(false);
       return;
@@ -192,7 +209,7 @@ export default function PersonalMediaEditor({
                 type="button"
                 onClick={() => setShowConfirmation(false)}
                 className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
-                disabled={isSaving}
+                disabled={isSaving || hasMediaError}
               >
                 Annulla
               </button>
@@ -200,7 +217,7 @@ export default function PersonalMediaEditor({
                 type="button"
                 onClick={handleSave}
                 className={`px-4 py-2 text-white rounded transition-colors bg-gradient-to-r ${config.accentClass}`}
-                disabled={isSaving}
+                disabled={isSaving || hasMediaError}
               >
                 {isSaving ? "Salvataggio..." : "Conferma"}
               </button>
@@ -210,7 +227,7 @@ export default function PersonalMediaEditor({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              setShowConfirmation(true);
+              if (!hasMediaError) setShowConfirmation(true);
             }}
           >
             <div className="rounded-lg bg-gray-700/40 border border-gray-700 p-4 mb-5">
@@ -224,10 +241,12 @@ export default function PersonalMediaEditor({
                 <label className="block text-white text-sm mb-1">Immagine</label>
                 <input
                   type="file"
-                  accept="image/*"
+                  aria-label="Immagine"
+                  accept={getTask07MediaPurpose(mediaPurpose).contentTypes.join(",")}
                   onChange={(event) => updatePreview(event, "image")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
+                {mediaErrors.image && <p role="alert" className="text-red-300 text-sm">{mediaErrors.image}</p>}
                 <MediaPreview
                   kind="Image"
                   previewUrl={resolvedImagePreviewUrl}
@@ -242,10 +261,12 @@ export default function PersonalMediaEditor({
                 <label className="block text-white text-sm mb-1">Video</label>
                 <input
                   type="file"
-                  accept="video/*"
+                  aria-label="Video"
+                  accept={getTask07MediaPurpose(`${mediaPurpose}-video`).contentTypes.join(",")}
                   onChange={(event) => updatePreview(event, "video")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
+                {mediaErrors.video && <p role="alert" className="text-red-300 text-sm">{mediaErrors.video}</p>}
                 <MediaPreview
                   kind="Video"
                   previewUrl={resolvedVideoPreviewUrl}
@@ -270,7 +291,7 @@ export default function PersonalMediaEditor({
               <button
                 type="submit"
                 className={`px-5 py-2 bg-gradient-to-r ${config.accentClass} text-white rounded-md shadow-md transition-colors duration-150`}
-                disabled={isSaving}
+                disabled={isSaving || hasMediaError}
               >
                 {config.saveLabel}
               </button>

@@ -95,14 +95,14 @@ test('performance host ports and Firebase CLI arguments keep Hosting registered 
   );
 });
 
-test('generated performance Firebase config changes only the Hosting emulator port', () => {
+test('generated performance Firebase config freezes Functions watching and changes only emulator settings', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fnd-performance-firebase-config-'));
   const sourcePath = path.join(root, 'firebase.json');
   const outputPath = path.join(root, 'firebase.performance.generated.json');
   const source = {
     firestore: { rules: 'firestore.rules' },
     hosting: { public: 'build', rewrites: [{ source: '**', destination: '/index.html' }] },
-    functions: [{ source: 'functions' }],
+    functions: [{ source: 'functions', codebase: 'default', ignore: ['node_modules'] }],
     emulators: {
       auth: { host: '127.0.0.1', port: 9099 },
       firestore: { host: '127.0.0.1', port: 8080 },
@@ -117,6 +117,7 @@ test('generated performance Firebase config changes only the Hosting emulator po
     const generated = writePerformanceFirebaseConfig({ sourcePath, outputPath });
     const expected = JSON.parse(JSON.stringify(source));
     expected.emulators.hosting.port = 5002;
+    expected.functions[0].ignore.push('**');
 
     assert.deepEqual(generated, expected);
     assert.deepEqual(JSON.parse(fs.readFileSync(outputPath, 'utf8')), expected);
@@ -894,4 +895,16 @@ test('previous emulator logs are archived with bounded tails and only exact file
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test('performance watcher freeze preserves object Functions configuration and original ignore list', () => {
+  const original = {functions: {source: 'functions', runtime: 'nodejs22', ignore: ['custom']}, emulators: {hosting: {port: 5000}}};
+  let output;
+  const generated = writePerformanceFirebaseConfig({fsImpl: {
+    readFileSync: () => JSON.stringify(original), writeFileSync: (_path, content) => {output = JSON.parse(content);},
+  }});
+  assert.deepEqual(generated.functions, {...original.functions, ignore: ['custom', '**']});
+  assert.deepEqual(original.functions.ignore, ['custom']);
+  assert.deepEqual(output, generated);
 });

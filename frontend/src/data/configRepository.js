@@ -2,10 +2,12 @@ import { db } from '../components/firebaseConfig';
 import {
   doc,
   getDoc,
+  onSnapshot,
   labelFirestoreTarget,
 } from '../performance/firestore';
 import {
   getCached,
+  subscribeShared,
   invalidate,
   RepositorySessionChangedError,
 } from './repositoryRuntime';
@@ -196,3 +198,13 @@ export const invalidateConfig = (documentId) => {
   for (const observer of configInvalidationObservers) observer(documentId);
   return invalidated;
 };
+
+export const subscribeFoePagingControl = (observer) => subscribeShared({
+  metricKey: 'config.foes-paging.subscribe.v1',
+  instanceKey: 'config:foes-paging',
+  listen: ({next, error}) => onSnapshot(
+    labelFirestoreTarget(doc(db, 'utils', 'foes_paging'), 'config.foes-paging.subscribe.v1'),
+    snapshot => next(normalizeDocumentData(snapshot)),
+    error
+  ),
+}, observer);

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useAuth, useAuthSession } from "../../AuthContext";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
 import PersonalMediaEditor from "./elements/personalMediaEditor";
 import FilterPanel from './FilterPanel';
+import { buildSearchEntries, filterSearchEntries } from './searchEntries';
 import { getCommonTechniques } from '../../data/configRepository';
 import {
   usePersonalSpells,
@@ -82,22 +83,16 @@ function TecnicheSpell() {
     return () => { active = false; };
   }, [contentScopeKey, user]);
 
-  // Apply unified predicate to datasets
-  const filteredPersonalTecniche = useMemo(() => {
-    return Object.entries(personalTecniche).reduce((acc, [k, v]) => {
-      if (predicate(v)) acc[k] = v; return acc;
-    }, {});
-  }, [personalTecniche, predicate]);
-  const filteredCommonTecniche = useMemo(() => {
-    return Object.entries(commonTecniche).reduce((acc, [k, v]) => {
-      if (predicate(v)) acc[k] = v; return acc;
-    }, {});
-  }, [commonTecniche, predicate]);
-  const filteredPersonalSpells = useMemo(() => {
-    return Object.entries(personalSpells).reduce((acc, [k, v]) => {
-      if (predicate(v)) acc[k] = v; return acc;
-    }, {});
-  }, [personalSpells, predicate]);
+  // Normalize and sort only when the domain/config source changes.
+  const personalTechniqueEntries = useMemo(() => buildSearchEntries(personalTecniche), [personalTecniche]);
+  const commonTechniqueEntries = useMemo(() => buildSearchEntries(commonTecniche), [commonTecniche]);
+  const spellEntries = useMemo(() => buildSearchEntries(personalSpells), [personalSpells]);
+  const filteredPersonalTecniche = useMemo(() => filterSearchEntries(personalTechniqueEntries, predicate), [personalTechniqueEntries, predicate]);
+  const filteredCommonTecniche = useMemo(() => filterSearchEntries(commonTechniqueEntries, predicate), [commonTechniqueEntries, predicate]);
+  const filteredPersonalSpells = useMemo(() => filterSearchEntries(spellEntries, predicate), [spellEntries, predicate]);
+  const onPredicateChange = useCallback(p => setPredicate(() => p), []);
+  const editTecnica = useCallback((name, data) => setSelectedTecnica({ name, data, scopeKey: contentScopeKey }), [contentScopeKey]);
+  const editSpell = useCallback((name, data) => setSelectedSpell({ name, data, scopeKey: contentScopeKey }), [contentScopeKey]);
 
   return (
   <div className="w-full min-h-full relative">
@@ -112,27 +107,27 @@ function TecnicheSpell() {
           personalTecniche={personalTecniche}
           commonTecniche={commonTecniche}
           personalSpells={personalSpells}
-          onPredicateChange={(p) => setPredicate(() => p)}
+          onPredicateChange={onPredicateChange}
         />
 
         {/* Main content - only render components when data is ready */}
         <main className="flex flex-col items-center p-5 w-full">
           <div className="flex flex-col md:flex-row w-full max-w-[1600px] gap-6 justify-center">
             <TecnicheSide
-              personalTecniche={filteredPersonalTecniche}
-              commonTecniche={filteredCommonTecniche}
+              key={`techniques:${contentScopeKey}`}
+              personalEntries={filteredPersonalTecniche}
+              filterKey={predicate}
+              commonEntries={filteredCommonTecniche}
               userData={userData}
-              onEditPersonalTecnica={(tecnicaName, tecnicaData) =>
-                setSelectedTecnica({ name: tecnicaName, data: tecnicaData, scopeKey: contentScopeKey })
-              }
+              onEditPersonalTecnica={editTecnica}
             />
 
             <SpellSide
-              personalSpells={filteredPersonalSpells}
+              key={`spells:${contentScopeKey}`}
+              entries={filteredPersonalSpells}
+              filterKey={predicate}
               userData={userData}
-              onEditPersonalSpell={(spellName, spellData) =>
-                setSelectedSpell({ name: spellName, data: spellData, scopeKey: contentScopeKey })
-              }
+              onEditPersonalSpell={editSpell}
             />
           </div>
           {/* Spacer for overlays to extend into */}

@@ -47,7 +47,7 @@ const {
   waitForKonvaTokenMove,
 } = require('./helpers');
 
-test('Foes Hub scrolls, settles finite assets, then expands the measured row', async () => {
+test('Foes Hub settles page assets before scrolling, settles the new viewport, then expands', async () => {
   const calls = [];
   const row = {
     evaluate: async (callback) => callback({
@@ -64,6 +64,7 @@ test('Foes Hub scrolls, settles finite assets, then expands the measured row', a
   });
 
   assert.deepEqual(calls, [
+    { action: 'settle', phase: 'before deterministic Foes Hub scroll' },
     {
       action: 'scroll',
       options: { behavior: 'auto', block: 'center', inline: 'nearest' },
@@ -74,7 +75,7 @@ test('Foes Hub scrolls, settles finite assets, then expands the measured row', a
   ]);
 });
 
-test('Foes Hub rejects missing finite-asset settlement after its deterministic scroll', async () => {
+test('Foes Hub rejects missing finite-asset settlement before moving the viewport', async () => {
   const calls = [];
   const row = {
     evaluate: async (callback) => callback({
@@ -89,7 +90,7 @@ test('Foes Hub rejects missing finite-asset settlement after its deterministic s
     () => runFoesHubRowInteraction(row),
     /requires finite-asset settlement/
   );
-  assert.deepEqual(calls, ['scroll']);
+  assert.deepEqual(calls, []);
 });
 
 test('retains bounded native long-task timings with the phase active at task start', () => {

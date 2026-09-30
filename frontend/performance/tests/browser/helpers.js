@@ -1318,6 +1318,12 @@ const runFoesHubRowInteraction = async (row, {
   settleFiniteAssets,
   assertExpanded = async () => expect(row).toHaveAttribute('aria-expanded', 'true'),
 } = {}) => {
+  if (typeof settleFiniteAssets !== 'function') {
+    throw new TypeError('Foes Hub measurement requires finite-asset settlement.');
+  }
+  // A page change starts its visible thumbnails before the target row is scrolled
+  // into view. Finish those requests before MediaImage detaches offscreen srcs.
+  await settleFiniteAssets('before deterministic Foes Hub scroll');
   await row.evaluate((node) => node.scrollIntoView({
     behavior: 'auto',
     block: 'center',
@@ -1461,6 +1467,8 @@ const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
       break;
     }
     case 'foes-hub': {
+      await page.getByRole('button', {name: 'Successiva', exact: true}).click();
+      await expect(page.getByText('Pagina 2', {exact: true})).toBeVisible();
       const row = page.locator('[role="button"]').filter({ hasText: 'Fixture foe 42' }).first();
       await expect(row).toBeVisible();
       await runFoesHubRowInteraction(row, { settleFiniteAssets });
