@@ -59,7 +59,7 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
     sourceFoeId,
     newFoeName,
     idempotencyKey,
-    operationId,
+    operationId: suppliedOperationId,
   } = req.data || {};
   if (!sourceFoeId || typeof sourceFoeId !== "string") {
     throw new HttpsError("invalid-argument", "sourceFoeId is required");
@@ -77,7 +77,9 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
   const sourceRef = db.doc("foes/" + sourceFoeId);
   const task07ControlRef = db.doc("utils/task07_media");
   const newDocRef = db.collection("foes").doc();
-  if (operationId !== undefined && !validateBackendOperationId(operationId)) {
+  const operationId = suppliedOperationId === undefined ? undefined :
+    validateBackendOperationId(suppliedOperationId);
+  if (suppliedOperationId !== undefined && !operationId) {
     throw new HttpsError("invalid-argument", "A valid operationId is required.");
   }
   const requestHash = backendOperationRequestHash("duplicate-foe", {

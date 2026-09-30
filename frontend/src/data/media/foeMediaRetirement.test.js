@@ -1,3 +1,6 @@
+import { webcrypto } from 'node:crypto';
+import { TextEncoder } from 'node:util';
+import { runWithDurableOperationIntent } from '../functions/backendOperationIntentStore';
 import {
   abandonDurableFoeMediaRetirement,
   buildFoeMediaRetirementReconciliationMarker,
@@ -16,6 +19,37 @@ const file = (overrides = {}) => ({
   type: 'image/png',
   arrayBuffer: async () => new Uint8Array(10).buffer,
   ...overrides,
+});
+
+test('reopened retirement reuses the pending operation after derived order maintenance', async () => {
+  const values = new Map();
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const originalEncoder = global.TextEncoder;
+  global.TextEncoder = TextEncoder;
+  let issued = 0;
+  const ids = [];
+  const input = { assetId: `m_${'a'.repeat(40)}`, expectedRevision: 4,
+    expectedUpdatedAt: { seconds: 12, nanoseconds: 3 } };
+  const attempt = async payload => {
+    const retirement = await buildFoeMediaRetirementIntent({ ...input, payload });
+    return runFoeMediaRetirement({ actorUid: 'dm-one', ...retirement }, {
+      runIntent: options => runWithDurableOperationIntent({ ...options, storage, cryptoImpl: webcrypto,
+        createOperationId: () => `retirement-order-operation-${++issued}` }),
+      prepare: async ({ operationId }) => {
+        ids.push(operationId);
+        throw Object.assign(new Error('Lost response'), { code: 'functions/unavailable' });
+      },
+    });
+  };
+  try {
+    await expect(attempt({ name: 'Same edit', task13OrderSeconds: 11 })).rejects.toThrow('Lost response');
+    await expect(attempt({ name: 'Same edit', task13OrderSeconds: 12 })).rejects.toThrow('Lost response');
+    expect(ids).toEqual(['retirement-order-operation-1', 'retirement-order-operation-1']);
+    await expect(attempt({ name: 'Different edit', task13OrderSeconds: 12 })).rejects.toThrow('Lost response');
+    expect(ids[2]).toBe('retirement-order-operation-2');
+  } finally {
+    global.TextEncoder = originalEncoder;
+  }
 });
 
 test('builds JSON-only mutation intents with exact keep/remove/upload images', async () => {

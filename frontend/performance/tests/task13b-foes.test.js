@@ -184,3 +184,16 @@ test('foe retirement survives additive order maintenance and old receipts while 
   assert.equal((await foeRef.get()).get('media.assetId'), plan.assetId);
   assert.equal((await foeRef.get()).get('notes'), 'Concurrent content edit');
 });
+
+test('legacy duplication and V2 share the normalized operation ID on a route-changing retry', async () => {
+  await reset(1);
+  await db.doc('app_config/task06_backend').set({schemaVersion: 1, derivedOwnerMode: 'authoritative', enabledOperationKinds: ['duplicate-foe']});
+  const request = {auth: {uid: 'dm'}, data: {sourceFoeId: 'f000', newFoeName: 'Copied', operationId: ' task13-normalized-operation-0001 '}};
+  const first = await duplicateFoeWithAssets.run(request);
+  const replay = await duplicateFoeWithAssetsV2.run({...request, data: {...request.data, operationId: request.data.operationId.trim()}});
+  assert.equal(replay.newFoeId, first.newFoeId);
+  assert.equal((await db.collection('foes').get()).size, 2);
+  assert.equal((await db.collection('backend_operations').get()).size, 1);
+  const receipt = await db.doc('backend_operations/' + operationReceiptId('dm', request.data.operationId.trim())).get();
+  assert.equal(receipt.get('operationId'), 'task13-normalized-operation-0001');
+});

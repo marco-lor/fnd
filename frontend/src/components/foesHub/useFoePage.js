@@ -6,6 +6,7 @@ import {FOE_PAGE_SIZE, pageFoes, reconcileFoeRows} from './foePage';
 
 export default function useFoePage() {
   const [mode, setMode] = useState(null);
+  const [refreshGeneration, setRefreshGeneration] = useState(0);
   const [anchors, setAnchors] = useState([null]);
   const [state, setState] = useState({rows: [], hasNext: false, cursor: null, loading: true, error: ''});
   const anchor = anchors.at(-1);
@@ -15,7 +16,7 @@ export default function useFoePage() {
       if (previous !== next) setAnchors([null]);
       return next;
     });
-  }, error: () => setState(previous => ({...previous, loading: false, error: 'Impossibile verificare la modalità della libreria.'}))}), []);
+  }, error: () => setState(previous => ({...previous, loading: false, error: 'Impossibile verificare la modalità della libreria.'}))}), [refreshGeneration]);
 
   useEffect(() => {
     if (!mode) return undefined;
@@ -40,10 +41,10 @@ export default function useFoePage() {
       if (active) setState(previous => ({...previous, loading: false, error: 'Impossibile caricare i foes. Ricarica la pagina e riprova.'}));
     });
     return () => {active = false; stop();};
-  }, [mode, anchor]);
+  }, [mode, anchor, refreshGeneration]);
   return {...state, mode, page: anchors.length,
     next: () => {if (!state.loading && state.hasNext && state.cursor) setAnchors(value => [...value, state.cursor]);},
     previous: () => setAnchors(value => value.length > 1 ? value.slice(0, -1) : value),
-    first: () => setAnchors([null]),
+    first: () => {setAnchors([null]); setRefreshGeneration(value => value + 1);},
   };
 }
