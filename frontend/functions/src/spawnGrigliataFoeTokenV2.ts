@@ -1,3 +1,4 @@
+import {foeDuplicationSourceHash, foeDuplicationSourceMatchesHash} from "./duplicateFoeWithAssetsCore";
 import {randomUUID} from "crypto";
 import * as admin from "firebase-admin";
 import {FieldValue, Timestamp} from "firebase-admin/firestore";
@@ -561,7 +562,7 @@ const spawnHandler = async (
         operation.get("regenerationPlan") as
           Task07FoeTokenMediaRegenerationPlan :
         null;
-      const sourceHash = source.exists ? hashValue(source.data()) : "";
+      const sourceHash = source.exists ? foeDuplicationSourceHash(source.data()) : "";
       const task07Enabled = task07MediaWritesV1ForActor({
         control: control.data(),
         purpose: "token",
@@ -643,7 +644,7 @@ const spawnHandler = async (
             !task07Enabled ? "task07-token-writes-disabled" :
               !currentPlan ? "canonical-source-unavailable" :
                 operation.exists &&
-                operation.get("sourceHash") !== sourceHash ?
+                !foeDuplicationSourceMatchesHash(source.data(), operation.get("sourceHash")) ?
                   "source-drift" :
                   operation.exists &&
                   !task07FoeTokenMediaRegenerationPlansMatch(
@@ -864,7 +865,7 @@ const spawnHandler = async (
           operation.get("status") !== "running" ||
           operation.get("leaseOwner") !== invocationId ||
           operation.get("requestHash") !== requestHash ||
-          operation.get("sourceHash") !== hashValue(source.data()) ||
+          !foeDuplicationSourceMatchesHash(source.data(), operation.get("sourceHash")) ||
           !task07FoeTokenMediaRegenerationPlansMatch(
             operation.get("regenerationPlan"),
             claim.plan
@@ -1000,7 +1001,7 @@ const spawnHandler = async (
         operation.get("phase") !== "commit" ||
         operation.get("leaseOwner") !== invocationId ||
         operation.get("requestHash") !== requestHash ||
-        operation.get("sourceHash") !== hashValue(source.data()) ||
+        !foeDuplicationSourceMatchesHash(source.data(), operation.get("sourceHash")) ||
         !isActiveGrigliataDm(actor.data()) ||
         !background.exists ||
         !task07MediaWritesV1ForActor({

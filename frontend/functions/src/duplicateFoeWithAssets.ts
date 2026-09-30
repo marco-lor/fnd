@@ -41,6 +41,8 @@ import {
   classifyFoeNestedEntryIdentities,
   duplicateFoeNestedEntryId,
   foeDuplicationControlFenceMatches,
+  foeDuplicationSourceHash,
+  foeDuplicationSourceMatchesHash,
   stripTask07MediaFromDuplicatedFoe,
 } from "./duplicateFoeWithAssetsCore";
 import {
@@ -386,7 +388,7 @@ const checkpointLegacySourcePresence = async (input: {
       operation.get("task07ControlHash") !== input.task07ControlHash ||
       operation.get("task07Mode") !== input.task07Mode ||
       !source.exists ||
-      operation.get("sourceHash") !== hashValue(source.data() ?? {}) ||
+      !foeDuplicationSourceMatchesHash(source.data() ?? {}, operation.get("sourceHash")) ||
       !storedManifest ||
       hashValue(storedManifest) !== hashValue(input.manifest)) {
       throw new HttpsError(
@@ -1233,7 +1235,7 @@ const duplicateFoeHandler = async (
     }
     const sourceData = source.data() ?? {};
     if (operation.exists &&
-      operation.get("sourceHash") !== hashValue(sourceData)) {
+      !foeDuplicationSourceMatchesHash(sourceData, operation.get("sourceHash"))) {
       return claimCleanup("source-drift", false);
     }
     if (operation.exists && !cleanupCanComplete) {
@@ -1410,7 +1412,7 @@ const duplicateFoeHandler = async (
         kind: "duplicate-foe",
         requestHash,
         sourceFoeId,
-        sourceHash: hashValue(sourceData),
+        sourceHash: foeDuplicationSourceHash(sourceData),
         task07ControlHash,
         task07Mode,
         newFoeId,
@@ -1616,8 +1618,7 @@ const duplicateFoeHandler = async (
           }) ||
           operation.get("task07ControlHash") !== claim.task07ControlHash ||
           operation.get("task07Mode") !== claim.task07Mode ||
-          operation.get("sourceHash") !==
-            hashValue(sourceSnapshot.data()) ||
+          !foeDuplicationSourceMatchesHash(sourceSnapshot.data(), operation.get("sourceHash")) ||
           !task07FoeMediaClonePlansMatch(
             operation.get("canonicalMediaClone"),
             claim.clone
@@ -1788,6 +1789,7 @@ const duplicateFoeHandler = async (
       manaCurrent: asFiniteNumber(sourceStats.manaTotal),
     },
     created_at: FieldValue.serverTimestamp(),
+    task13OrderSeconds: Math.floor(Date.now() / 1000),
     updated_at: FieldValue.serverTimestamp(),
   };
   const result = {
@@ -1889,7 +1891,7 @@ const duplicateFoeHandler = async (
         operation.get("task07ControlHash") !== claim.task07ControlHash ||
         operation.get("task07Mode") !== claim.task07Mode ||
         !sourceSnapshot.exists ||
-        operation.get("sourceHash") !== hashValue(sourceSnapshot.data())
+        !foeDuplicationSourceMatchesHash(sourceSnapshot.data(), operation.get("sourceHash"))
       ) {
         throw new HttpsError(
           "aborted",

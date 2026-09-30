@@ -28,6 +28,7 @@ const FORBIDDEN_FIELDS = new Set([
   'spells',
   'task07MediaRevision',
   'task07VideoMediaRevision',
+  'task13OrderSeconds',
   'tecniche',
   'updated_at',
   'url',

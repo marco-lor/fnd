@@ -1,6 +1,17 @@
 {
   "schemaVersion": 1,
+  "task13Foes": {"maxSnapshotDocuments": 26, "maxInitialRows": 25, "maxInitialThumbnails": 25, "maxSerializedRatio": 0.06, "maxUnaffectedCommits": 0, "enforcedBy": ["task13:test:models", "src/components/foesHub/task13b-performance.test.js", "task13:test:emulator"]},
   "budgets": [
+    {
+      "id": "task13-foes-unaffected-commits",
+      "scenario": "foes-hub",
+      "metric": "react.unaffectedRowChartCommits",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "13"
+    },
     {
       "id": "entry-javascript-regression",
       "scenario": "build",

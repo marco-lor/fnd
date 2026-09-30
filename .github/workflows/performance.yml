@@ -36,6 +36,7 @@ jobs:
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
       - run: npm run perf:test
+      - run: npm run task13:test:models
       - run: npm run perf:check-firestore-imports
       - run: npm run perf:check-shared-config-boundaries
       - run: npm run perf:check-user-data-boundaries
@@ -106,6 +107,7 @@ jobs:
       - run: npm --prefix functions run build
       - run: node scripts/performance/rules-emulators.js
       - run: node scripts/task12/run-emulator-tests.js
+      - run: npm run task13:test:emulator
 
   hardened-build:
     runs-on: ubuntu-latest

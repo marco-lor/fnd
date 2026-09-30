@@ -141,3 +141,21 @@ test("spawn payloads snapshot foe state and bind the placement", () => {
   });
   assert.equal(explicitNullCurrent.stats.hpCurrent, 7);
 });
+
+
+test("foe order migration preserves spawn source fences and token snapshot while gameplay edits fail", () => {
+  const {foeDuplicationSourceHash, foeDuplicationSourceMatchesHash} = require("../lib/duplicateFoeWithAssetsCore");
+  const {hashValue} = require("../lib/userDataV2");
+  const source = {name: "Goblin", stats: {hpTotal: 7, manaTotal: 4}, spells: [{name: "Spark"}], updated_at: {seconds: 12}};
+  const migrated = {...source, task13OrderSeconds: 12};
+  const input = {actorUid: "dm-user", foeId: payload.foeId, timestamp: {seconds: 123}};
+  assert.deepEqual(buildSpawnedFoeTokenDocument({...input, source}),
+    buildSpawnedFoeTokenDocument({...input, source: migrated}));
+  for (const hash of [hashValue(source), foeDuplicationSourceHash(migrated)]) {
+    assert.equal(foeDuplicationSourceMatchesHash(migrated, hash), true);
+    assert.equal(foeDuplicationSourceMatchesHash({...migrated, task13OrderSeconds: 13}, hash), true);
+    for (const patch of [{stats: {hpTotal: 8}}, {spells: []}, {imagePath: "foes/new.png"}, {updated_at: {seconds: 13}}]) {
+      assert.equal(foeDuplicationSourceMatchesHash({...migrated, ...patch}, hash), false);
+    }
+  }
+});

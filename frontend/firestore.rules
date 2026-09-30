@@ -1913,7 +1913,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (docId != "codex"
         || !exists(/databases/$(database)/documents/utils/codex_control)
         || get(/databases/$(database)/documents/utils/codex_control).data.mode in ["legacy", "frozen"]);
-      allow write: if docId != "codex_control"
+      allow write: if docId != "foes_paging" && docId != "codex_control"
         && (docId == "codex" ? (isDMOrWebmaster() && codexLegacyWritable()) : isWebmaster());
       match /Razze/{raceId} {
         allow read: if isSignedIn();
@@ -1921,10 +1921,21 @@ service cloud.firestore {
       }
     }
 
+    // Task13 readers cannot silently exclude old-client writes after cutover.
+    function foeOrderIsPresent(data) {
+      return ("task13OrderSeconds" in data) && data.task13OrderSeconds is number
+        && data.task13OrderSeconds >= -62135596800 && data.task13OrderSeconds <= 253402300799;
+    }
+    function foePagingRequiresOrder() {
+      return exists(/databases/$(database)/documents/utils/foes_paging)
+        && get(/databases/$(database)/documents/utils/foes_paging).data.mode == "paged";
+    }
+
     // Foes
     match /foes/{foeId} {
       allow get, list: if isDM();
       allow create: if isDM()
+        && (!foePagingRequiresOrder() || foeOrderIsPresent(request.resource.data))
         && hasNoTask07EmbeddedMedia(request.resource.data)
         && hasValidOptionalTask07MediaReference(
           request.resource.data,
@@ -1936,6 +1947,7 @@ service cloud.firestore {
         )
         && hasNoTask07FoeGeneralServerFields(request.resource.data);
       allow update: if isDM()
+        && (!foePagingRequiresOrder() || foeOrderIsPresent(request.resource.data))
         && task07EmbeddedMediaUnchanged(
           request.resource.data,
           resource.data

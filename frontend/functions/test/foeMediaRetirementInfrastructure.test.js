@@ -102,7 +102,18 @@ test("foe retirement commits target, manifest, queues, and receipt atomically", 
     path.join(frontendRoot, "functions", "src", "foeMediaRetirement.ts"),
     "utf8"
   );
-  assert.match(source, /hashValue\(current\) !== receipt\.get\("targetHash"\)/);
+  // The caller's target fence is exercised by the Task13 emulator regression.
+  // Check its content semantics here instead of requiring the obsolete full hash.
+  const {foeDuplicationSourceHash, foeDuplicationSourceMatchesHash} =
+    require("../lib/duplicateFoeWithAssetsCore");
+  const {hashValue} = require("../lib/userDataV2");
+  const original = {name: "Foe", media: {assetId: "m_source"}};
+  const ordered = {...original, task13OrderSeconds: 7};
+  for (const targetHash of [hashValue(original), foeDuplicationSourceHash(ordered)]) {
+    assert.equal(foeDuplicationSourceMatchesHash(ordered, targetHash), true);
+    assert.equal(foeDuplicationSourceMatchesHash({...ordered, name: "Edited"}, targetHash), false);
+    assert.equal(foeDuplicationSourceMatchesHash({...ordered, media: {assetId: "m_other"}}, targetHash), false);
+  }
   assert.match(source, /task07FoeCanonicalRetirementPatch/);
   assert.match(source, /transaction\.update\(manifestRef/);
   assert.match(source, /transaction\.set\(canonicalCleanupRef/);

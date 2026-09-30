@@ -1,6 +1,20 @@
 import {createHash} from "crypto";
+import {asRecord, hashValue} from "./userDataV2";
 
 type UnknownRecord = Record<string, unknown>;
+
+// Ordering is a derived query field, not foe gameplay/media content. Its
+// maintenance must not invalidate a durable duplication or token-spawn intent.
+export const foeDuplicationSourceHash = (source: unknown): string => hashValue(
+  Object.fromEntries(Object.entries(asRecord(source)).filter(
+    ([key]) => key !== "task13OrderSeconds"
+  ))
+);
+
+export const foeDuplicationSourceMatchesHash = (
+  source: unknown, expected: unknown
+): boolean => expected === foeDuplicationSourceHash(source) ||
+  expected === hashValue(source);
 
 type StripTask07MediaOptions = {
   canonicalClone?: boolean;

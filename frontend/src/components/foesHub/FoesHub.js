@@ -7,7 +7,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  onSnapshot,
+
   runTransaction,
   serverTimestamp,
   setDoc,
@@ -16,6 +16,9 @@ import {
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import RadarChart from './elements/RadarChart';
+import {usePerformanceRenderProbe} from '../../performance/PerformanceProfiler';
+import useFoePage from './useFoePage';
+import {validateFoeUploads} from './foeUploadValidation';
 import { FoeFormModal } from './elements/lazyFoeEditors';
 import {
   deleteLegacyStoragePath,
@@ -79,9 +82,14 @@ const persistedImagePath = (item = {}) => {
 };
 
 
-const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
+export const FoeRow = React.memo(({ foe, onEdit, onDelete, onDuplicate }) => {
+  usePerformanceRenderProbe(`FoeRow:${foe.id}`);
   const [open, setOpen] = useState(false);
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
+  const chartModels = useMemo(() => ['Base', 'Combattimento'].map(group => {
+    const labels = Object.keys(params?.[group] || {}).sort();
+    return {labels, values: labels.map(key => Number(params?.[group]?.[key]?.Tot || 0))};
+  }), [params]);
   const hpTxt = `${Number(foe?.stats?.hpCurrent ?? foe?.stats?.hpTotal ?? 0)}/${Number(foe?.stats?.hpTotal ?? 0)}`;
   const manaTxt = `${Number(foe?.stats?.manaCurrent ?? foe?.stats?.manaTotal ?? 0)}/${Number(foe?.stats?.manaTotal ?? 0)}`;
   const renderedTechniques = useMemo(
@@ -167,16 +175,18 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
           {/* Radar charts */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <RadarChart
+                probeId={`FoeRadar:${foe.id}:base`}
                 title="Parametri Base"
-                labels={Object.keys(params?.Base || {}).sort()}
-                values={Object.keys(params?.Base || {}).sort().map((k) => Number(params?.Base?.[k]?.Tot || 0))}
+                labels={chartModels[0].labels}
+                values={chartModels[0].values}
                 color="sky"
                 size={300}
               />
               <RadarChart
+                probeId={`FoeRadar:${foe.id}:combat`}
                 title="Parametri Combattimento"
-                labels={Object.keys(params?.Combattimento || {}).sort()}
-                values={Object.keys(params?.Combattimento || {}).sort().map((k) => Number(params?.Combattimento?.[k]?.Tot || 0))}
+                labels={chartModels[1].labels}
+                values={chartModels[1].values}
                 color="fuchsia"
                 size={300}
               />
@@ -270,12 +280,12 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
       )}
     </div>
   );
-};
+});
 
 const FoesHub = () => {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
-  const [foes, setFoes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const paging = useFoePage();
+  const {rows: foes, loading} = paging;
   const [schema, setSchema] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null); // foe doc or null
@@ -292,23 +302,6 @@ const FoesHub = () => {
   const pendingFoeCreateRef = useRef(null);
   const completedNestedOperationsRef = useRef(new Set());
   const completedRootUploadRef = useRef(null);
-
-  // Subscribe foes
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'foes'), (snap) => {
-      const rows = [];
-      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-      // sort by updated_at/created_at desc if present
-      rows.sort((a, b) => (b.updated_at?.seconds || b.created_at?.seconds || 0) - (a.updated_at?.seconds || a.created_at?.seconds || 0));
-      setFoes(rows);
-      setLoading(false);
-    }, (err) => {
-      console.error('foes snapshot error', err);
-      setLoading(false);
-      setError('Impossibile caricare i foes.');
-    });
-    return () => unsub();
-  }, []);
 
   // Load base schema to bootstrap a foe
   useEffect(() => {
@@ -352,22 +345,22 @@ const FoesHub = () => {
     setModalOpen(true);
   };
 
-  const handleEdit = (foe) => {
+  const handleEdit = useCallback((foe) => {
     pendingFoeCreateRef.current = null;
     completedNestedOperationsRef.current.clear();
     completedRootUploadRef.current = null;
     setEditing(foe);
     setModalError('');
     setModalOpen(true);
-  };
+  }, []);
 
-  const handleDuplicateOpen = (foe) => {
+  const handleDuplicateOpen = useCallback((foe) => {
     setDupTarget(foe);
     const base = foe?.name?.toString()?.trim() || 'Foe';
     setDupName(`${base} (copy)`);
     setDupError('');
     setDupOpen(true);
-  };
+  }, []);
 
   const closeDuplicateModal = () => {
     if (dupBusy) return;
@@ -377,7 +370,7 @@ const FoesHub = () => {
     setDupError('');
   };
 
-  const handleDelete = async (foe) => {
+  const handleDelete = useCallback(async (foe) => {
     if (!foe?.id) return;
     const ok = window.confirm(`Eliminare definitivamente "${foe.name || foe.id}"?`);
     if (!ok) return;
@@ -399,7 +392,7 @@ const FoesHub = () => {
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
 
   const handleSave = async (foeData, options = {}) => {
     const uploadedLegacyPaths = new Set();
@@ -414,6 +407,7 @@ const FoesHub = () => {
         originalImageUrl,
         originalImagePath,
       } = options;
+      validateFoeUploads(foeData, requestedImageFile);
       const pendingFoeAtAttemptStart = !editing?.id
         ? pendingFoeCreateRef.current
         : null;
@@ -731,7 +725,8 @@ const FoesHub = () => {
           imagePath: currentFoe
             ? currentFoe.imagePath || ''
             : editing?.imagePath || '',
-          updated_at: serverTimestamp(),
+          task13OrderSeconds: Math.floor(Date.now() / 1000),
+        updated_at: serverTimestamp(),
         };
         const expectedRevision = imageSave.binding.revision;
         const previousAssetId = imageSave.binding.assetId;
@@ -977,6 +972,7 @@ const FoesHub = () => {
         ...basePayload,
         imageUrl: normalizeImageUrl(imageUrl) || '',
         imagePath: imagePath || '',
+        task13OrderSeconds: Math.floor(Date.now() / 1000),
         updated_at: serverTimestamp(),
       };
       if (recoveryMarker && !storedRecoveryPayload) {
@@ -1081,20 +1077,16 @@ const FoesHub = () => {
         dupTarget,
         { force: TASK06_LOCAL_CANDIDATE }
       );
-      if (useDurableDuplication) {
-        await runWithDurableOperationIntent({
-          actorUid: auth.currentUser?.uid,
-          kind: 'duplicate-foe',
-          intent: duplicateRequest,
-          isDefinitiveError: isDefinitiveFoeDuplicationError,
-          invoke: (operationId) => duplicateFoeWithAssetsV2({
-            ...duplicateRequest,
-            operationId,
-          }),
-        });
-      } else {
-        await duplicateFoeWithAssetsLegacy(duplicateRequest);
-      }
+      await runWithDurableOperationIntent({
+        actorUid: auth.currentUser?.uid,
+        kind: 'duplicate-foe',
+        intent: duplicateRequest,
+        isDefinitiveError: isDefinitiveFoeDuplicationError,
+        invoke: (operationId) => useDurableDuplication ? duplicateFoeWithAssetsV2({
+          ...duplicateRequest,
+          operationId,
+        }) : duplicateFoeWithAssetsLegacy({...duplicateRequest, operationId}),
+      });
       // Optional: we could resolve URLs for previews here using getDownloadURL on returned paths
       // but no need to mutate state; the Firestore onSnapshot will include the new doc
       setDupOpen(false);
@@ -1114,7 +1106,7 @@ const FoesHub = () => {
   // The parent registry is authoritative for embedded media. Project it into
   // editor entries so canonical-only images remain previewable and removable
   // without copying descriptors into the persisted nested arrays.
-  const initialForModal = useMemo(() => editing ? {
+  const initialForModal = useMemo(() => !modalOpen ? null : editing ? {
     ...editing,
     tecniche: (Array.isArray(editing.tecniche) ? editing.tecniche : [])
       .map((entry) => withTask07EmbeddedMedia(
@@ -1128,7 +1120,7 @@ const FoesHub = () => {
         entry,
         'foe-spell'
       )),
-  } : newFoeFromSchema(), [editing, newFoeFromSchema]);
+  } : newFoeFromSchema(), [modalOpen, editing, newFoeFromSchema]);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 text-white">
@@ -1143,8 +1135,8 @@ const FoesHub = () => {
           </button>
         </div>
 
-        {error && (
-          <div className="mb-3 text-sm text-red-300">{error}</div>
+        {(error || paging.error) && (
+          <div className="mb-3 text-sm text-red-300">{error || paging.error}</div>
         )}
 
         {loading ? (
@@ -1152,7 +1144,7 @@ const FoesHub = () => {
         ) : (
           <div className="space-y-3">
             {foes.length === 0 ? (
-              <div className="text-slate-400">Nessun foe creato. Clicca "Nuovo foe" per iniziare.</div>
+              <div className="text-slate-400">{paging.page > 1 ? 'Questa pagina è vuota. Torna alla pagina precedente o aggiorna dall’inizio.' : 'Nessun foe creato. Clicca "Nuovo foe" per iniziare.'}</div>
             ) : (
               foes.map((f) => (
                 <FoeRow key={f.id} foe={f} onEdit={handleEdit} onDelete={handleDelete} onDuplicate={handleDuplicateOpen} />
@@ -1162,6 +1154,12 @@ const FoesHub = () => {
         )}
       </div>
 
+      <nav aria-label="Pagine dei foes" className="max-w-6xl mx-auto mt-4 flex items-center gap-3">
+        <button disabled={loading || paging.page === 1} onClick={paging.previous}>Precedente</button>
+        <span aria-live="polite">Pagina {paging.page}</span>
+        <button disabled={loading || !paging.hasNext} onClick={paging.next}>Successiva</button>
+        <button disabled={loading} onClick={paging.first}>Aggiorna dall'inizio</button>
+      </nav>
       {/* Modal */}
   {modalOpen ? (
     <FoeFormModal

@@ -193,3 +193,4 @@ export {
 export {task09CatalogPage, task09CatalogDetail, task09WriteCatalogItem} from './bazaarCatalog';
 
 export {task12MutateCodex} from "./codex";
+export {syncFoeOrder} from "./foeOrder";

@@ -7,6 +7,7 @@ import {
   getVarie,
   invalidateConfig,
   subscribeConfigInvalidation,
+  subscribeFoePagingControl,
 } from './configRepository';
 import {
   __resetRepositoryRuntimeForTests,
@@ -16,6 +17,7 @@ import {
 import {
   doc,
   getDoc,
+  onSnapshot,
   labelFirestoreTarget,
 } from '../performance/firestore';
 
@@ -24,6 +26,7 @@ jest.mock('../components/firebaseConfig', () => ({ db: {} }));
 jest.mock('../performance/firestore', () => ({
   doc: jest.fn((_db, ...segments) => ({ path: segments.join('/') })),
   getDoc: jest.fn(),
+  onSnapshot: jest.fn(),
   labelFirestoreTarget: jest.fn((target) => target),
 }));
 
@@ -228,4 +231,31 @@ test('config invalidation notifies after eviction, including empty caches, and u
   invalidateConfig('spells_common');
   expect(observer).toHaveBeenCalledTimes(2);
   expect(() => invalidateConfig('unsupported')).toThrow();
+});
+
+ test('foe paging control shares realtime delivery and fences late callbacks across actors', async () => {
+  __resetRepositoryRuntimeForTests(); jest.clearAllMocks();
+  setRepositoryActor('dm-a');
+  const listeners = [];
+  onSnapshot.mockImplementation((target, next, error) => {
+    const stop = jest.fn(); listeners.push({target, next, error, stop}); return stop;
+  });
+  const left = jest.fn(), right = jest.fn(), nextActor = jest.fn();
+  const stopLeft = subscribeFoePagingControl(left);
+  const stopRight = subscribeFoePagingControl(right);
+  expect(onSnapshot).toHaveBeenCalledTimes(1);
+  listeners[0].next(snapshot({version: 1, mode: 'paged'}));
+  expect(left).toHaveBeenLastCalledWith({version: 1, mode: 'paged'});
+  expect(right).toHaveBeenCalledTimes(1);
+  stopLeft(); await Promise.resolve();
+  expect(listeners[0].stop).not.toHaveBeenCalled();
+  setRepositoryActor('dm-b');
+  expect(listeners[0].stop).toHaveBeenCalledTimes(1);
+  const stopNext = subscribeFoePagingControl(nextActor);
+  listeners[0].next(snapshot({version: 1, mode: 'legacy'}));
+  expect(nextActor).not.toHaveBeenCalled();
+  listeners[1].next(snapshot(null));
+  expect(nextActor).toHaveBeenLastCalledWith(null);
+  stopRight(); stopNext(); await Promise.resolve();
+  expect(listeners[1].stop).toHaveBeenCalledTimes(1);
 });

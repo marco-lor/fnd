@@ -4,6 +4,9 @@ import { FaPen } from "react-icons/fa";
 import { updateResource } from '../../../data/userData/userDataCommands';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import MediaVideo from '../../common/MediaVideo';
+import IncrementalCardGrid from './IncrementalCardGrid';
+import { sortEntries } from '../searchEntries';
+import { getManaState } from './manaState';
 
 // Cache dismissal timeouts to prevent flickering
 const timeoutCache = new Map();
@@ -32,64 +35,10 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
   const hasVideo = Boolean(legacyVideoUrl || tecnica?.videoMedia);
   const azione = tecnica.Azione || tecnica.azione || "";
 
-  // --- Mana validation logic with special reduction (ridCostoTec) ---
-  const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(() => {
-    const extractOriginalCost = () => {
-      const costStr = tecnica.Costo?.toString() || "0";
-      const match = costStr.match(/(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    const getCurrentMana = () => userData?.stats?.manaCurrent || 0;
-
-    // Find a reduction value in Parametri.Special using robust key matching
-    const getSpecialReduction = (specialObj, desiredKey) => {
-      if (!specialObj) return 0;
-      const extractVal = (node) => {
-        if (typeof node === 'number') return node;
-        if (node && typeof node === 'object') {
-          return Number(node.Tot ?? node.tot ?? node.value ?? 0) || 0;
-        }
-        return Number(node) || 0;
-      };
-      // Try exact key first
-      if (specialObj[desiredKey] !== undefined) {
-        const v = extractVal(specialObj[desiredKey]);
-        if (!isNaN(v) && v) return v;
-      }
-      const norm = (s) => s.toLowerCase().replace(/\s|_/g, '');
-      const desired = norm(desiredKey);
-      // Try normalized equality
-      for (const k of Object.keys(specialObj)) {
-        if (norm(k) === desired) {
-          const v = extractVal(specialObj[k]);
-          if (!isNaN(v) && v) return v;
-        }
-      }
-      // Try substring match
-      for (const k of Object.keys(specialObj)) {
-        if (norm(k).includes(desired)) {
-          const v = extractVal(specialObj[k]);
-          if (!isNaN(v) && v) return v;
-        }
-      }
-      return 0;
-    };
-
-    const orig = extractOriginalCost();
-    const rid = getSpecialReduction(userData?.Parametri?.Special, 'ridCostoTec');
-    // If original cost > 0, apply reduction with a minimum effective cost of 1
-    const effective = orig > 0 ? Math.max(1, orig - rid) : 0;
-    const mana = getCurrentMana();
-
-    return {
-      originalCost: orig,
-      costReduction: rid,
-      manaCost: effective,
-      currentMana: mana,
-      hasSufficientMana: mana >= effective
-    };
-  }, [tecnica.Costo, userData?.stats?.manaCurrent, userData?.Parametri?.Special]);
+  const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(
+    () => getManaState(tecnica.Costo, userData, 'ridCostoTec'),
+    [ tecnica.Costo, userData ]
+  );
 
   // Save initial card position for animation
   useEffect(() => {
@@ -521,70 +470,25 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
 // Memoized TecnicaCard for better performance
 const MemoizedTecnicaCard = React.memo(TecnicaCard);
 
-const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {}, onEditPersonalTecnica }) => {
+const EMPTY_TECHNIQUES = Object.freeze({});
+const TecnicheSide = ({ personalTecniche = EMPTY_TECHNIQUES, commonTecniche = EMPTY_TECHNIQUES,
+  personalEntries, commonEntries, filterKey, userData = {}, onEditPersonalTecnica }) => {
+  const personal = useMemo(() => personalEntries || sortEntries(personalTecniche), [personalEntries, personalTecniche]);
+  const common = useMemo(() => commonEntries || sortEntries(commonTecniche), [commonEntries, commonTecniche]);
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <h1 className="text-2xl text-white font-bold mb-4">Tecniche</h1>
-      {/* Tecniche Personali */}
-      <div className="mb-8">
-        <h2 className="text-xl text-white font-semibold mb-4 border-b border-gray-600 pb-2">
-          Tecniche Personali
-        </h2>
-        {Object.keys(personalTecniche).length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Object.entries(personalTecniche)
-              .sort((a, b) => {
-                const nameA = (a[1]?.Nome || a[0] || "").toString();
-                const nameB = (b[1]?.Nome || b[0] || "").toString();
-                return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
-              })
-              .map(([tecnicaName, tecnica]) => (
-                <MemoizedTecnicaCard
-                  key={tecnicaName}
-                  tecnicaName={tecnicaName}
-                  tecnica={tecnica}
-                  isPersonal={true}
-                  userData={userData}
-                  onEdit={onEditPersonalTecnica}
-                />
-              ))}
-          </div>
-        ) : (
-          <p className="text-gray-400">Nessuna tecnica personale disponibile.</p>
-        )}
-      </div>
-      {/* Tecniche Comuni */}
-      <div>
-        <h2 className="text-xl text-white font-semibold mb-4 border-b border-gray-600 pb-2">
-          Tecniche Comuni
-        </h2>
-        {Object.keys(commonTecniche).length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Object.entries(commonTecniche)
-              .sort((a, b) => {
-                const nameA = (a[1]?.Nome || a[0] || "").toString();
-                const nameB = (b[1]?.Nome || b[0] || "").toString();
-                return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
-              })
-              .map(([tecnicaName, tecnica]) => (
-                <MemoizedTecnicaCard
-                  key={tecnicaName}
-                  tecnicaName={tecnicaName}
-                  tecnica={tecnica}
-                  isPersonal={false}
-                  userData={userData}
-                  onEdit={null}
-                />
-              ))}
-          </div>
-        ) : (
-          <p className="text-gray-400">Nessuna tecnica comune disponibile.</p>
-        )}
-      </div>
+      {[{ entries: personal, label: 'Tecniche Personali', personal: true },
+        { entries: common, label: 'Tecniche Comuni', personal: false }].map(group =>
+        <div key={group.label} className={group.personal ? 'mb-8' : ''}>
+          <h2 className="text-xl text-white font-semibold mb-4 border-b border-gray-600 pb-2">{group.label}</h2>
+          {group.entries.length ? <IncrementalCardGrid entries={group.entries} label={group.label} filterKey={filterKey}
+            renderCard={([tecnicaName, tecnica]) => <MemoizedTecnicaCard key={tecnicaName} tecnicaName={tecnicaName}
+              tecnica={tecnica} isPersonal={group.personal} userData={userData}
+              onEdit={group.personal ? onEditPersonalTecnica : null} />} /> :
+            <p className="text-gray-400">{group.personal ? 'Nessuna tecnica personale disponibile.' : 'Nessuna tecnica comune disponibile.'}</p>}
+        </div>)}
     </div>
   );
 };
-
-// Memoize the entire TecnicheSide component to prevent unnecessary rerenders
 export default React.memo(TecnicheSide);
-

@@ -57,6 +57,13 @@ test('maximum long-task metrics retain the worst observed iteration', () => {
   assert.equal(metrics['dm-dashboard:runtime.maxLongTaskMs.p95'], 307);
 });
 
+test('foe render isolation never hides a single bad iteration in the median', () => {
+  const metrics = buildMetricMap({browserReport: {scenarios: [0, 1, 0].map(value => ({
+    id: 'foes-hub', metrics: {'react.unaffectedRowChartCommits': value},
+  }))}});
+  assert.equal(metrics['foes-hub:react.unaffectedRowChartCommits'], 1);
+});
+
 test('commit identity always comes from HEAD and rejects a stale inherited GITHUB_SHA', () => {
   const head = 'a'.repeat(40);
   const execFileSync = () => `${head}\n`;

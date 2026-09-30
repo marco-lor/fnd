@@ -6,11 +6,14 @@ import {
 } from "./duplicateFoeWithAssetsCore";
 import {task07MediaModeForActor} from "./task07MediaControl";
 import {hashValue} from "./userDataV2";
+import {backendOperationExpiry, backendOperationReceiptId,
+  backendOperationRequestHash, validateBackendOperationId} from "./backendOperationCore";
 
 export type LegacyDuplicatePayload = {
   sourceFoeId?: string;
   newFoeName?: string;
   idempotencyKey?: string;
+  operationId?: string;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -56,6 +59,7 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
     sourceFoeId,
     newFoeName,
     idempotencyKey,
+    operationId: suppliedOperationId,
   } = req.data || {};
   if (!sourceFoeId || typeof sourceFoeId !== "string") {
     throw new HttpsError("invalid-argument", "sourceFoeId is required");
@@ -73,10 +77,31 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
   const sourceRef = db.doc("foes/" + sourceFoeId);
   const task07ControlRef = db.doc("utils/task07_media");
   const newDocRef = db.collection("foes").doc();
-  const idemDocRef = idempotencyKey && typeof idempotencyKey === "string" ?
+  const operationId = suppliedOperationId === undefined ? undefined :
+    validateBackendOperationId(suppliedOperationId);
+  if (suppliedOperationId !== undefined && !operationId) {
+    throw new HttpsError("invalid-argument", "A valid operationId is required.");
+  }
+  const requestHash = backendOperationRequestHash("duplicate-foe", {
+    sourceFoeId, newFoeName: newFoeName.trim(),
+  });
+  // The compatibility alias supports durable no-media intents without requiring
+  // Task06 V2 enablement. Actor-scoped receipts cannot collide across DMs.
+  const idemDocRef = operationId ? db.collection("backend_operations").doc(
+    backendOperationReceiptId(ctx.uid, operationId)
+  ) : idempotencyKey && typeof idempotencyKey === "string" ?
     db.collection("duplications").doc(idempotencyKey) :
     null;
 
+  // A source can lose its media between retries. Preserve the existing V2
+  // cleanup/lease protocol instead of creating a second no-media operation.
+  if (operationId && idemDocRef) {
+    const existing = await idemDocRef.get();
+    if (existing.exists && existing.get("status") !== "completed") {
+      const {duplicateFoeWithAssetsV2} = await import("./duplicateFoeWithAssets.js");
+      return duplicateFoeWithAssetsV2.run(req);
+    }
+  }
   const outcome = await db.runTransaction(async (transaction) => {
     const snapshots = await transaction.getAll(
       requesterRef,
@@ -96,6 +121,14 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
       );
     }
     if (existingReceipt?.exists) {
+      if (operationId && (existingReceipt.get("actorUid") !== ctx.uid ||
+          existingReceipt.get("kind") !== "duplicate-foe" ||
+          existingReceipt.get("requestHash") !== requestHash)) {
+        throw new HttpsError("already-exists", "Operation intent changed.");
+      }
+      if (operationId && existingReceipt.get("status") !== "completed") {
+        throw new HttpsError("aborted", "Duplication is already running. Retry.");
+      }
       const existingResult = existingReceipt.get("result");
       if (existingResult && typeof existingResult === "object") {
         return {
@@ -146,6 +179,7 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
       spells: newSpells,
       created_at: admin.firestore.FieldValue.serverTimestamp(),
       updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      task13OrderSeconds: Math.floor(Date.now() / 1000),
     };
     const result = {
       newFoeId: newDocRef.id,
@@ -169,6 +203,11 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
       transaction.set(idemDocRef, {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         actor: ctx.uid,
+        ...(operationId ? {operationId, requestHash, actorUid: ctx.uid,
+          schemaVersion: 2, kind: "duplicate-foe", status: "completed",
+          phase: "completed", expiresAt: backendOperationExpiry(),
+          progress: {planned: 0, processed: 0, succeeded: 0, failed: 0, skipped: 0},
+        } : {}),
         sourceFoeId,
         sourceHash: hashValue(source),
         task07ControlHash,

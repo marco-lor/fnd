@@ -97,6 +97,8 @@
     "perf:check-user-data-boundaries": "node scripts/performance/check-user-data-boundaries.js",
     "perf:check-media-boundaries": "node scripts/performance/check-media-boundaries.js",
     "test": "react-scripts test",
+    "task13:test:models": "node --test scripts/performance/task13b-model.test.js scripts/task13/foe-order-migration.test.js",
+    "task13:test:emulator": "node scripts/task13/run-emulator-tests.js",
     "eject": "react-scripts eject",
     "fb:login": "npx firebase login",
     "fb:whoami": "npx firebase projects:list",

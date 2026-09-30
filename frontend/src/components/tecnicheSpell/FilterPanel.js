@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
+import { normalizeSearchItem } from './searchEntries';
 import { FiSearch, FiSliders, FiX } from 'react-icons/fi';
 
 /**
@@ -20,19 +21,11 @@ export function buildFilterPredicate({
 }) {
   const lowerSearch = searchTerm.trim().toLowerCase();
   const maxCostNum = maxCost === '' ? Infinity : parseInt(maxCost, 10);
-  return (item) => {
+  return (item, normalized) => {
     if (!item) return false;
-    const nome = (item.Nome || '').toString();
-    const effetto = [item.Effetto, item['Effetti Positivi'], item['Effetti Negativi']]
-      .filter(Boolean)
-      .join(' ') || '';
-    const searchable = (nome + ' ' + effetto).toLowerCase();
+    const { searchable, numericCost } = (normalized && typeof normalized === 'object') ? normalized : normalizeSearchItem(item);
     if (lowerSearch && !searchable.includes(lowerSearch)) return false;
 
-    // Cost extraction
-    const costStr = item.Costo?.toString() || '';
-    const match = costStr.match(/(\d+)/);
-    const numericCost = match ? parseInt(match[1], 10) : Infinity;
     if (numericCost > maxCostNum) return false;
 
     // Action filter (apply only if specific actions selected)
@@ -77,6 +70,7 @@ export default function FilterPanel({
   onPredicateChange
 }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [maxCost, setMaxCost] = useState('');
   const [selectedActions, setSelectedActions] = useState(['All']);
   const [selectedTipoBase, setSelectedTipoBase] = useState(['All']);
@@ -107,13 +101,13 @@ export default function FilterPanel({
 
   // Update predicate when filters change
   const predicate = useMemo(() => buildFilterPredicate({
-    searchTerm,
+    searchTerm: deferredSearchTerm,
     maxCost,
     selectedActions,
     selectedTipoBase,
     turniRange: showAdvanced ? turniRange : null,
     esperienzaRange: showAdvanced ? esperienzaRange : null
-  }), [searchTerm, maxCost, selectedActions, selectedTipoBase, turniRange, esperienzaRange, showAdvanced]);
+  }), [deferredSearchTerm, maxCost, selectedActions, selectedTipoBase, turniRange, esperienzaRange, showAdvanced]);
 
   useEffect(() => {
     onPredicateChange && onPredicateChange(predicate);

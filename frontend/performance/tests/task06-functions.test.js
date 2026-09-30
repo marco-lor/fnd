@@ -1293,126 +1293,74 @@ test('NPC and encounter cleanup remove indexed and nested descendants', async ()
 
 test('foe duplication skips a missing optional legacy image and replays', async () => {
   await resetTask06ControlPlane();
-  const sourceFoeId = 'task06-storage-source';
   const bucket = getStorage(app).bucket();
-  const sourcePaths = {
-    main: 'foes/task06/source-main.png',
-    technique: 'foes/task06/source-technique.png',
-    spell: 'foes/task06/source-missing-spell.png',
-  };
-  await Promise.all([
-    bucket.file(sourcePaths.main).save(Buffer.from('task06-main'), {
-      metadata: {contentType: 'image/png'},
-    }),
-    bucket.file(sourcePaths.technique).save(
-      Buffer.from('task06-technique'),
-      {metadata: {contentType: 'image/png'}}
-    ),
-  ]);
-  await db.doc(`foes/${sourceFoeId}`).set({
-    name: 'Task 06 source',
-    imagePath: sourcePaths.main,
-    imageUrl: 'https://example.invalid/source-main.png',
-    tecniche: [{
-      name: 'Technique',
-      imagePath: sourcePaths.technique,
-      imageUrl: 'https://example.invalid/source-technique.png',
-    }],
-    spells: [{
-      name: 'Spell',
-      imagePath: sourcePaths.spell,
-      imageUrl: 'https://example.invalid/source-spell.png',
-    }],
-    stats: {hpTotal: 20, manaTotal: 10},
+  const sourcePath = 'foes/task06/source-main.png';
+  await bucket.file(sourcePath).save(Buffer.from('task06-main'), {
+    metadata: {contentType: 'image/png'},
   });
+  // Task07 requires canonical identities/bindings for persisted nested media.
+  // Keep the old malformed fixture as an explicit source-integrity regression.
+  await db.doc('foes/task06-invalid-nested-source').set({
+    name: 'Invalid nested source',
+    tecniche: [{name: 'Technique', imagePath: 'foes/task06/source-technique.png'}],
+  });
+  await assert.rejects(invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_OPERATION_ID + '-invalid',
+    sourceFoeId: 'task06-invalid-nested-source', newFoeName: 'Must not copy',
+  }), /Nested foe media identity or registry binding is invalid/);
 
-  const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
-    operationId: FOE_OPERATION_ID,
-    sourceFoeId,
-    newFoeName: 'Task 06 duplicate',
-  });
-  assert.equal(completed.replayed, false);
-  assert.ok(completed.newFoeId);
-
-  const operationQuery = await db.collection('backend_operations')
-    .where('operationId', '==', FOE_OPERATION_ID)
-    .limit(1)
-    .get();
-  assert.equal(operationQuery.size, 1);
-  const operation = operationQuery.docs[0];
-  const manifest = operation.get('assetManifest');
-  assert.equal(manifest.length, 3);
-  const destinationState = await Promise.all(
-    manifest.map(({destinationPath}) => (
-      bucket.file(destinationPath).exists().then(([exists]) => exists)
-    ))
-  );
-  assert.deepEqual(destinationState, [true, true, false]);
-  assert.deepEqual(operation.get('progress'), {
-    planned: 3,
-    processed: 3,
-    succeeded: 2,
-    skipped: 1,
-    failed: 0,
-  });
-  const duplicate = await db.doc(`foes/${completed.newFoeId}`).get();
-  assert.equal(duplicate.exists, true);
-  assert.equal(duplicate.get('name'), 'Task 06 duplicate');
-  assert.equal(
-    manifest.every(({destinationPath}) => (
-      destinationPath.startsWith('foes/operations/')
-    )),
-    true
-  );
-  const copiedManifest = manifest.filter(({key}) => key !== 'spell:0');
-  const destinationMetadata = await Promise.all(
-    copiedManifest.map(async (entry) => {
-      const [exists] = await bucket.file(entry.destinationPath).exists();
+  for (const missing of [false, true]) {
+    const sourceFoeId = 'task06-storage-source-' + missing;
+    const operationId = FOE_OPERATION_ID + '-' + missing;
+    const source = {
+      name: 'Task 06 source',
+      imagePath: missing ? 'foes/task06/source-missing-main.png' : sourcePath,
+      imageUrl: 'https://example.invalid/source-main.png',
+      tecniche: [{name: 'Technique', description: 'No persisted media'}],
+      spells: [{name: 'Spell', description: 'No persisted media'}],
+      stats: {hpTotal: 20, manaTotal: 10},
+    };
+    await db.doc('foes/' + sourceFoeId).set(source);
+    const request = {operationId, sourceFoeId, newFoeName: 'Task 06 duplicate'};
+    const completed = await invokeCallable('duplicateFoeWithAssetsV2', request);
+    assert.equal(completed.replayed, false);
+    const operationQuery = await db.collection('backend_operations')
+      .where('operationId', '==', operationId).limit(1).get();
+    assert.equal(operationQuery.size, 1);
+    const operation = operationQuery.docs[0];
+    const manifest = operation.get('assetManifest');
+    assert.equal(manifest.length, 1);
+    const [entry] = manifest;
+    assert.equal(entry.key, 'main');
+    assert.ok(entry.destinationPath.startsWith('foes/operations/'));
+    const [exists] = await bucket.file(entry.destinationPath).exists();
+    assert.equal(exists, !missing);
+    assert.deepEqual(operation.get('progress'), {
+      planned: 1, processed: 1, succeeded: missing ? 0 : 1,
+      skipped: missing ? 1 : 0, failed: 0,
+    });
+    if (!missing) {
       const [metadata] = await bucket.file(entry.destinationPath).getMetadata();
-      return {entry, exists, metadata};
-    })
-  );
-  destinationMetadata.forEach(({entry, exists, metadata}) => {
-    assert.equal(exists, true);
-    assert.equal(metadata.contentType, 'image/png');
-    assert.equal(
-      metadata.metadata.task06OperationOwned,
-      'true'
-    );
-    assert.equal(
-      metadata.metadata.firebaseStorageDownloadTokens,
-      entry.downloadToken
-    );
-    assert.match(metadata.cacheControl, /private/);
-    assert.match(metadata.cacheControl, /immutable/);
-  });
-  const manifestByKey = new Map(
-    manifest.map((entry) => [entry.key, entry])
-  );
-  assert.equal(
-    duplicate.get('imagePath'),
-    manifestByKey.get('main').destinationPath
-  );
-  assert.equal(
-    duplicate.get('tecniche')[0].imagePath,
-    manifestByKey.get('tecnica:0').destinationPath
-  );
-  assert.equal(duplicate.get('spells')[0].imagePath, '');
-  assert.equal(duplicate.get('spells')[0].imageUrl, '');
-  assert.deepEqual(completed.assets.spells[0], {
-    name: 'Spell',
-    path: '',
-    url: '',
-  });
-
-  const replay = await invokeCallable('duplicateFoeWithAssetsV2', {
-    operationId: FOE_OPERATION_ID,
-    sourceFoeId,
-    newFoeName: 'Task 06 duplicate',
-  });
-  assert.equal(replay.replayed, true);
-  assert.equal(replay.newFoeId, completed.newFoeId);
-  assert.deepEqual(replay.assets, completed.assets);
+      assert.equal(metadata.contentType, 'image/png');
+      assert.equal(metadata.metadata.task06OperationOwned, 'true');
+      assert.equal(metadata.metadata.firebaseStorageDownloadTokens, entry.downloadToken);
+      assert.match(metadata.cacheControl, /private/);
+      assert.match(metadata.cacheControl, /immutable/);
+    }
+    const duplicate = await db.doc('foes/' + completed.newFoeId).get();
+    assert.equal(duplicate.exists, true);
+    assert.equal(duplicate.get('imagePath'), missing ? '' : entry.destinationPath);
+    if (missing) assert.equal(duplicate.get('imageUrl'), '');
+    assert.equal(duplicate.get('tecniche')[0].imagePath, '');
+    assert.equal(duplicate.get('spells')[0].imagePath, '');
+    const unchangedSource = (await db.doc('foes/' + sourceFoeId).get()).data();
+    delete unchangedSource.task13OrderSeconds;
+    assert.deepEqual(unchangedSource, source);
+    const replay = await invokeCallable('duplicateFoeWithAssetsV2', request);
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.newFoeId, completed.newFoeId);
+    assert.deepEqual(replay.assets, completed.assets);
+  }
 });
 
 test('foe duplication owns and atomically attaches a canonical media family', async () => {

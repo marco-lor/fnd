@@ -9,8 +9,29 @@ const {
   foeDuplicationControlFenceMatches,
   foeHasNestedPersistedMedia,
   foeHasPersistedMedia,
+  foeDuplicationSourceHash,
+  foeDuplicationSourceMatchesHash,
   stripTask07MediaFromDuplicatedFoe,
 } = require("../lib/duplicateFoeWithAssetsCore");
+const {hashValue} = require("../lib/userDataV2");
+
+test("source fences ignore only derived order and retain pre-migration receipt compatibility", () => {
+  const source = {name: "Source", updated_at: {seconds: 12}, stats: {manaCurrent: 4}, media: {assetId: "m_test"}};
+  const beforeMigration = hashValue(source);
+  const migrated = {...source, task13OrderSeconds: 12};
+  assert.equal(foeDuplicationSourceMatchesHash(migrated, beforeMigration), true);
+  const current = foeDuplicationSourceHash(migrated);
+  assert.equal(foeDuplicationSourceMatchesHash({...migrated, task13OrderSeconds: 13}, current), true);
+  for (const patch of [{name: "edited"}, {updated_at: {seconds: 13}}, {stats: {manaCurrent: 3}}, {media: {assetId: "m_other"}}]) {
+    assert.equal(foeDuplicationSourceMatchesHash({...migrated, ...patch}, current), false);
+    assert.equal(foeDuplicationSourceMatchesHash({...migrated, ...patch}, beforeMigration), false);
+  }
+  // Historical full-hash receipts that already contained the new field remain
+  // compatible if unchanged. Its lost original value cannot safely be guessed.
+  const historicalWithField = hashValue(migrated);
+  assert.equal(foeDuplicationSourceMatchesHash(migrated, historicalWithField), true);
+  assert.equal(foeDuplicationSourceMatchesHash({...migrated, task13OrderSeconds: 13}, historicalWithField), false);
+});
 
 test("nested foe duplication rekeys media-free and retired entry identities", () => {
   const source = {

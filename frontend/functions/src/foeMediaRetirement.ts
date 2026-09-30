@@ -1,4 +1,8 @@
 import {randomUUID} from "crypto";
+import {
+  foeDuplicationSourceHash,
+  foeDuplicationSourceMatchesHash,
+} from "./duplicateFoeWithAssetsCore";
 import * as admin from "firebase-admin";
 import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
@@ -345,7 +349,7 @@ export const task07PrepareFoeMediaRetirement = onCall(
         foeId,
         expectedRevision,
         expectedUpdatedAt,
-        targetHash: hashValue(current),
+        targetHash: foeDuplicationSourceHash(current),
         mutation,
         uploads,
         uploadsBySlot: Object.fromEntries(uploads.map((upload) => [
@@ -477,7 +481,8 @@ export const task07CommitFoeMediaRetirement = onCall(
         );
       }
       const current = foe.data() || {};
-      if (!foe.exists || hashValue(current) !== receipt.get("targetHash")) {
+      if (!foe.exists ||
+        !foeDuplicationSourceMatchesHash(current, receipt.get("targetHash"))) {
         fail("aborted", "Foe document changed before retirement commit.");
       }
       const plan = asStoredTask07MediaUploadPlan(manifest.get("plan"));
