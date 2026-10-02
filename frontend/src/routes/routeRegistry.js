@@ -17,10 +17,6 @@ export const ROUTE_DESCRIPTORS = Object.freeze({
     chunkName: 'route-bazaar',
     importer: () => import(/* webpackChunkName: "route-bazaar" */ '../components/bazaar/Bazaar'),
   }),
-  combat: createModuleLoader({
-    chunkName: 'route-combat',
-    importer: () => import(/* webpackChunkName: "route-combat" */ '../components/combatTool/combatPage'),
-  }),
   tecnicheSpell: createModuleLoader({
     chunkName: 'route-tecniche-spell',
     importer: () => import(/* webpackChunkName: "route-tecniche-spell" */ '../components/tecnicheSpell/TecnicheSpell'),
@@ -56,7 +52,6 @@ export const ROUTE_REGISTRY = Object.freeze([
   { key: 'characterCreation', path: '/character-creation', public: true, descriptor: ROUTE_DESCRIPTORS.characterCreation },
   { key: 'home', path: '/home', descriptor: ROUTE_DESCRIPTORS.home },
   { key: 'bazaar', path: '/bazaar', descriptor: ROUTE_DESCRIPTORS.bazaar },
-  { key: 'combat', path: '/combat', descriptor: ROUTE_DESCRIPTORS.combat },
   { key: 'tecnicheSpell', path: '/tecniche-spell', descriptor: ROUTE_DESCRIPTORS.tecnicheSpell },
   { key: 'codex', path: '/codex', descriptor: ROUTE_DESCRIPTORS.codex },
   { key: 'echiDiViaggio', path: '/echi-di-viaggio', descriptor: ROUTE_DESCRIPTORS.echiDiViaggio },

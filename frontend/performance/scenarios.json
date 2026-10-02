@@ -4,6 +4,9 @@
   "locale": "en-US",
   "timezoneId": "Europe/Rome",
   "scenarios": [
+    { "id": "task14-retired-dm", "route": "/combat", "role": "dm", "interaction": "retired-direct-reload-return", "scheduledOnly": true, "requiredMetrics": ["task14.encounterListenerOpens", "task14.encounterWriteAttempts", "task14.encounterRequests", "task14.combatChunkRequests"] },
+    { "id": "task14-retired-anonymous", "route": "/combat", "role": "anonymous", "interaction": "retired-direct-reload-return", "scheduledOnly": true, "requiredMetrics": ["task14.encounterListenerOpens", "task14.encounterWriteAttempts", "task14.encounterRequests", "task14.combatChunkRequests"] },
+    { "id": "task14-grigliata-turns", "route": "/grigliata", "role": "dm", "interaction": "retained-next-wrap-join-leave", "scheduledOnly": true, "requiredMetrics": ["task14.turnTransitions", "task14.joinedParticipants", "task14.removedParticipants"] },
     { "id": "login-cold", "route": "/", "role": "anonymous", "interaction": "toggle-password", "cache": "cold" },
     { "id": "login-warm", "route": "/", "role": "anonymous", "interaction": "toggle-password", "cache": "warm" },
     { "id": "character-creation", "route": "/character-creation", "role": "new-player", "interaction": "select-race" },
@@ -11,7 +14,6 @@
     { "id": "bazaar", "route": "/bazaar", "role": "player", "interaction": "filter-and-open" },
     { "id": "tecniche-spell", "route": "/tecniche-spell", "role": "player", "interaction": "filter-and-open" },
     { "id": "codex", "route": "/codex", "role": "player", "interaction": "category-and-search" },
-    { "id": "combat", "route": "/combat", "role": "player", "interaction": "select-large-encounter" },
     { "id": "echi-di-viaggio", "route": "/echi-di-viaggio", "role": "player", "interaction": "hover-marker" },
     { "id": "dm-dashboard", "route": "/dm-dashboard", "role": "dm", "interaction": "expand-player" },
     { "id": "foes-hub", "route": "/foes-hub", "role": "dm", "interaction": "filter-and-select" },

@@ -29,12 +29,17 @@ test("Task 06 config fails safely to legacy with operations disabled", () => {
       "level-up-all",
       "level-up-all",
       "not-real",
+      "delete-encounter",
     ],
   }), {
     schemaVersion: 1,
     derivedOwnerMode: "authoritative",
     enabledOperationKinds: ["level-up-all"],
   });
+});
+
+test("retired encounter receipts remain recognizable for historical status", () => {
+  assert.equal(operationViewFromData({kind: "delete-encounter", status: "completed"}).kind, "delete-encounter");
 });
 
 test("operation identity is actor-scoped and request-bound", () => {

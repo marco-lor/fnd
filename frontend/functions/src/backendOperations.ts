@@ -11,7 +11,6 @@ import {
   BACKEND_OPERATION_LEASE_MS,
   BACKEND_OPERATION_PAGE_SIZE,
   BACKEND_OPERATION_STEP_BUDGET_MS,
-  BACKEND_OPERATION_STORAGE_CONCURRENCY,
   BackendOperationKind,
   BackendOperationStatus,
   BackendOperationView,
@@ -20,7 +19,7 @@ import {
   backendOperationRequestHash,
   emptyOperationProgress,
   getTokenGrantForLevel,
-  mapWithConcurrency,
+  isRetiredBackendOperationKind,
   operationViewFromData,
   ownedStoragePath,
   resolveTask06BackendConfig,
@@ -215,6 +214,11 @@ const createBackendOperation = async (input: {
       configRef
     );
     assertCallableActorRole(actor, input.kind);
+    if (isRetiredBackendOperationKind(input.kind)) {
+      throw new HttpsError(
+        "failed-precondition", "Combat Tool encounter deletion is retired."
+      );
+    }
     if (existing.exists) {
       if (
         existing.get("actorUid") !== actorUid ||
@@ -727,143 +731,6 @@ const finalizeNpcDeletion = async (
   };
 };
 
-const prepareEncounterDeletion = async (
-  operation: admin.firestore.DocumentSnapshot,
-  operationRef: admin.firestore.DocumentReference
-): Promise<OperationStepResult> => {
-  await requireCurrentActorRole(operation);
-  const encounterId = asTrimmedString(
-    asRecord(operation.get("input")).encounterId
-  );
-  const encounterRef = admin.firestore().doc(`encounters/${encounterId}`);
-  const encounter = await encounterRef.get();
-  if (!encounter.exists) {
-    return {
-      done: true,
-      phase: "completed",
-      result: {alreadyDeleted: true},
-    };
-  }
-  const collections = await encounterRef.listCollections();
-  await admin.firestore().runTransaction(async (transaction) => {
-    const [latestOperation, latestEncounter] = await transaction.getAll(
-      operationRef,
-      encounterRef
-    );
-    if (!latestOperation.exists || !latestEncounter.exists) return;
-    transaction.update(encounterRef, {
-      status: "deleted",
-      deletionState: "pending",
-      deletionRequestedAt: FieldValue.serverTimestamp(),
-      deletionRequestedBy: operation.get("actorUid"),
-    });
-    transaction.update(operationRef, {
-      phase: "descendants",
-      pendingCollections: collections.map((entry) => entry.path),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  });
-  return {done: false, phase: "descendants"};
-};
-
-const deleteEncounterDescendantPage = async (
-  operation: admin.firestore.DocumentSnapshot,
-  operationRef: admin.firestore.DocumentReference
-): Promise<OperationStepResult> => {
-  await requireCurrentActorRole(operation);
-  const pending = Array.isArray(operation.get("pendingCollections"))
-    ? operation.get("pendingCollections")
-      .map(asTrimmedString)
-      .filter(Boolean)
-    : [];
-  if (!pending.length) {
-    await operationRef.update({
-      phase: "verify",
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    return {done: false, phase: "verify"};
-  }
-  const collectionPath = pending[0];
-  const documents = await admin.firestore().collection(collectionPath)
-    .limit(WORKER_PAGE_SIZE)
-    .get();
-  if (documents.empty) {
-    await operationRef.update({
-      pendingCollections: pending.slice(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    return {done: false, phase: "descendants"};
-  }
-  const nestedCollections = new Set<string>(pending);
-  const nestedByDocument = await mapWithConcurrency(
-    documents.docs,
-    BACKEND_OPERATION_STORAGE_CONCURRENCY,
-    (document) => document.ref.listCollections()
-  );
-  for (const nested of nestedByDocument) {
-    nested.forEach((entry) => nestedCollections.add(entry.path));
-  }
-  const batch = admin.firestore().batch();
-  documents.docs.forEach((document) => {
-    const subjectRef = operationRef.collection("subjects").doc(
-      hashValue(["encounter-descendant", document.ref.path]).slice(0, 48)
-    );
-    batch.delete(document.ref);
-    batch.create(subjectRef, {
-      schemaVersion: 1,
-      outcome: "succeeded",
-      createdAt: FieldValue.serverTimestamp(),
-      expiresAt: backendOperationExpiry(),
-    });
-  });
-  batch.update(operationRef, {
-    pendingCollections: [...nestedCollections],
-    "progress.planned": FieldValue.increment(
-      documents.size
-    ),
-    "progress.processed": FieldValue.increment(
-      documents.size
-    ),
-    "progress.succeeded": FieldValue.increment(
-      documents.size
-    ),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  await batch.commit();
-  return {done: false, phase: "descendants"};
-};
-
-const finalizeEncounterDeletion = async (
-  operation: admin.firestore.DocumentSnapshot,
-  operationRef: admin.firestore.DocumentReference
-): Promise<OperationStepResult> => {
-  await requireCurrentActorRole(operation);
-  const encounterId = asTrimmedString(
-    asRecord(operation.get("input")).encounterId
-  );
-  const encounterRef = admin.firestore().doc(`encounters/${encounterId}`);
-  const collections = await encounterRef.listCollections();
-  const nonEmpty: string[] = [];
-  for (const collection of collections) {
-    const remaining = await collection.limit(1).get();
-    if (!remaining.empty) nonEmpty.push(collection.path);
-  }
-  if (nonEmpty.length) {
-    await operationRef.update({
-      phase: "descendants",
-      pendingCollections: nonEmpty,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    return {done: false, phase: "descendants"};
-  }
-  await encounterRef.delete();
-  return {
-    done: true,
-    phase: "completed",
-    result: {encounterDeleted: true},
-  };
-};
-
 const processOperationStep = async (
   operation: admin.firestore.DocumentSnapshot,
   operationRef: admin.firestore.DocumentReference,
@@ -903,15 +770,6 @@ const processOperationStep = async (
       return deleteNpcMedia(operation, operationRef);
     }
     return finalizeNpcDeletion(operation, operationRef);
-  }
-  if (kind === "delete-encounter") {
-    if (phase === "prepare") {
-      return prepareEncounterDeletion(operation, operationRef);
-    }
-    if (phase === "descendants") {
-      return deleteEncounterDescendantPage(operation, operationRef);
-    }
-    return finalizeEncounterDeletion(operation, operationRef);
   }
   throw new OperationStepError(
     "This operation kind uses its domain-specific runner.",
@@ -976,6 +834,28 @@ export const runBackendOperationWorker = onDocumentCreated(
         configRef
       );
       if (!operation.exists || !work.exists) return false;
+      // Fence even stale generations, terminal receipts and disabled config.
+      // Only operation/work metadata may change; encounter history is retained.
+      if (isRetiredBackendOperationKind(operation.get("kind"))) {
+        transaction.update(operationRef, {
+          status: "failed",
+          retryable: false,
+          errorClass: "validation",
+          retirementReason: "combat-tool-retired",
+          leaseOwner: FieldValue.delete(),
+          leaseExpiresAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(workSnapshot.ref, {
+          status: "failed",
+          retryable: false,
+          errorClass: "validation",
+          retirementReason: "combat-tool-retired",
+          leaseOwner: FieldValue.delete(),
+          completedAt: FieldValue.serverTimestamp(),
+        });
+        return false;
+      }
       if (["completed", "failed"].includes(asTrimmedString(
         operation.get("status")
       ))) return false;
@@ -1200,16 +1080,17 @@ export const deleteEncounterV2 = onCall(
     operationId?: string;
     encounterId?: string;
   }>) => {
-    const encounterId = asTrimmedString(request.data?.encounterId);
-    if (!isValidFirestoreDocumentId(encounterId)) {
-      throw new HttpsError("invalid-argument", "encounterId is invalid.");
+    const actorUid = asTrimmedString(request.auth?.uid);
+    if (!actorUid) {
+      throw new HttpsError("unauthenticated", "Authentication required.");
     }
-    return createBackendOperation({
-      request,
-      kind: "delete-encounter",
-      operationId: asTrimmedString(request.data?.operationId),
-      operationInput: {encounterId},
-    });
+    assertCallableActorRole(
+      await admin.firestore().doc(`users/${actorUid}`).get(),
+      "delete-encounter"
+    );
+    throw new HttpsError(
+      "failed-precondition", "Combat Tool encounter deletion is retired."
+    );
   }
 );
 
@@ -1286,6 +1167,11 @@ export const resumeBackendOperation = onCall(
       }
       const kind = operation.get("kind") as BackendOperationKind;
       assertCallableActorRole(actor, kind);
+      if (isRetiredBackendOperationKind(kind)) {
+        throw new HttpsError(
+          "failed-precondition", "Combat Tool encounter deletion is retired."
+        );
+      }
       const config = resolveTask06BackendConfig(configSnapshot.data());
       if (!config.enabledOperationKinds.includes(kind)) {
         throw new HttpsError(

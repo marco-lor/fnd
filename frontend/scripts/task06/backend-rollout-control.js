@@ -14,7 +14,7 @@ const REPORT_SCHEMA_VERSION = 1;
 const CONFIG_SCHEMA_VERSION = 1;
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
 const DERIVED_OWNER_MODES = new Set(['legacy', 'shadow', 'authoritative']);
-const OPERATION_KINDS = new Set([
+const KNOWN_OPERATION_KINDS = new Set([
   'level-up-all',
   'set-parameter-locks',
   'delete-npc',
@@ -22,6 +22,9 @@ const OPERATION_KINDS = new Set([
   'delete-grigliata-custom-token',
   'duplicate-foe',
 ]);
+const SELECTABLE_OPERATION_KINDS = new Set(
+  [...KNOWN_OPERATION_KINDS].filter((kind) => kind !== 'delete-encounter')
+);
 const CONFIG_KEYS = new Set([
   'schemaVersion',
   'derivedOwnerMode',
@@ -41,7 +44,7 @@ const printHelp = () => console.log([
   'Usage:',
   `  node scripts/task06/backend-rollout-control.js --environment production --project ${PRODUCTION_PROJECT_ID} --site ${PRODUCTION_PROJECT_ID} --bucket ${PRODUCTION_PROJECT_ID}.firebasestorage.app`,
   '    --derived-owner legacy|shadow|authoritative',
-  '    --enabled-kinds <comma-separated operation kinds>',
+  '    --enabled-kinds <comma-separated operation kinds|none>',
   '    [--auth admin|firebase-cli] [--report <path>]',
   '    [--execute --approve-fingerprint <sha256>]',
   `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
@@ -61,6 +64,7 @@ const parseArguments = (args = []) => {
     confirmProject: '',
     derivedOwnerMode: '',
     enabledOperationKinds: [],
+    disableAllOperations: false,
     execute: false,
     help: false,
     projectId: '',
@@ -92,7 +96,9 @@ const parseArguments = (args = []) => {
       if (argument === '--bucket') options.storageBucket = value;
       if (argument === '--derived-owner') options.derivedOwnerMode = value;
       if (argument === '--enabled-kinds') {
-        options.enabledOperationKinds = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+        options.disableAllOperations = value === 'none';
+        options.enabledOperationKinds = options.disableAllOperations
+          ? [] : value.split(',').map((entry) => entry.trim()).filter(Boolean);
       }
       if (argument === '--auth') options.authMode = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
@@ -107,12 +113,15 @@ const parseArguments = (args = []) => {
   if (!DERIVED_OWNER_MODES.has(options.derivedOwnerMode)) {
     throw new Error('--derived-owner must be legacy, shadow, or authoritative.');
   }
-  if (!options.enabledOperationKinds.length) {
-    throw new Error('--enabled-kinds must contain at least one operation kind.');
+  if (!options.enabledOperationKinds.length && !options.disableAllOperations) {
+    throw new Error('--enabled-kinds must contain an operation kind or explicit none.');
   }
   const uniqueKinds = [...new Set(options.enabledOperationKinds)];
-  if (uniqueKinds.some((kind) => !OPERATION_KINDS.has(kind))) {
+  if (uniqueKinds.some((kind) => !KNOWN_OPERATION_KINDS.has(kind))) {
     throw new Error('--enabled-kinds contains an unknown operation kind.');
+  }
+  if (uniqueKinds.some((kind) => !SELECTABLE_OPERATION_KINDS.has(kind))) {
+    throw new Error('Combat Tool encounter deletion is retired.');
   }
   options.enabledOperationKinds = uniqueKinds.sort();
   if (!AUTH_MODES.has(options.authMode)) {
@@ -190,7 +199,7 @@ const resolveCurrentConfig = ({exists, data}) => {
   const enabledOperationKinds = [...new Set(data.enabledOperationKinds)];
   if (
     enabledOperationKinds.length !== data.enabledOperationKinds.length
-    || enabledOperationKinds.some((kind) => !OPERATION_KINDS.has(kind))
+    || enabledOperationKinds.some((kind) => !KNOWN_OPERATION_KINDS.has(kind))
   ) {
     throw new Error('The Task 06 control document contains duplicate or unknown operation kinds.');
   }
@@ -201,13 +210,21 @@ const resolveCurrentConfig = ({exists, data}) => {
   };
 };
 
+const assertSelectableConfig = (config) => {
+  const normalized = resolveCurrentConfig({exists: true, data: config});
+  if (normalized.enabledOperationKinds.some((kind) => !SELECTABLE_OPERATION_KINDS.has(kind))) {
+    throw new Error('Combat Tool encounter deletion is retired.');
+  }
+  return normalized;
+};
+
 const buildPlan = ({projectId, desiredConfig, snapshot}) => {
   const beforeConfig = resolveCurrentConfig(snapshot);
-  const afterConfig = {
+  const afterConfig = assertSelectableConfig({
     schemaVersion: CONFIG_SCHEMA_VERSION,
     derivedOwnerMode: desiredConfig.derivedOwnerMode,
     enabledOperationKinds: [...desiredConfig.enabledOperationKinds].sort(),
-  };
+  });
   const subject = {
     reportSchemaVersion: REPORT_SCHEMA_VERSION,
     projectId,
@@ -234,6 +251,9 @@ const writeJsonAtomic = (filePath, value) => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 const assertApprovedPlan = ({approved, current, fingerprint}) => {
+  // A pre-retirement fingerprint cannot authorize re-enabling the old writer.
+  assertSelectableConfig(approved?.afterConfig);
+  assertSelectableConfig(current?.afterConfig);
   if (
     approved?.planFingerprint !== fingerprint
     || canonicalHash(approved) !== canonicalHash(current)

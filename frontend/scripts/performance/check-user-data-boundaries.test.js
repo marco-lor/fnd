@@ -232,7 +232,7 @@ test('normal UI command flows depend only on canonical Task 05 commands', () => 
   );
 });
 
-test('required auth, character, combat, and item flows use V2 user data boundaries', () => {
+test('required auth, character, retained turn, and item flows use V2 user data boundaries', () => {
   const frontendRoot = path.resolve(__dirname, '..', '..');
   const read = (relativePath) => fs.readFileSync(
     path.join(frontendRoot, relativePath),
@@ -247,12 +247,7 @@ test('required auth, character, combat, and item flows use V2 user data boundari
       /spendCharacterPoint/,
       /data\/userData\/userDataCommands/,
     ]],
-    ['src/components/combatTool/elements/buttons/advanceTurn.js', [/consumeTurnEffects/]],
-    ['src/components/combatTool/elements/EncounterCreator.js', [/subscribeUserDirectoryFirstPage/]],
-    ['src/components/combatTool/elements/EncounterDetails.js', [
-      /useProgression\(user\?\.uid\)/,
-      /subscribeUserResources/,
-    ]],
+    ['src/components/grigliata/GrigliataPage.js', [/consumeTurnEffects/, /grigliataTransition/]],
     ['src/components/home/elements/ItemDetailsModal.js', [/useEquipment/, /mutateInventory/]],
     ['src/components/tecnicheSpell/elements/spell_side.js', [/updateResource/]],
     ['src/components/tecnicheSpell/elements/tecniche_side.js', [/updateResource/]],
@@ -263,4 +258,16 @@ test('required auth, character, combat, and item flows use V2 user data boundari
     assert.equal(findDirectAccessesInSource(source).length, 0, relativePath);
     for (const marker of markers) assert.match(source, marker, relativePath);
   }
+});
+
+test('retired Combat implementation and inbound loaders are absent', () => {
+  const frontendRoot = path.resolve(__dirname, '..', '..');
+  assert.equal(fs.existsSync(path.join(frontendRoot, 'src/components/combatTool')), false);
+  for (const relativePath of ['src/App.js', 'src/routes/routeRegistry.js', 'src/components/common/navbar.js']) {
+    const source = fs.readFileSync(path.join(frontendRoot, relativePath), 'utf8');
+    assert.doesNotMatch(source, /combatTool|route-combat|feature-combat/, relativePath);
+  }
+  const navbar = fs.readFileSync(path.join(frontendRoot, 'src/components/common/navbar.js'), 'utf8');
+  assert.doesNotMatch(navbar, /path: ['"]\/combat['"]|label: ['"]Combat['"]/);
+  assert.match(navbar, /path: ['"]\/grigliata['"]/);
 });

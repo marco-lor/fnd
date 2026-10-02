@@ -8,7 +8,7 @@ let mockShellState;
 jest.mock("react-router-dom", () => ({
   Routes: ({ children }) => <div data-testid="routes">{children}</div>,
   Route: ({ element = null, children = null }) => <>{element}{children}</>,
-  Navigate: ({ to }) => <div data-testid="navigate">{to}</div>,
+  Navigate: ({ to, replace }) => <div data-testid="navigate" data-replace={replace ? 'true' : 'false'}>{to}</div>,
   Outlet: () => <div data-testid="route-outlet" />,
   useLocation: () => ({ pathname: "/" }),
 }), { virtual: true });
@@ -40,7 +40,6 @@ jest.mock("./components/bazaar/Bazaar", () => () => <div>Bazaar Page</div>);
 jest.mock("./components/dmDashboard/DMDashboard", () => () => <div>DM Dashboard Page</div>);
 jest.mock("./components/foesHub/FoesHub", () => () => <div>Foes Hub Page</div>);
 jest.mock("./components/tecnicheSpell/TecnicheSpell", () => () => <div>Tecniche Spell Page</div>);
-jest.mock("./components/combatTool/combatPage", () => () => <div>Combat Page</div>);
 jest.mock("./components/admin/adminPage", () => () => <div>Admin Page</div>);
 jest.mock("./components/codex/Codex", () => () => <div>Codex Page</div>);
 jest.mock("./components/echiDiViaggio/EchiDiViaggio", () => () => <div>Echi di Viaggio Page</div>);
@@ -152,6 +151,7 @@ describe("App route authorization states", () => {
     expect(screen.getByText("route-login")).toBeInTheDocument();
     expect(screen.getByText("route-character-creation")).toBeInTheDocument();
     expect(screen.getByText("route-grigliata")).toBeInTheDocument();
+    expect(screen.queryByText("route-combat")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("navigate").some((node) => node.textContent === "/home")).toBe(true);
   });
 });

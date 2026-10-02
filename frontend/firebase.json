@@ -114,10 +114,6 @@
         "destination": "/index.html"
       },
       {
-        "source": "/combat",
-        "destination": "/index.html"
-      },
-      {
         "source": "/tecniche-spell",
         "destination": "/index.html"
       },

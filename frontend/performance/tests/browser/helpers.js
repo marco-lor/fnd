@@ -1445,11 +1445,6 @@ const runInteraction = async (page, scenario, { settleFiniteAssets } = {}) => {
       assertCodexV2PageTelemetry(await page.evaluate(() => window.__FND_PERF__.snapshot().events));
       break;
     }
-    case 'combat': {
-      await page.getByText('Encounter 0', { exact: true }).first().click();
-      await expect(page.getByText('Encounter Log', { exact: false }).first()).toBeVisible();
-      break;
-    }
     case 'echi-di-viaggio': {
       const marker = page.getByRole('button', { name: /Fixture NPC 0/i });
       await expect(marker).toBeVisible();

@@ -88,6 +88,10 @@ before(async () => {
       }),
       setDoc(doc(firestore, 'users/task06-dm'), {role: 'dm'}),
       setDoc(doc(firestore, 'users/task06-webmaster'), {role: 'webmaster'}),
+      setDoc(doc(firestore, 'users/task06-participant'), {role: 'spectator'}),
+      setDoc(doc(firestore, 'users/task06-character-participant'), {role: 'spectator', characterId: 'task06-character'}),
+      setDoc(doc(firestore, 'users/task06-outsider'), {role: 'spectator'}),
+      setDoc(doc(firestore, 'users/task06-other-player'), {role: 'player'}),
       setDoc(doc(firestore, 'app_config/task06_backend'), {
         schemaVersion: 1,
         derivedOwnerMode: 'authoritative',
@@ -131,9 +135,12 @@ before(async () => {
       }),
       setDoc(doc(firestore, 'encounters/active-encounter'), {
         status: 'active',
-        participantIds: ['task06-player'],
+        participantIds: ['task06-player', 'task06-participant'],
         participantCharacterIds: ['task06-character'],
       }),
+      setDoc(doc(firestore, 'encounters/active-encounter/participants/task06-player'), {uid: 'task06-player'}),
+      setDoc(doc(firestore, 'encounters/active-encounter/logs/history'), {message: 'Historical turn'}),
+      setDoc(doc(firestore, 'encounters/pending-encounter/logs/history'), {message: 'Historical deletion fence'}),
       setDoc(doc(firestore, 'encounters/pending-encounter'), {
         status: 'deleted',
         deletionState: 'pending',
@@ -267,58 +274,58 @@ test('pending NPC deletion fences the document and every referencing marker writ
   }));
 });
 
-test('pending encounter deletion fences the parent and descendants', async () => {
-  const player = environment.authenticatedContext('task06-player').firestore();
-  const dm = environment.authenticatedContext('task06-dm').firestore();
-  const webmaster = environment.authenticatedContext('task06-webmaster').firestore();
-  const pendingPath = 'encounters/pending-encounter';
-
-  await assertSucceeds(getDoc(doc(player, pendingPath)));
-  await assertSucceeds(getDoc(doc(dm, pendingPath)));
-  await assertSucceeds(getDoc(doc(webmaster, pendingPath)));
-  await assertFails(updateDoc(doc(dm, pendingPath), {name: 'must remain fenced'}));
-  await assertFails(deleteDoc(doc(dm, pendingPath)));
-  await assertFails(setDoc(doc(
-    dm,
-    `${pendingPath}/participants/new-participant`
-  ), {
-    uid: 'new-participant',
-  }));
-  await assertFails(deleteDoc(doc(
-    dm,
-    `${pendingPath}/participants/task06-player`
-  )));
-  await assertFails(setDoc(doc(dm, `${pendingPath}/logs/new-log`), {
-    message: 'must remain fenced',
-  }));
-
-  await assertSucceeds(updateDoc(
-    doc(dm, 'encounters/active-encounter'),
-    {name: 'Allowed active edit'}
-  ));
-  await assertSucceeds(setDoc(doc(
-    dm,
-    'encounters/active-encounter/participants/second'
-  ), {
-    uid: 'second',
-  }));
+test('retired encounter history preserves the existing read audience', async () => {
+  for (const uid of ['task06-dm', 'task06-webmaster', 'task06-player', 'task06-other-player', 'task06-participant', 'task06-character-participant']) {
+    const firestore = environment.authenticatedContext(uid).firestore();
+    await assertSucceeds(getDoc(doc(firestore, 'encounters/active-encounter')));
+    await assertSucceeds(getDoc(doc(firestore, 'encounters/active-encounter/participants/task06-player')));
+    const readLog = getDoc(doc(firestore, 'encounters/active-encounter/logs/history'));
+    await (uid === 'task06-other-player' ? assertFails(readLog) : assertSucceeds(readLog));
+  }
+  for (const uid of ['task06-dm', 'task06-webmaster', 'task06-player', 'task06-other-player']) {
+    const firestore = environment.authenticatedContext(uid).firestore();
+    await assertSucceeds(getDoc(doc(firestore, 'encounters/pending-encounter')));
+    await assertSucceeds(getDoc(doc(firestore, 'encounters/pending-encounter/participants/task06-player')));
+    const readLog = getDoc(doc(firestore, 'encounters/pending-encounter/logs/history'));
+    await (['task06-dm', 'task06-webmaster'].includes(uid) ? assertSucceeds(readLog) : assertFails(readLog));
+  }
+  for (const firestore of [environment.unauthenticatedContext().firestore(), environment.authenticatedContext('task06-outsider').firestore()]) {
+    for (const suffix of ['', '/participants/task06-player', '/logs/history']) {
+      await assertFails(getDoc(doc(firestore, `encounters/active-encounter${suffix}`)));
+    }
+  }
 });
 
-test('encounter parent and participants can still be created atomically', async () => {
-  const dm = environment.authenticatedContext('task06-dm').firestore();
-  const batch = writeBatch(dm);
-  batch.set(doc(dm, 'encounters/batched-encounter'), {
-    status: 'active',
-    participantIds: ['task06-player'],
-    participantCharacterIds: ['task06-character'],
+test('every client encounter create, update and delete is denied without changing history', async () => {
+  const contexts = [environment.unauthenticatedContext().firestore(), ...[
+    'task06-dm', 'task06-webmaster', 'task06-player', 'task06-participant', 'task06-character-participant', 'task06-outsider',
+  ].map(uid => environment.authenticatedContext(uid).firestore())];
+  for (const firestore of contexts) {
+    for (const encounterId of ['active-encounter', 'pending-encounter']) {
+      for (const suffix of ['', '/participants/task06-player', '/logs/history']) {
+        const reference = doc(firestore, `encounters/${encounterId}${suffix}`);
+        await assertFails(setDoc(reference, {client: true}));
+        await assertFails(updateDoc(reference, {client: true}));
+        await assertFails(deleteDoc(reference));
+      }
+      await assertFails(setDoc(doc(firestore, `encounters/${encounterId}/participants/new`), {uid: 'new'}));
+      await assertFails(setDoc(doc(firestore, `encounters/${encounterId}/logs/new`), {message: 'new'}));
+    }
+    const batch = writeBatch(firestore);
+    batch.set(doc(firestore, 'encounters/batched-encounter'), {status: 'active', participantIds: ['task06-player'], participantCharacterIds: ['task06-character']});
+    batch.set(doc(firestore, 'encounters/batched-encounter/participants/task06-player'), {uid: 'task06-player'});
+    await assertFails(batch.commit());
+  }
+  await environment.withSecurityRulesDisabled(async context => {
+    const firestore = context.firestore();
+    const parent = await getDoc(doc(firestore, 'encounters/active-encounter'));
+    const participant = await getDoc(doc(firestore, 'encounters/active-encounter/participants/task06-player'));
+    const log = await getDoc(doc(firestore, 'encounters/active-encounter/logs/history'));
+    require('node:assert/strict').equal(parent.data().status, 'active');
+    require('node:assert/strict').deepEqual(participant.data(), {uid: 'task06-player'});
+    require('node:assert/strict').deepEqual(log.data(), {message: 'Historical turn'});
+    require('node:assert/strict').equal((await getDoc(doc(firestore, 'encounters/batched-encounter'))).exists(), false);
   });
-  batch.set(doc(
-    dm,
-    'encounters/batched-encounter/participants/task06-player'
-  ), {
-    uid: 'task06-player',
-  });
-  await assertSucceeds(batch.commit());
 });
 
 test('pending custom-token deletion fences instances, placements, and token updates', async () => {

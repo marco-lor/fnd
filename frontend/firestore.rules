@@ -1613,21 +1613,6 @@ service cloud.firestore {
       return /databases/$(database)/documents/encounters/$(encounterId);
     }
 
-    function isEncounterDeletionPending(data) {
-      return data is map
-        && (
-          data.get("deletionState", null) == "pending"
-          || data.get("status", null) == "deleted"
-        );
-    }
-
-    function encounterAcceptsClientMutation(encounterId) {
-      return existsAfter(encounterPath(encounterId))
-        && !isEncounterDeletionPending(
-          getAfter(encounterPath(encounterId)).data
-        );
-    }
-
     // Can the authed user read this encounter document (by uid or characterId), excluding deleted ones?
     // Use resource.data when available (reading the encounter doc itself) to avoid extra reads.
     function canReadEncounterDoc() {
@@ -1972,46 +1957,21 @@ service cloud.firestore {
         || isPlayer()
         || canReadEncounterDoc();
 
-      // Only the server may publish or advance a deletion fence.
-      allow create: if isDM()
-        && !isEncounterDeletionPending(request.resource.data);
-      allow update: if isDM()
-        && !isEncounterDeletionPending(resource.data)
-        && !isEncounterDeletionPending(request.resource.data);
-      allow delete: if isDM()
-        && !isEncounterDeletionPending(resource.data);
+      // Retained history is read-only, including for privileged clients.
+      allow create, update, delete: if false;
 
       // Per-encounter participants
       match /participants/{pid} {
   // Read: DM, Webmaster, Player (full read like webmaster), or any participant of this encounter
   allow read: if isDM() || isWebmaster() || isPlayer() || canReadEncounterById(encounterId);
 
-        // Create/Update: DM, or the signed-in user updating their own participant doc
-        // The participant doc id may be either the user's uid or their characterId; allow both for the owner.
-        allow create, update: if encounterAcceptsClientMutation(encounterId)
-          && (
-            isDM()
-          || (
-               isActiveSignedIn()
-               && canReadEncounterById(encounterId)
-               && (pid == request.auth.uid || pid == authedCharacterId())
-             )
-          );
-
-        // Delete: DM only
-        allow delete: if isDM()
-          && encounterAcceptsClientMutation(encounterId);
+        allow create, update, delete: if false;
       }
 
-      // Shared logs — OPEN TO ALL SIGNED-IN USERS (any role)
+      // Historical encounter logs
       match /logs/{logId} {
-        // Read & Write for any authenticated user; DM still has global allow.
         allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
-        allow write: if encounterAcceptsClientMutation(encounterId)
-          && (
-            isDM()
-            || (isActiveSignedIn() && canReadEncounterById(encounterId))
-          );
+        allow create, update, delete: if false;
       }
     }
 

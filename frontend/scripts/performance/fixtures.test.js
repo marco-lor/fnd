@@ -31,6 +31,9 @@ test('fixture generation is stable and contains the required scale', () => {
   assert.equal(first.counts.echi_npcs, 500);
   assert.equal(first.counts.map_markers, 2000);
   assert.equal(first.counts.encounters, 100);
+  assert.equal(firstDocuments.filter(({path}) => /^encounters\/[^/]+\/participants\/[^/]+$/.test(path)).length, 436);
+  assert.equal(firstDocuments.filter(({path}) => /^encounters\/[^/]+\/logs\/[^/]+$/.test(path)).length, 1000);
+  assert.equal(TASK06_BACKEND_CONFIG.enabledOperationKinds.includes('delete-encounter'), false);
   assert.equal(first.counts.grigliata_backgrounds, 50);
   assert.equal(first.counts.grigliata_gallery_folders, 2);
   assert.equal(first.counts.grigliata_music_stream, 1);
