@@ -4862,21 +4862,11 @@ export default function GrigliataPage() {
     batch.set(
       doc(db, 'grigliata_token_placements', placementContext.placementId),
       {
-        ...buildPlacementWritePayload({
-          backgroundId: targetBackgroundId,
-          tokenId: entry.tokenId,
-          ownerUid: placementContext.ownerUid,
-          col: placementContext.col,
-          row: placementContext.row,
-          isVisibleToPlayers: placementContext.isVisibleToPlayers,
-          isDead: placementContext.isDead,
-          isInTurnOrder: placementContext.isInTurnOrder,
-          turnOrderInitiative: placementContext.turnOrderInitiative,
-          turnOrderJoinedAt: placementContext.turnOrderJoinedAt,
-          turnCounter: nextTurnCounter,
-          turnEffects: nextTurnEffects,
-        }),
-        ...(!nextTurnEffects.length ? { turnEffects: deleteField() } : {}),
+        tokenId: entry.tokenId,
+        turnCounter: nextTurnCounter,
+        turnEffects: nextTurnEffects.length ? nextTurnEffects : deleteField(),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
       },
       { merge: true }
     );
@@ -4896,7 +4886,6 @@ export default function GrigliataPage() {
   }, [
     activeBackgroundId,
     activeTurnCursor,
-    buildPlacementWritePayload,
     currentUserId,
     isManager,
     resolveTurnOrderProgressState,

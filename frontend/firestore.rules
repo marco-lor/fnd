@@ -618,50 +618,69 @@ service cloud.firestore {
         );
     }
 
+    function hasValidGrigliataTurnEffectCounters(totalTurns, remainingTurns, appliesFromTurnCounter) {
+      return [
+        totalTurns is int,
+        totalTurns > 0,
+        remainingTurns is int,
+        remainingTurns >= 0,
+        remainingTurns <= totalTurns,
+        appliesFromTurnCounter is int,
+        appliesFromTurnCounter >= 0
+      ].hasOnly([true]);
+    }
+
     function isValidGrigliataTurnEffect(effect) {
-      return effect is map
-        && effect.keys().hasAll([
-          "id",
-          "kind",
-          "totalTurns",
-          "remainingTurns",
-          "appliesFromTurnCounter"
-        ])
-        && effect.keys().hasOnly([
-          "id",
-          "kind",
-          "totalTurns",
-          "remainingTurns",
-          "appliesFromTurnCounter"
-        ])
-        && effect.id is string
-        && effect.id.size() > 0
-        && effect.kind is string
-        && effect.kind.size() > 0
-        && effect.totalTurns is int
-        && effect.totalTurns > 0
-        && effect.remainingTurns is int
-        && effect.remainingTurns >= 0
-        && effect.remainingTurns <= effect.totalTurns
-        && effect.appliesFromTurnCounter is int
-        && effect.appliesFromTurnCounter >= 0;
+      // Five keys plus the required field accesses enforce the exact schema.
+      // Non-map values cannot supply these five named fields. Keep this helper
+      // free of eager let bindings for unused list slots.
+      return effect.size() == 5
+        // String-only matches with dotall preserve every nonempty string,
+        // including newlines, without separate type/size evaluations.
+        && effect.id.matches('(?s).+')
+        && effect.kind.matches('(?s).+')
+        && hasValidGrigliataTurnEffectCounters(
+          effect.totalTurns,
+          effect.remainingTurns,
+          effect.appliesFromTurnCounter
+        );
+    }
+
+    function hasValidFullGrigliataTurnEffectChunk(effects) {
+      return [
+        isValidGrigliataTurnEffect(effects[0]),
+        isValidGrigliataTurnEffect(effects[1]),
+        isValidGrigliataTurnEffect(effects[2]),
+        isValidGrigliataTurnEffect(effects[3])
+      ].hasOnly([true]);
+    }
+
+    function hasValidFinalGrigliataTurnEffectChunk(effects, count) {
+      return count == 4
+        ? hasValidFullGrigliataTurnEffectChunk(effects)
+        : [
+          count < 1 || isValidGrigliataTurnEffect(effects[0]),
+          count < 2 || isValidGrigliataTurnEffect(effects[1]),
+          count < 3 || isValidGrigliataTurnEffect(effects[2])
+        ].hasOnly([true]);
     }
 
     function hasValidGrigliataTurnEffects(effects) {
+      let count = effects is list ? effects.size() : 0;
+      // Validate known-present groups of four without a guard for every slot.
+      // Only the final partial group needs individual presence guards.
       return effects is list
-        && effects.size() <= 12
-        && (effects.size() < 1 || isValidGrigliataTurnEffect(effects[0]))
-        && (effects.size() < 2 || isValidGrigliataTurnEffect(effects[1]))
-        && (effects.size() < 3 || isValidGrigliataTurnEffect(effects[2]))
-        && (effects.size() < 4 || isValidGrigliataTurnEffect(effects[3]))
-        && (effects.size() < 5 || isValidGrigliataTurnEffect(effects[4]))
-        && (effects.size() < 6 || isValidGrigliataTurnEffect(effects[5]))
-        && (effects.size() < 7 || isValidGrigliataTurnEffect(effects[6]))
-        && (effects.size() < 8 || isValidGrigliataTurnEffect(effects[7]))
-        && (effects.size() < 9 || isValidGrigliataTurnEffect(effects[8]))
-        && (effects.size() < 10 || isValidGrigliataTurnEffect(effects[9]))
-        && (effects.size() < 11 || isValidGrigliataTurnEffect(effects[10]))
-        && (effects.size() < 12 || isValidGrigliataTurnEffect(effects[11]));
+        && count <= 12
+        && (count <= 4
+          ? hasValidFinalGrigliataTurnEffectChunk(effects, count)
+          : (count <= 8
+            ? hasValidFullGrigliataTurnEffectChunk(effects[0:4])
+              && hasValidFinalGrigliataTurnEffectChunk(effects[4:count], count - 4)
+            : hasValidFullGrigliataTurnEffectChunk(effects[0:4])
+              && hasValidFullGrigliataTurnEffectChunk(effects[4:8])
+              && hasValidFinalGrigliataTurnEffectChunk(effects[8:count], count - 8)
+          )
+        );
     }
 
     function isValidOwnerManagedGrigliataTurnOrderCreate(data) {
@@ -718,7 +737,9 @@ service cloud.firestore {
         && figureId.matches('^.+__' + request.auth.uid + '__(circle|square|cone|rectangle)__(1|2|3|4|5)$');
     }
 
-    function isValidGrigliataPlacement(data, placementId) {
+    // The unchanged-effect flag is computed internally only for owner updates;
+    // owners still cannot add, remove, or alter any effect through that path.
+    function isValidGrigliataPlacement(data, placementId, unchangedOwnerEffects) {
       return data.keys().hasAll([
           "backgroundId",
           "ownerUid",
@@ -802,7 +823,8 @@ service cloud.firestore {
           )
         )
         && (
-          !data.keys().hasAny(["turnEffects"])
+          unchangedOwnerEffects
+          || !data.keys().hasAny(["turnEffects"])
           || hasValidGrigliataTurnEffects(data.turnEffects)
         )
         && (
@@ -1596,6 +1618,69 @@ service cloud.firestore {
         );
     }
 
+    function canUpdateGrigliataPlacementTurn(data, previousData, placementId, manager) {
+      let tokenId = resolveGrigliataPlacementTokenId(previousData);
+      let tokenPath = grigliataTokenDocPath(tokenId);
+      // The caller admits only turn fields and stable legacy token-ID repair.
+      // Identity/path and both current/after token fences remain mandatory.
+      return manager
+        && data.keys().hasAll(["tokenId", "turnCounter", "updatedAt", "updatedBy"])
+        && data.ownerUid is string
+        && data.tokenId is string
+        && data.tokenId == tokenId
+        && isGrigliataPlacementId(data.backgroundId, tokenId, placementId)
+        && data.turnCounter is int
+        && data.turnCounter >= 0
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          tokenId == data.ownerUid
+          || (exists(tokenPath) && get(tokenPath).data.ownerUid == data.ownerUid)
+        )
+        && (
+          tokenId == data.ownerUid
+          || (existsAfter(tokenPath)
+            && !isGrigliataTokenPendingDeletion(getAfter(tokenPath).data))
+        )
+        && hasValidGrigliataTurnEffects(data.get("turnEffects", []));
+    }
+
+    function canUpdateGeneralGrigliataPlacement(data, previousData, placementId, manager, changedKeys) {
+      return isActiveSignedIn()
+        && data.keys().hasAll(["tokenId"])
+        && data.backgroundId == previousData.backgroundId
+        && data.tokenId == resolveGrigliataPlacementTokenId(previousData)
+        && data.ownerUid == previousData.ownerUid
+        && isValidGrigliataPlacement(data, placementId,
+          !manager && request.auth.uid == previousData.ownerUid
+            && !changedKeys.hasAny(["turnEffects"]))
+        && grigliataPlacementTokenAcceptsMutation(data)
+        && (
+          manager
+          || (
+            request.auth.uid == previousData.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(previousData)
+            && isGrigliataPlacementVisibleToPlayers(data)
+            && isGrigliataPlacementDead(data) == isGrigliataPlacementDead(previousData)
+            && !changedKeys.hasAny([
+              "turnCounter", "turnEffects", "visionEnabled", "visionRadiusSquares"
+            ])
+            && isValidOwnerManagedGrigliataTurnOrderUpdate(data, previousData)
+          )
+        );
+    }
+
+    function canUpdateGrigliataPlacement(data, previousData, placementId) {
+      let changedKeys = data.diff(previousData).affectedKeys();
+      let manager = isGrigliataManager();
+      // Dispatch before validation: an invalid turn patch must not fall through
+      // to the full schema and consume another expression budget.
+      return changedKeys.hasOnly(["tokenId", "turnCounter", "turnEffects", "updatedAt", "updatedBy"])
+          && changedKeys.hasAny(["turnCounter", "turnEffects"])
+          && data.keys().hasAny(["turnCounter"])
+        ? canUpdateGrigliataPlacementTurn(data, previousData, placementId, manager)
+        : canUpdateGeneralGrigliataPlacement(data, previousData, placementId, manager, changedKeys);
+    }
+
     function npcPath(npcId) {
       return /databases/$(database)/documents/echi_npcs/$(npcId);
     }
@@ -2285,7 +2370,7 @@ service cloud.firestore {
 
       allow create: if isActiveSignedIn()
         && request.resource.data.keys().hasAll(["tokenId"])
-        && isValidGrigliataPlacement(request.resource.data, placementId)
+        && isValidGrigliataPlacement(request.resource.data, placementId, false)
         && grigliataPlacementTokenAcceptsMutation(
           request.resource.data
         )
@@ -2305,34 +2390,10 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isActiveSignedIn()
-        && request.resource.data.keys().hasAll(["tokenId"])
-        && isValidGrigliataPlacement(request.resource.data, placementId)
-        && grigliataPlacementTokenAcceptsMutation(
-          request.resource.data
-        )
-        && request.resource.data.backgroundId == resource.data.backgroundId
-        && request.resource.data.tokenId == resolveGrigliataPlacementTokenId(resource.data)
-        && request.resource.data.ownerUid == resource.data.ownerUid
-        && (
-          isGrigliataManager()
-          || (
-            request.auth.uid == resource.data.ownerUid
-            && isGrigliataPlacementVisibleToPlayers(resource.data)
-            && isGrigliataPlacementVisibleToPlayers(request.resource.data)
-            && isGrigliataPlacementDead(request.resource.data) == isGrigliataPlacementDead(resource.data)
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-              "turnCounter",
-              "turnEffects",
-              "visionEnabled",
-              "visionRadiusSquares"
-            ])
-            && isValidOwnerManagedGrigliataTurnOrderUpdate(request.resource.data, resource.data)
-          )
-        );
+      allow update: if canUpdateGrigliataPlacement(request.resource.data, resource.data, placementId);
 
       allow delete: if isActiveSignedIn()
-        && isValidGrigliataPlacement(resource.data, placementId)
+        && isValidGrigliataPlacement(resource.data, placementId, false)
         && (
           isGrigliataManager()
           || (

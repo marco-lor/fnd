@@ -11520,13 +11520,13 @@ describe('GrigliataPage', () => {
       );
       expect(committedBatch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
-        expect.objectContaining({
+        {
+          tokenId: 'user-2',
           turnCounter: 1,
-          isInTurnOrder: true,
-          turnOrderInitiative: 18,
-          turnOrderJoinedAt: { seconds: 123 },
+          turnEffects: { __type: 'deleteField' },
+          updatedAt: { __type: 'serverTimestamp' },
           updatedBy: 'user-1',
-        }),
+        },
         { merge: true }
       );
     });
@@ -11902,6 +11902,74 @@ describe('GrigliataPage', () => {
         }),
         { merge: true }
       );
+    });
+  });
+
+  test.each([2, 12])('advances and expires %i custom-token effects without overwriting placement fields', async (count) => {
+    setManagerAuth();
+    const turnEffects = Array.from({ length: count }, (_, index) => ({
+      id: index === 0 ? 'shield' : `duration-${index}`,
+      kind: index === 0 ? 'shield' : `duration-${index}`,
+      totalTurns: 2, remainingTurns: 2, appliesFromTurnCounter: 1,
+    }));
+    const placement = {
+      id: 'map-1__custom-turn', backgroundId: 'map-1', tokenId: 'custom-turn',
+      ownerUid: 'user-2', label: 'Stored placement label', imageUrl: 'https://example.com/stored.png',
+      col: 3, row: 4, sizeSquares: 2, isVisibleToPlayers: true, isDead: false,
+      statuses: ['shielded'], visionEnabled: true, visionRadiusSquares: 12,
+      isInTurnOrder: true, turnOrderInitiative: 18, turnOrderJoinedAt: { seconds: 123 },
+      turnCounter: 1, turnEffects,
+    };
+    act(() => {
+      setCollectionData('grigliata_tokens', [{
+        id: 'custom-turn', ownerUid: 'user-2', label: 'Current token label',
+        tokenType: 'custom', customTokenRole: 'instance', customTemplateId: 'custom-template',
+        imageSource: 'uploaded', imageUrl: 'https://example.com/current.png',
+        stats: { shieldCurrent: 5, shieldTotal: 5 },
+      }]);
+      setCollectionData('grigliata_token_placements', [placement]);
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1', name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 }, isGridVisible: true,
+        turnOrderActive: { tokenId: 'custom-turn', initiative: 18,
+          joinedAt: { seconds: 123 }, label: 'Current token label', startedAt: { seconds: 999 } },
+      }]);
+    });
+    render(<GrigliataPage />);
+    await waitFor(() => expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('1'));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /advance turn order/i })));
+    const remainingEffects = turnEffects.map(effect => ({ ...effect, remainingTurns: 1 }));
+    await waitFor(() => expect(getLastCommittedBatch()?.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__custom-turn' }),
+      { tokenId: 'custom-turn', turnCounter: 2, turnEffects: remainingEffects,
+        updatedAt: { __type: 'serverTimestamp' }, updatedBy: 'user-1' },
+      { merge: true }
+    ));
+    expect(getLastCommittedBatch().set.mock.calls.some(([target]) => target.path === 'grigliata_tokens/custom-turn')).toBe(false);
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => setCollectionData('grigliata_token_placements', [{ ...placement,
+      turnCounter: 2, turnEffects: remainingEffects }]));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /advance turn order/i })));
+    await waitFor(() => {
+      const batch = getLastCommittedBatch();
+      expect(batch?.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__custom-turn' }),
+        { tokenId: 'custom-turn', turnCounter: 3, turnEffects: { __type: 'deleteField' },
+          updatedAt: { __type: 'serverTimestamp' }, updatedBy: 'user-1' },
+        { merge: true }
+      );
+      expect(batch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_tokens/custom-turn' }),
+        { stats: { shieldCurrent: 0, shieldTotal: 0 },
+          updatedAt: { __type: 'serverTimestamp' }, updatedBy: 'user-1' },
+        { merge: true }
+      );
+      expect(batch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({ turnOrderActive: expect.objectContaining({ tokenId: 'custom-turn' }) }),
+        { merge: true }
+      );
+      expect(mockTask05ConsumeTurnEffectsCallable).not.toHaveBeenCalled();
     });
   });
 

@@ -26,6 +26,12 @@ const task06RulesPath = path.join(
   'tests',
   'task06-rules.test.js'
 );
+const task14gRulesPath = path.join(
+  frontendRoot,
+  'performance',
+  'tests',
+  'task14g-grigliata-rules.test.js'
+);
 const task07CallablesPath = path.join(
   frontendRoot,
   'performance',
@@ -76,6 +82,7 @@ const buildRulesExecCommands = ({ task07Only = false, task08Only = false } = {})
       'tests',
       'task05-callables.test.js'
     )),
+    serialNodeTest(task14gRulesPath),
     // This suite clears the shared Firestore emulator during teardown, so it
     // must remain after every suite that consumes the deterministic fixture.
     serialNodeTest(task06RulesPath),

@@ -184,8 +184,11 @@ test('owned emulator runner executes Task 07 rules and callables serially', () =
     path.join(frontendRoot, 'scripts', 'performance', 'fixtures.js'),
     'seed',
   ];
-  assert.equal(commands.length, 7);
-  assert.equal(nodeTests.length, 6);
+  assert.equal(commands.length, 8);
+  assert.equal(nodeTests.length, 7);
+  assert.equal(commands.some((args) => args.includes(path.join(
+    frontendRoot, 'performance', 'tests', 'task14g-grigliata-rules.test.js'
+  ))), true);
   assert.equal(commands.some((args) => args.includes(task07RulesPath)), true);
   assert.equal(commands.some((args) => args.includes(task07CallablesPath)), true);
   assert.ok(
