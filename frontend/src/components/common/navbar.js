@@ -7,7 +7,6 @@ import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
 import {
   GiBarbecue,
-  GiCrossedSwords,
   GiDeathSkull,
   GiSpikedDragonHead,
   GiSpellBook,
@@ -40,12 +39,6 @@ const NAV_ITEMS = [
     label: 'Bazaar',
     path: '/bazaar',
     icon: FiShoppingBag,
-    end: true,
-  },
-  {
-    label: 'Combat',
-    path: '/combat',
-    icon: GiCrossedSwords,
     end: true,
   },
   {

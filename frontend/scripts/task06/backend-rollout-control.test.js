@@ -99,3 +99,20 @@ test('normalizes valid config and refuses unmanaged or malformed state', () => {
     },
   }), /unmanaged fields/);
 });
+
+test('old encounter enablement is inspectable but forbidden in desired and approved plans', () => {
+  const retiredConfig = {schemaVersion: 1, derivedOwnerMode: 'legacy', enabledOperationKinds: ['delete-encounter', 'delete-npc']};
+  const snapshot = {exists: true, data: retiredConfig, updateTime: 'old'};
+  assert.deepEqual(resolveCurrentConfig(snapshot).enabledOperationKinds, ['delete-encounter', 'delete-npc']);
+  const disablePlan = buildPlan({projectId: 'fatins', snapshot, desiredConfig: {derivedOwnerMode: 'legacy', enabledOperationKinds: ['delete-npc']}});
+  assert.deepEqual(disablePlan.afterConfig.enabledOperationKinds, ['delete-npc']);
+  assert.throws(() => parseArguments([...liveArguments, '--enabled-kinds', 'delete-encounter']), /retired/);
+  assert.throws(() => buildPlan({projectId: 'fatins', snapshot, desiredConfig: retiredConfig}), /retired/);
+  const stale = {...disablePlan, afterConfig: retiredConfig};
+  assert.throws(() => assertApprovedPlan({approved: stale, current: stale, fingerprint: stale.planFingerprint}), /retired/);
+  const disabledOptions = parseArguments([...liveArguments, '--enabled-kinds', 'none']);
+  assert.deepEqual(disabledOptions.enabledOperationKinds, []);
+  const allDisabled = buildPlan({projectId: 'fatins', snapshot: {...snapshot, data: {...retiredConfig, enabledOperationKinds: ['delete-encounter']}}, desiredConfig: disabledOptions});
+  assert.deepEqual(allDisabled.afterConfig.enabledOperationKinds, []);
+  assertApprovedPlan({approved: allDisabled, current: allDisabled, fingerprint: allDisabled.planFingerprint});
+});

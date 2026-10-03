@@ -11976,6 +11976,79 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('blocks a rapid second turn action and retries an ambiguous shield turn with the same operation', async () => {
+    setManagerAuth();
+    const pendingTurn = createDeferred();
+    mockTask05ConsumeTurnEffectsCallable.mockImplementationOnce(() => pendingTurn.promise);
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1', name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        turnOrderActive: {
+          tokenId: 'user-3', initiative: 8, joinedAt: { seconds: 124 },
+          label: 'Ciro', startedAt: { seconds: 999 },
+        },
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2', backgroundId: 'map-1', tokenId: 'user-2',
+        ownerUid: 'user-2', label: 'Boros', col: 3, row: 4,
+        isVisibleToPlayers: true, isDead: false, statuses: [],
+        isInTurnOrder: true, turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 123 }, turnCounter: 1,
+        turnEffects: [{ id: 'shield', kind: 'shield', totalTurns: 2,
+          remainingTurns: 2, appliesFromTurnCounter: 1 }],
+      }, {
+        id: 'map-1__user-3', backgroundId: 'map-1', tokenId: 'user-3',
+        ownerUid: 'user-3', label: 'Ciro', col: 4, row: 5,
+        isVisibleToPlayers: true, isDead: false, statuses: [],
+        isInTurnOrder: true, turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 124 },
+      }]);
+    });
+    try {
+      render(<GrigliataPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-3');
+      });
+      mockBatchInstances.splice(0, mockBatchInstances.length);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+      });
+      await waitFor(() => {
+        expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole('button', { name: /advance turn order/i })).toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+      expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledTimes(1);
+      const firstPayload = mockTask05ConsumeTurnEffectsCallable.mock.calls[0][0];
+      await act(async () => {
+        pendingTurn.reject(Object.assign(new Error('connection lost'), { code: 'functions/unavailable' }));
+        await Promise.resolve();
+      });
+      expect(screen.getByText('Unable to advance the turn order right now.')).toBeInTheDocument();
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-3');
+      expect(getCommittedBatches()).toHaveLength(0);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+      });
+      await waitFor(() => {
+        expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('button', { name: /advance turn order/i })).not.toBeDisabled();
+      });
+      expect(mockTask05ConsumeTurnEffectsCallable.mock.calls[1][0]).toEqual(firstPayload);
+      expect(firstPayload.grigliataTransition).toEqual({
+        backgroundId: 'map-1', tokenId: 'user-2',
+        expectedPreviousActiveTokenId: 'user-3', expectedTurnCounter: 2,
+        preserveStartedAt: true,
+      });
+      expect(getCommittedBatches()).toHaveLength(0);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   test('ticks only the newly active token and expires character shield on later own turns', async () => {
     setManagerAuth();
     act(() => {

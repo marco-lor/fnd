@@ -394,7 +394,6 @@ const task06BackendConfig = () => ({
     'level-up-all',
     'set-parameter-locks',
     'delete-npc',
-    'delete-encounter',
     'delete-grigliata-custom-token',
     'duplicate-foe',
   ],
@@ -1153,7 +1152,7 @@ test('lock-all uses bounded subjects and completes beyond the former batch ceili
   assert.match(state.get('managerSummaryCommitId'), /^[0-9a-f-]{36}$/);
 });
 
-test('NPC and encounter cleanup remove indexed and nested descendants', async () => {
+test('NPC cleanup removes indexed markers while retired encounter deletion preserves history', async () => {
   await resetTask06ControlPlane();
   const npcId = 'task06-delete-npc';
   const encounterId = 'task06-delete-encounter';
@@ -1235,23 +1234,10 @@ test('NPC and encounter cleanup remove indexed and nested descendants', async ()
   const [npcMediaExists] = await bucket.file(npcMediaPath).exists();
   assert.equal(npcMediaExists, false);
 
-  const encounterStarted = await invokeCallable('deleteEncounterV2', {
-    operationId: ENCOUNTER_OPERATION_ID,
-    encounterId,
-  });
-  assert.equal(
-    encounterStarted.operationId,
-    ENCOUNTER_OPERATION_ID
-  );
-  const encounterCompleted = await waitForOperation(
-    ENCOUNTER_OPERATION_ID,
-    ['completed']
-  );
-  assert.equal(encounterCompleted.result.encounterDeleted, true);
-  assert.equal(
-    encounterCompleted.progress.succeeded,
-    PAGED_DELETE_COUNT * 2 + nestedEffects.length
-  );
+  await assert.rejects(invokeCallable('deleteEncounterV2', {
+    operationId: ENCOUNTER_OPERATION_ID, encounterId,
+  }), error => error.code === 'FAILED_PRECONDITION' && /retired/i.test(error.message));
+  assert.equal((await db.collection('backend_operations').where('operationId', '==', ENCOUNTER_OPERATION_ID).get()).empty, true);
 
   const [
     npc,
@@ -1267,28 +1253,78 @@ test('NPC and encounter cleanup remove indexed and nested descendants', async ()
     db.collectionGroup('map_markers_private')
       .where('npcId', '==', npcId).limit(1).get(),
     db.doc(`encounters/${encounterId}`).get(),
-    db.collection(`encounters/${encounterId}/participants`).limit(1).get(),
-    db.collection(`encounters/${encounterId}/logs`).limit(1).get(),
+    db.collection(`encounters/${encounterId}/participants`).get(),
+    db.collection(`encounters/${encounterId}/logs`).get(),
     ...nestedEffects.map(([documentPath]) => db.doc(documentPath).get()),
   ]);
   assert.equal(npc.exists, false);
   assert.equal(publicRemaining.empty, true);
   assert.equal(privateRemaining.empty, true);
-  assert.equal(encounter.exists, false);
-  assert.equal(participantsRemaining.empty, true);
-  assert.equal(logsRemaining.empty, true);
-  assert.equal(effects.every((snapshot) => !snapshot.exists), true);
+  assert.deepEqual(encounter.data(), {status: 'active'});
+  assert.equal(participantsRemaining.size, PAGED_DELETE_COUNT);
+  assert.equal(logsRemaining.size, PAGED_DELETE_COUNT);
+  assert.deepEqual(participantsRemaining.docs.map(snapshot => [snapshot.ref.path, snapshot.data()]), participants);
+  assert.deepEqual(logsRemaining.docs.map(snapshot => [snapshot.ref.path, snapshot.data()]), logs);
+  assert.deepEqual(effects.map(snapshot => [snapshot.ref.path, snapshot.data()]), nestedEffects);
 
   const npcReplay = await invokeCallable('deleteNpcV2', {
     operationId: NPC_OPERATION_ID,
     npcId,
   });
-  const encounterReplay = await invokeCallable('deleteEncounterV2', {
-    operationId: ENCOUNTER_OPERATION_ID,
-    encounterId,
-  });
   assert.equal(npcReplay.replayed, true);
-  assert.equal(encounterReplay.replayed, true);
+  await assert.rejects(invokeCallable('deleteEncounterV2', {
+    operationId: ENCOUNTER_OPERATION_ID, encounterId,
+  }), error => error.code === 'FAILED_PRECONDITION');
+
+});
+
+test('retired encounter work terminally fails across phases and stale config without history writes', async () => {
+  await resetTask06ControlPlane();
+  const history = [
+    ['encounters/task14-history', {status: 'active', turn: 9}],
+    ['encounters/task14-history/participants/player', {uid: 'player', hp: 42}],
+    ['encounters/task14-history/participants/player/effects/shield', {remaining: 2}],
+    ['encounters/task14-history/logs/history', {message: 'retained'}],
+  ];
+  await writeBatches(history);
+  const {backendOperationReceiptId} = require('../../functions/lib/backendOperationCore');
+  for (const [index, phase] of ['prepare', 'descendants', 'verify', 'unknown'].entries()) {
+    const operationId = `task14-retired-queued-${index}`;
+    const receiptId = backendOperationReceiptId(actor.uid, operationId);
+    const operationRef = db.doc(`backend_operations/${receiptId}`);
+    await db.doc('app_config/task06_backend').set({...task06BackendConfig(), enabledOperationKinds: index % 2 ? [] : ['delete-encounter']});
+    await operationRef.set({schemaVersion: 1, operationId, actorUid: actor.uid, kind: 'delete-encounter', input: {encounterId: 'task14-history'},
+      phase, generation: 9, status: index === 2 ? 'completed' : 'running', retryable: true,
+      leaseExpiresAt: Timestamp.fromMillis(Date.now() - 1000),
+      pendingCollections: ['encounters/task14-history/participants', 'encounters/task14-history/logs']});
+    const workRef = db.doc(`backend_operation_work/${receiptId}-00000000`);
+    await workRef.set({schemaVersion: 1, receiptId, generation: 0, status: 'pending'});
+    // The old receipt may already say completed before the new trigger runs.
+    // Wait for the retirement transition without treating that stale status
+    // as a fresh completion or an integration failure.
+    const statusDeadline = Date.now() + 30_000;
+    let failed;
+    do {
+      failed = await invokeCallable('getBackendOperationStatus', {operationId});
+      if (failed.status === 'failed') break;
+      await delay(100);
+    } while (Date.now() < statusDeadline);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.kind, 'delete-encounter');
+    assert.equal(failed.retryable, false);
+    const deadline = Date.now() + 30_000;
+    let work;
+    do { work = await workRef.get(); if (work.get('status') === 'failed') break; await delay(100); } while (Date.now() < deadline);
+    assert.equal(work.get('status'), 'failed');
+    assert.equal(work.get('retryable'), false);
+    const before = (await operationRef.get()).data();
+    const worksBefore = (await db.collection('backend_operation_work').where('receiptId', '==', receiptId).get()).size;
+    await assert.rejects(invokeCallable('resumeBackendOperation', {operationId}), error => error.code === 'FAILED_PRECONDITION' && /retired/i.test(error.message));
+    await assert.rejects(invokeCallable('deleteEncounterV2', {operationId, encounterId: 'task14-history'}), error => error.code === 'FAILED_PRECONDITION');
+    assert.deepEqual((await operationRef.get()).data(), before);
+    assert.equal((await db.collection('backend_operation_work').where('receiptId', '==', receiptId).get()).size, worksBefore);
+  }
+  assert.deepEqual(await Promise.all(history.map(async ([path]) => [path, (await db.doc(path).get()).data()])), history);
 });
 
 test('foe duplication skips a missing optional legacy image and replays', async () => {

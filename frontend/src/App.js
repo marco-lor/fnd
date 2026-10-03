@@ -185,7 +185,7 @@ export function AppRoutes() {
       <Route element={<AuthenticatedRoute />}>
         <Route path="/home" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.home} label="Home" />} />
         <Route path="/bazaar" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.bazaar} label="Bazaar" />} />
-        <Route path="/combat" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.combat} label="Combat" />} />
+        <Route path="/combat" element={<Navigate to="/home" replace />} />
         <Route path="/tecniche-spell" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.tecnicheSpell} label="Tecniche and Spell" />} />
         <Route path="/codex" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.codex} label="Codex" />} />
         <Route path="/echi-di-viaggio" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.echiDiViaggio} label="Echi di Viaggio" />} />

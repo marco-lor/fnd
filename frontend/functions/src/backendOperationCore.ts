@@ -29,6 +29,11 @@ export const BACKEND_OPERATION_KINDS = [
 export type BackendOperationKind =
   typeof BACKEND_OPERATION_KINDS[number];
 
+// Keep historical receipts recognizable without allowing retired work to run.
+export const isRetiredBackendOperationKind = (kind: unknown): boolean => (
+  kind === "delete-encounter"
+);
+
 export type BackendOperationStatus =
   | "pending"
   | "running"
@@ -85,7 +90,8 @@ export const resolveTask06BackendConfig = (
   ) ? data.enabledOperationKinds
     .map(asTrimmedString)
     .filter((kind): kind is BackendOperationKind => (
-      BACKEND_OPERATION_KINDS.includes(kind as BackendOperationKind)
+      BACKEND_OPERATION_KINDS.includes(kind as BackendOperationKind) &&
+      !isRetiredBackendOperationKind(kind)
     )) : [];
   return {
     schemaVersion: BACKEND_OPERATION_SCHEMA_VERSION,

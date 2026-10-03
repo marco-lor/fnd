@@ -5,7 +5,6 @@
     "route-character-creation",
     "route-home",
     "route-bazaar",
-    "route-combat",
     "route-tecniche-spell",
     "route-codex",
     "route-echi-di-viaggio",
@@ -35,8 +34,6 @@
     "feature-dm-gold-dialog",
     "feature-dm-misc-item-editors",
     "feature-foes-editor",
-    "feature-combat-encounter-details",
-    "feature-combat-add-foes",
     "feature-home-item-details",
     "feature-home-consumable-dialog",
     "perf-firestore-persistence-experiment"

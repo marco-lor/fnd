@@ -48,7 +48,6 @@ const TASK06_OPERATION_KINDS = Object.freeze([
   'level-up-all',
   'set-parameter-locks',
   'delete-npc',
-  'delete-encounter',
   'delete-grigliata-custom-token',
   'duplicate-foe',
 ]);

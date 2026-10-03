@@ -1222,3 +1222,154 @@ test('the Grigliata character-resource callable is owner-scoped and server-autho
   assert.equal(tokenDocument.get('tokenType'), 'character');
   assert.equal(root.get('stats'), undefined);
 });
+
+// Isolated retained-turn fixture: two own turns expire a two-turn shield.
+// Existing page fixtures cover roster ordering, hidden turns, joins and removals.
+const withGrigliataTurnFixture = async (work) => {
+  const userId = 'perf-peer-2';
+  const backgroundId = 'task14-retained-turn';
+  const paths = {
+    resources: `users/${userId}/state/resources`,
+    background: `grigliata_backgrounds/${backgroundId}`,
+    placement: `grigliata_token_placements/${backgroundId}__${userId}`,
+    token: `grigliata_tokens/${userId}`,
+  };
+  const original = await captureDocuments(Object.values(paths));
+  const shield = { totalTurns: 2, remainingTurns: 2 };
+  try {
+    await withBackgroundTriggersDisabled(() => writeDocuments([
+      { path: paths.resources, data: stateDocument(userId, {
+        stats: { hpCurrent: 30, hpTotal: 50, manaCurrent: 8, manaTotal: 10,
+          barrieraCurrent: 7, barrieraTotal: 7 },
+        active_turn_effect: { barriera: shield, haste: { remainingTurns: 3 } },
+      }) },
+      { path: paths.background, data: {
+        name: 'Task 14 retained turn',
+        turnOrderActive: { tokenId: 'perf-player', startedAt: FIXED_TIME },
+      } },
+      { path: paths.placement, data: {
+        backgroundId, tokenId: userId, ownerUid: userId,
+        label: 'Retained hero', isInTurnOrder: true,
+        isVisibleToPlayers: false, turnOrderInitiative: 16,
+        turnOrderJoinedAt: FIXED_TIME, turnCounter: 1,
+        turnEffects: [{ id: 'shield', kind: 'shield', ...shield,
+          appliesFromTurnCounter: 1 }],
+      } },
+      { path: paths.token, data: { ownerUid: userId, tokenType: 'character' } },
+    ]));
+    const request = {
+      userId,
+      grigliataTransition: {
+        backgroundId, tokenId: userId,
+        expectedPreviousActiveTokenId: 'perf-player',
+        expectedTurnCounter: 2, preserveStartedAt: true,
+      },
+    };
+    await work({ paths, request, token: await signIn('perf-dm') });
+  } finally {
+    await restoreDocuments(original);
+  }
+};
+
+test('retained Grigliata turn replay applies resources, effects and cursor once and preserves history', async () => {
+  await withGrigliataTurnFixture(async ({ paths, request, token }) => {
+    const historyPaths = [
+      'encounters/encounter-0000',
+      'encounters/encounter-0000/participants/participant-00',
+      'encounters/encounter-0000/logs/log-00000',
+    ];
+    const history = await captureDocuments(historyPaths);
+    assert.ok([...history.values()].every((document) => document.exists));
+    const payload = { ...request, operationId: operationId('retained-turn-replay') };
+    const result = await callFunction('task05ConsumeTurnEffects', payload, { token });
+    assert.deepEqual(result, { success: true, changed: true, barrierExpired: false,
+      transitioned: true, turnCounter: 2, replayed: false });
+    const afterFirst = await captureDocuments(Object.values(paths));
+    const retry = await callFunction('task05ConsumeTurnEffects', payload, { token });
+    assert.deepEqual(retry, { ...result, replayed: true });
+    assert.deepEqual(await captureDocuments(Object.values(paths)), afterFirst);
+    const resources = (await db.doc(paths.resources).get());
+    assert.equal(resources.get('revision'), 2);
+    assert.equal(resources.get('active_turn_effect.barriera.remainingTurns'), 1);
+    assert.equal(resources.get('active_turn_effect.haste.remainingTurns'), 2);
+    assert.equal(resources.get('stats.barrieraCurrent'), 7);
+    assert.equal((await db.doc(paths.placement).get()).get('isVisibleToPlayers'), false);
+    assert.deepEqual((await db.doc(paths.background).get()).get('turnOrderActive.startedAt'), FIXED_TIME);
+
+    const expired = await callFunction('task05ConsumeTurnEffects', {
+      ...request, operationId: operationId('retained-turn-expiry'),
+      grigliataTransition: { ...request.grigliataTransition,
+        expectedPreviousActiveTokenId: request.userId, expectedTurnCounter: 3 },
+    }, { token });
+    assert.equal(expired.barrierExpired, true);
+    const finalResources = await db.doc(paths.resources).get();
+    assert.deepEqual(finalResources.get('stats'), {
+      hpCurrent: 30, hpTotal: 50, manaCurrent: 8, manaTotal: 10,
+      barrieraCurrent: 0, barrieraTotal: 0,
+    });
+    assert.deepEqual(finalResources.get('active_turn_effect.barriera'), {
+      totalTurns: 0, remainingTurns: 0,
+    });
+    assert.equal(finalResources.get('active_turn_effect.haste.remainingTurns'), 1);
+    const placement = await db.doc(paths.placement).get();
+    assert.equal(placement.get('turnCounter'), 3);
+    assert.equal(placement.get('turnEffects'), undefined);
+    assert.deepEqual(await captureDocuments(historyPaths), history);
+  });
+});
+
+test('retained Grigliata concurrent retries and competing transitions serialize without double consumption', async () => {
+  await withGrigliataTurnFixture(async ({ paths, request, token }) => {
+    const payload = { ...request, operationId: operationId('retained-turn-concurrent-retry') };
+    // Concurrent requests contend on the same receipt and board/resource documents.
+    const retries = await Promise.all([
+      callFunction('task05ConsumeTurnEffects', payload, { token }),
+      callFunction('task05ConsumeTurnEffects', payload, { token }),
+    ]);
+    assert.deepEqual(retries.map((result) => result.replayed).sort(), [false, true]);
+    assert.equal((await db.doc(paths.resources).get()).get('revision'), 2);
+    assert.equal((await db.doc(paths.placement).get()).get('turnCounter'), 2);
+
+    const next = { ...request, grigliataTransition: {
+      ...request.grigliataTransition,
+      expectedPreviousActiveTokenId: request.userId, expectedTurnCounter: 3,
+    } };
+    const outcomes = await Promise.allSettled(['a', 'b'].map((suffix) => (
+      callFunction('task05ConsumeTurnEffects', {
+        ...next, operationId: operationId(`retained-turn-competing-${suffix}`),
+      }, { token })
+    )));
+    assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    assert.equal(rejected.reason.code, 'failed-precondition');
+    assert.equal((await db.doc(paths.resources).get()).get('revision'), 3);
+    assert.equal((await db.doc(paths.resources).get()).get('active_turn_effect.haste.remainingTurns'), 1);
+    assert.equal((await db.doc(paths.placement).get()).get('turnCounter'), 3);
+  });
+});
+
+test('retained Grigliata turn denies players and stale background, removed placement and resource timers atomically', async () => {
+  await withGrigliataTurnFixture(async ({ paths, request, token }) => {
+    const baseline = await captureDocuments(Object.values(paths));
+    await expectCallableError(callFunction('task05ConsumeTurnEffects', {
+      ...request, operationId: operationId('retained-turn-player-denial'),
+    }, { token: await signIn(request.userId) }), 'permission-denied');
+    assert.deepEqual(await captureDocuments(Object.values(paths)), baseline);
+
+    for (const [label, path, patch] of [
+      ['background', paths.background, { turnOrderActive: { tokenId: 'another-token' } }],
+      ['removed', paths.placement, { isInTurnOrder: false }],
+      ['timer', paths.resources, { active_turn_effect: {
+        barriera: { totalTurns: 2, remainingTurns: 1 },
+      } }],
+    ]) {
+      await restoreDocuments(baseline);
+      await withBackgroundTriggersDisabled(() => db.doc(path).set(patch, { merge: true }));
+      const changed = await captureDocuments(Object.values(paths));
+      await expectCallableError(callFunction('task05ConsumeTurnEffects', {
+        ...request, operationId: operationId(`retained-turn-stale-${label}`),
+      }, { token }), 'failed-precondition');
+      assert.deepEqual(await captureDocuments(Object.values(paths)), changed);
+    }
+  });
+});
