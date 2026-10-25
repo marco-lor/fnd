@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "encoder": {
+    "sharp": "0.35.4",
+    "versions": {
+      "aom": "3.15.0",
+      "archive": "3.8.9",
+      "cairo": "1.18.4",
+      "cgif": "0.5.3",
+      "exif": "0.6.26",
+      "expat": "2.8.3",
+      "ffi": "3.8.0",
+      "fontconfig": "2.18.3",
+      "freetype": "2.14.3",
+      "fribidi": "1.0.16",
+      "glib": "2.89.4",
+      "harfbuzz": "14.3.1",
+      "heif": "1.23.2",
+      "highway": "1.4.0",
+      "imagequant": "2.4.1",
+      "lcms": "2.19.1",
+      "mozjpeg": "0826579",
+      "pango": "1.58.2",
+      "pixman": "0.46.4",
+      "png": "1.6.58",
+      "proxy-libintl": "0.5",
+      "rsvg": "2.62.91",
+      "tiff": "4.7.2",
+      "uhdr": "2.0.2",
+      "vips": "8.18.6",
+      "webp": "1.6.0",
+      "xml2": "2.15.3",
+      "zlib-ng": "2.3.3",
+      "sharp": "0.35.4"
+    },
+    "settings": {
+      "resize": {
+        "kernel": "lanczos3",
+        "fit": "fill"
+      },
+      "avif": {
+        "quality": 85,
+        "effort": 6,
+        "chromaSubsampling": "4:4:4"
+      },
+      "webp": {
+        "quality": 96,
+        "effort": 6,
+        "smartSubsample": true
+      }
+    }
+  },
+  "maps": {
+    "art": {
+      "original": {
+        "file": "mappa_art.png",
+        "width": 2816,
+        "height": 1536,
+        "bytes": 7994651,
+        "sha256": "24616aa4ab4c5acc5189cd03d146129ae9ce4f216275d6ac772247ce41168452"
+      },
+      "variants": {
+        "avif": [
+          {
+            "file": "art-704.avif",
+            "width": 704,
+            "height": 384,
+            "bytes": 113325,
+            "sha256": "cc2aaad486eefc38a03cbd454ba008daee584dd3ff3a91a5ca2c3ed212008204"
+          },
+          {
+            "file": "art-1408.avif",
+            "width": 1408,
+            "height": 768,
+            "bytes": 399979,
+            "sha256": "4cfee9e89a91ab038adb04284d81608a4811b7e8e804afa1b6b60d4aedc3599e"
+          },
+          {
+            "file": "art-2816.avif",
+            "width": 2816,
+            "height": 1536,
+            "bytes": 1136364,
+            "sha256": "5739036e419e97cf3b17b972ac0c4d9f9558044cece13c6fcd6d666051b29931"
+          }
+        ],
+        "webp": [
+          {
+            "file": "art-704.webp",
+            "width": 704,
+            "height": 384,
+            "bytes": 168028,
+            "sha256": "12218ac02a69ae6a3fe14a6cf0c200801667bb0832088e8f94f44b799ad5eaae"
+          },
+          {
+            "file": "art-1408.webp",
+            "width": 1408,
+            "height": 768,
+            "bytes": 639170,
+            "sha256": "c134c538df175f62a45cbd453fea2293e225b302cc593d7573030222d6385d85"
+          },
+          {
+            "file": "art-2816.webp",
+            "width": 2816,
+            "height": 1536,
+            "bytes": 1903528,
+            "sha256": "ca137ccb7baaaadbc48f235bb1380fc7473507221064b356c8f0c0dee541a6cc"
+          }
+        ]
+      }
+    },
+    "precisa": {
+      "original": {
+        "file": "mappa_precisa.png",
+        "width": 2752,
+        "height": 1536,
+        "bytes": 6894688,
+        "sha256": "e53ad9b884877865d0786058c6fcbd7801fb62014c3eba14142dc9bf6828360e"
+      },
+      "variants": {
+        "avif": [
+          {
+            "file": "precisa-688.avif",
+            "width": 688,
+            "height": 384,
+            "bytes": 85490,
+            "sha256": "43a5e1ba59644dc91f53f8666ee484a55a6a6faad4067a61b7fb710ee0edddff"
+          },
+          {
+            "file": "precisa-1376.avif",
+            "width": 1376,
+            "height": 768,
+            "bytes": 298823,
+            "sha256": "c38b287d554ab47950714df7e05fd0f6e5ea3c24bb1c974ca4cdb8f5953a23e8"
+          },
+          {
+            "file": "precisa-2752.avif",
+            "width": 2752,
+            "height": 1536,
+            "bytes": 829199,
+            "sha256": "668e19f6cc6d6dfc5fce79d9c852dea94d567914fe1e490c8102ccb3e1bf26ce"
+          }
+        ],
+        "webp": [
+          {
+            "file": "precisa-688.webp",
+            "width": 688,
+            "height": 384,
+            "bytes": 127612,
+            "sha256": "3febe8dd21e88d0a1784e743fab2457b0dfa94d32758f35acaccfd01522da362"
+          },
+          {
+            "file": "precisa-1376.webp",
+            "width": 1376,
+            "height": 768,
+            "bytes": 477338,
+            "sha256": "5c8c1986ca41493eec30eccd9531b0a175d970d3ebec9e9ca22662979367463f"
+          },
+          {
+            "file": "precisa-2752.webp",
+            "width": 2752,
+            "height": 1536,
+            "bytes": 1488536,
+            "sha256": "7b259ecf9190045b517b04fe733a98bd6850958c9ed0e7a31611315b8125558e"
+          }
+        ]
+      }
+    }
+  },
+  "coldModern": {
+    "budgetBytes": 4466801,
+    "avifBytes": 1965563,
+    "webpBytes": 3392064,
+    "worstCaseBytes": 3392064
+  }
+}

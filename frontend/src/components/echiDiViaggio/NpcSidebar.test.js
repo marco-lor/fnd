@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NpcSidebar from './NpcSidebar';
 import { deleteDoc, doc, getDocs, onSnapshot } from '../../performance/firestore';
 import { deleteObject } from 'firebase/storage';
@@ -40,19 +40,13 @@ jest.mock('firebase/storage', () => ({
 
 jest.mock('framer-motion', () => {
   const React = require('react');
+  const Div = React.forwardRef(({ children, initial, animate, exit, transition, ...props }, ref) => (
+    <div ref={ref} {...props}>{children}</div>
+  ));
 
   return {
     AnimatePresence: ({ children }) => <>{children}</>,
-    motion: new Proxy(
-      {},
-      {
-        get: () => React.forwardRef(({ children, ...props }, ref) => (
-          <div ref={ref} {...props}>
-            {children}
-          </div>
-        )),
-      }
-    ),
+    motion: { div: Div },
     useReducedMotion: () => true,
   };
 });
@@ -87,14 +81,184 @@ describe('NpcSidebar', () => {
     });
   });
 
+  const renderWithNpc = (extraNpcs = []) => {
+    onSnapshot.mockImplementation((target, onNext) => {
+      onNext({ docs: [{ id: 'npc-guide', data: () => ({
+        nome: 'Guide', description: 'A local guide', notes: 'Final note',
+      }) }, ...extraNpcs] });
+      return () => {};
+    });
+    return render(<NpcSidebar user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} stickyOffset={104} />);
+  };
+
+  test('bounds the popup to a 320 CSS pixel viewport and makes long content scrollable', () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    window.innerWidth = 320;
+    window.innerHeight = 240;
+    const bounds = jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.getAttribute('role') === 'dialog') {
+        return { left: 0, right: 304, top: 0, bottom: 600, width: 304, height: 600 };
+      }
+      return { left: 280, right: 312, top: 212, bottom: 232, width: 32, height: 20 };
+    });
+    try {
+      renderWithNpc();
+      fireEvent.focus(screen.getByRole('button', { name: /Guide/ }));
+      const popup = screen.getByRole('dialog', { name: /Guide/ });
+      expect(popup).toHaveStyle({ position: 'fixed', left: '8px', top: '8px', width: '304px', maxHeight: '224px', overflowY: 'auto' });
+      expect(popup).toHaveTextContent('Final note');
+    } finally {
+      bounds.mockRestore();
+      window.innerWidth = originalWidth;
+      window.innerHeight = originalHeight;
+    }
+  });
+
+  test('keeps the focused NPC action owner when a different tile is hovered', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+      const guide = screen.getByRole('button', { name: /Guide/ });
+      const scout = screen.getByRole('button', { name: /Scout/ });
+      act(() => guide.focus());
+      const guidePopup = screen.getByRole('dialog', { name: 'NPC: Guide' });
+      const editGuide = screen.getByRole('button', { name: 'Edit' });
+      act(() => editGuide.focus());
+      fireEvent.mouseEnter(scout);
+      fireEvent.mouseLeave(scout);
+      act(() => jest.advanceTimersByTime(300));
+      expect(editGuide).toHaveFocus();
+      expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toBe(guidePopup);
+      expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('ArrowDown enters its initiating NPC after a different tile is hovered', () => {
+    renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+    const guide = screen.getByRole('button', { name: /Guide/ });
+    const scout = screen.getByRole('button', { name: /Scout/ });
+    act(() => guide.focus());
+    fireEvent.mouseEnter(scout);
+    fireEvent.keyDown(guide, { key: 'ArrowDown' });
+    expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toHaveFocus();
+    expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(guide).toHaveFocus();
+    fireEvent.keyDown(guide, { key: 'ArrowDown' });
+    expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toHaveFocus();
+  });
+
+  test('explicit activation can select another NPC while the first popup owns focus', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+      const guide = screen.getByRole('button', { name: /Guide/ });
+      const scout = screen.getByRole('button', { name: /Scout/ });
+      act(() => guide.focus());
+      act(() => screen.getByRole('button', { name: 'Edit' }).focus());
+      fireEvent.mouseEnter(screen.getByRole('dialog', { name: 'NPC: Guide' }));
+      fireEvent.click(scout);
+      expect(screen.getByRole('dialog', { name: 'NPC: Scout' })).toHaveFocus();
+      expect(screen.queryByRole('dialog', { name: 'NPC: Guide' })).not.toBeInTheDocument();
+      act(() => screen.getByRole('button', { name: '+ Add NPC' }).focus());
+      act(() => jest.advanceTimersByTime(300));
+      expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+      fireEvent.click(scout);
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      expect(screen.getByDisplayValue('Scout')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Scout note')).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('keeps the popup open while focus moves from its tile into its actions', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc();
+      const tile = screen.getByRole('button', { name: /Guide/ });
+      act(() => tile.focus());
+      fireEvent.keyDown(tile, { key: 'ArrowDown' });
+      expect(screen.getByRole('dialog', { name: /Guide/ })).toHaveFocus();
+      const edit = screen.getByRole('button', { name: 'Edit' });
+      act(() => edit.focus());
+      act(() => jest.advanceTimersByTime(300));
+      expect(edit).toHaveFocus();
+      expect(screen.getByRole('dialog', { name: /Guide/ })).toBeInTheDocument();
+      act(() => screen.getByRole('button', { name: '+ Add NPC' }).focus());
+      act(() => jest.advanceTimersByTime(300));
+      expect(screen.queryByRole('dialog', { name: /Guide/ })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('Escape dismisses the popup, restores its trigger and does not immediately reopen it', () => {
+    renderWithNpc();
+    const tile = screen.getByRole('button', { name: /Guide/ });
+    act(() => tile.focus());
+    act(() => screen.getByRole('button', { name: 'Edit' }).focus());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /Guide/ })).not.toBeInTheDocument();
+    expect(tile).toHaveFocus();
+    fireEvent.focus(tile);
+    expect(screen.queryByRole('dialog', { name: /Guide/ })).not.toBeInTheDocument();
+    fireEvent.click(tile);
+    expect(screen.getByRole('dialog', { name: /Guide/ })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    act(() => screen.getByRole('button', { name: '+ Add NPC' }).focus());
+    act(() => tile.focus());
+    expect(screen.getByRole('dialog', { name: /Guide/ })).toBeInTheDocument();
+  });
+
+  test('removes an open popup and pending close when the route unmounts', () => {
+    jest.useFakeTimers();
+    try {
+      const { unmount } = renderWithNpc();
+      const tile = screen.getByRole('button', { name: /Guide/ });
+      fireEvent.mouseEnter(tile);
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+      fireEvent.mouseLeave(tile);
+      unmount();
+      act(() => jest.runOnlyPendingTimers());
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('a dismissed pointer popup can open and close normally on a later visit', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc();
+      const tile = screen.getByRole('button', { name: /Guide/ });
+      fireEvent.mouseEnter(tile);
+      fireEvent.mouseLeave(tile);
+      fireEvent.mouseEnter(screen.getByRole('dialog', { name: /Guide/ }));
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.mouseEnter(tile);
+      fireEvent.mouseLeave(tile);
+      act(() => jest.advanceTimersByTime(300));
+      fireEvent.mouseEnter(tile);
+      expect(screen.getByRole('dialog', { name: /Guide/ })).toBeInTheDocument();
+      fireEvent.mouseLeave(tile);
+      act(() => jest.advanceTimersByTime(300));
+      expect(screen.queryByRole('dialog', { name: /Guide/ })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('reports hover state without triggering cross-component render warnings', async () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     render(<HoverStateHarness />);
 
     const emptyState = await screen.findByText('No NPCs yet.');
-    const listContainer = emptyState.parentElement;
-    fireEvent.mouseEnter(listContainer);
+    fireEvent.mouseEnter(emptyState);
 
     await waitFor(() => expect(screen.getByTestId('hover-state')).toHaveTextContent('hovered'));
 
@@ -133,8 +297,7 @@ describe('NpcSidebar', () => {
       />
     );
 
-    const npcName = await screen.findByText('Canonical NPC');
-    fireEvent.mouseEnter(npcName.closest('button'));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: /Canonical NPC/ }));
     const deleteButton = await screen.findByRole('button', { name: 'Delete' });
     fireEvent.click(deleteButton);
 
@@ -171,8 +334,7 @@ describe('NpcSidebar', () => {
       />
     );
 
-    const npcName = await screen.findByText('Legacy NPC');
-    fireEvent.mouseEnter(npcName.closest('button'));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: /Legacy NPC/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(deleteObject).toHaveBeenCalled());
