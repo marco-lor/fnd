@@ -17,6 +17,23 @@ test('materialized rank preserves localeCompare punctuation, accents and binary 
  assert.deepEqual([...sorted,fresh].sort((a,b)=>a.rank-b.rank).map(s=>s.id), [...sorted,fresh].sort(compareNames).map(s=>s.id));
  assert.throws(()=>allocateRank([{...fresh,id:'a',name:'a',rank:1},{...fresh,id:'c',name:'c',rank:1+Number.EPSILON}],{...fresh,name:'b'}), /rebuild/);
 });
+test('filtered and stat tie order follows persisted ranks across runtime collation changes', () => {
+ const rows = [projectSummary(item('z','z'),1,0), projectSummary(item('a','a'),1,1024)];
+ for (const filters of [{}, {selectedBaseParams:['Forza']}, {searchTerm:''}]) {
+  assert.deepEqual(evaluateSummaries(rows,filters).map(row=>row.id),['z','a']);
+ }
+});
+test('rank allocation refuses incompatible, duplicate and nonfinite stored ranks', () => {
+ const a=projectSummary(item('a','a'),1,0), z=projectSummary(item('z','z'),1,1024);
+ const fresh=projectSummary(item('m','m'),1,0);
+ for (const rows of [[{...a,rank:2048},z],[a,{...z,rank:0}],[a,{...z,rank:NaN}],[{...a,rank:Infinity},z]]) {
+  assert.throws(()=>allocateRank(rows,fresh),/rebuild|required|ordering/i);
+ }
+ // An inversion away from the insertion interval must also block allocation.
+ const b=projectSummary(item('b','b'),1,2048), c=projectSummary(item('c','c'),1,1024);
+ assert.throws(()=>allocateRank([a,b,c,{...z,rank:3072}],fresh),/rebuild|required|ordering/i);
+ assert.throws(()=>allocateRank([a,{...b,rank:0},z],{...fresh,name:'zz'}),/rebuild|required|ordering/i);
+});
 test('advanced filtering is complete, raw substring preserved and summed stats ordered', () => {
  const rows=Array.from({length:65},(_,i)=>projectSummary(item(String(i),i===64?' rare ':'item '+i),1,i));
  assert.deepEqual(evaluateSummaries(rows,{searchTerm:' rare '}).map(s=>s.id),['64']);

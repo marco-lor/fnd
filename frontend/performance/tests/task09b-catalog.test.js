@@ -7,7 +7,7 @@ const fRequire=require('node:module').createRequire(path.resolve(__dirname,'../.
 const {initializeApp,deleteApp}=fRequire('firebase-admin/app');const {getFirestore}=fRequire('firebase-admin/firestore');
 const {migrateCatalog,synchronizeCatalogMedia}=require('../../functions/lib/bazaarCatalog');
 const {projectSummary,evaluateSummaries,visible,compareNames}=require('../../functions/lib/bazaarCatalogCore');
-let app,db,tokens={},source,revision;const costs=[];
+let app,db,tokens={},source,projectedSource,revision;const costs=[];
 async function call(name,data,role='perf-player',error){
  const response=await fetch(`http://127.0.0.1:5001/${projectId}/europe-west8/${name}`,{method:'POST',headers:{'Content-Type':'application/json',...(role?{Authorization:`Bearer ${tokens[role]}`}:{})},body:JSON.stringify({data})});
  const body=await response.json();if(error){assert.equal(body.error?.status,error,JSON.stringify(body));return body.error;}
@@ -24,6 +24,7 @@ before(async()=>{
   const data=await response.json();assert.ok(data.idToken,JSON.stringify(data));tokens[uid]=data.idToken;
  }
  source=(await db.collection('items').get()).docs.filter(d=>d.get('item_type')).map(d=>({id:d.id,...d.data()}));assert.equal(source.length,1000);
+ projectedSource=source.map(d=>projectSummary(d,1,0)).sort(compareNames).map((d,i)=>({...d,rank:i*1024}));
 });
 after(async()=>{fs.writeFileSync(path.resolve(__dirname,'../../../docs/coordinator/task-09-bazaar-catalog/evidence/09b-query-costs.json'),JSON.stringify({fixtureItems:1000,inventory:500,costs},null,2));await deleteApp(app);});
 test('migration freezes writers, resumes, detects corruption, activates and is bounded per step',async()=>{
@@ -42,14 +43,30 @@ test('default cold/warm costs and complete stable cursor pages match ICU name an
  assert.equal(cold.rows.length,50);assert.equal(cold.costs.summaryDocuments,50);assert.equal(cold.costs.metadataDocuments,4);assert.equal(cold.facets,null);
  assert.ok(cold.rows.every(r=>!r.General&&!r.Parametri&&!r.spells));
  const rows=[...cold.rows];let cursor=cold.cursor;while(cursor){const more=await page({}, {cursor});rows.push(...more.rows);cursor=more.cursor;}
- const expected=source.filter(d=>visible(d,'perf-player','player')).map(d=>projectSummary(d,1,0)).sort(compareNames).map(d=>d.id);
+ const expected=projectedSource.filter(d=>visible(d,'perf-player','player')).map(d=>d.id);
  assert.equal(expected.length,950);assert.equal(new Set(rows.map(d=>d.id)).size,950);assert.deepEqual(rows.map(d=>d.id),expected);
  await call('task09CatalogPage',{revision,filters:{},cursor:{...cold.cursor,rank:cold.cursor.rank+1},accessGeneration:'test-generation'},'perf-player','FAILED_PRECONDITION');
  await call('task09CatalogPage',{revision,filters:{},cursor:cold.cursor,accessGeneration:'other-generation'},'perf-player','FAILED_PRECONDITION');
 });
+test('historical ICU remains readable with materialized ranks and no catalog mutation',async()=>{
+ const control=db.doc('catalogControl/bazaar');const original=(await control.get()).data();
+ const first=(await page()).rows[0];const sourceRef=db.doc(`items/${first.id}`),summaryRef=db.doc(`catalogSummaries/${first.id}`);
+ const sourceTime=(await sourceRef.get()).updateTime.toMillis(),summaryTime=(await summaryRef.get()).updateTime.toMillis();
+ await control.update({icu:'historical-icu'});
+ try{
+  const result=await page();
+  assert.deepEqual(result.rows.map(d=>d.id),projectedSource.filter(d=>visible(d,'perf-player','player')).slice(0,50).map(d=>d.id));
+  assert.equal((await call('task09CatalogDetail',{itemId:first.id,revision})).id,first.id);
+  const filters={selectedBaseParams:['Forza'],selectedCombatParams:['Attacco']};
+  const advanced=await page(filters);
+  assert.deepEqual(advanced.rows.map(d=>d.id),evaluateSummaries(projectedSource.filter(d=>visible(d,'perf-player','player')),filters).slice(0,50).map(d=>d.id));
+  assert.deepEqual((await control.get()).data(),{...original,icu:'historical-icu'});
+  assert.equal((await sourceRef.get()).updateTime.toMillis(),sourceTime);assert.equal((await summaryRef.get()).updateTime.toMillis(),summaryTime);
+ }finally{await control.update({icu:original.icu});}
+});
 test('complete advanced scans and facets, including restored cold filters and actor separation',async()=>{
  const cases=[{searchTerm:'Item 0999'},{searchTerm:'  '},{selectedSpecialParams:['zero'],selectedSlot:['ring','body']},{selectedBaseParams:['Forza'],selectedCombatParams:['Attacco']},{onlyAffordable:true,userGold:5}];
- const projected=source.filter(d=>visible(d,'perf-player','player')).map(d=>projectSummary(d,1,0));
+ const projected=projectedSource.filter(d=>visible(d,'perf-player','player'));
  for(const filters of cases){let result=await page(filters);costs.push({window:'advanced-cold',filters,...result.costs});const warm=await page(filters);costs.push({window:'advanced-warm',filters,...warm.costs});const rows=[...result.rows];while(result.cursor){result=await page(filters,{cursor:result.cursor});rows.push(...result.rows);}assert.deepEqual(rows.map(d=>d.id),evaluateSummaries(projected,filters).map(d=>d.id));}
  const facets=await page({}, {facets:true});assert.equal(facets.costs.summaryDocuments,950);assert.ok(facets.facets.slots.length>1);costs.push({window:'facets',...facets.costs});
  const dm=await page({}, {facets:true},'perf-dm');assert.equal(dm.costs.summaryDocuments,1000);
