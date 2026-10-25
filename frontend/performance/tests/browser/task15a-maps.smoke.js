@@ -278,6 +278,14 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
     const marker = art.getByRole('button', { name: temporaryName, exact: true });
     const markerOwner = marker.locator('..');
     const allMarkers = page.locator('[data-echi-map] button[aria-haspopup="dialog"]');
+    const removeNativeDragObserver = async () => {
+      if (await marker.count()) await marker.evaluate((element) => {
+        if (element.__task15aNativeDragObserver) {
+          document.removeEventListener('dragstart', element.__task15aNativeDragObserver);
+          delete element.__task15aNativeDragObserver;
+        }
+      });
+    };
     const noteHeading = page.getByRole('heading', { name: 'Aggiungi Nota Pubblica', exact: true });
     const moveHeading = page.getByRole('heading', { name: 'Conferma Spostamento NPC', exact: true });
     const initialCount = fixtureManifest.counts.map_markers;
@@ -368,12 +376,14 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
       await marker.evaluate((element) => {
         element.__task15aNativeDragPayloads = [];
         // Observe after React's root listener has populated the native payload.
-        document.addEventListener('dragstart', (event) => {
+        element.__task15aNativeDragObserver = (event) => {
           if (event.target === element) element.__task15aNativeDragPayloads.push(event.dataTransfer.getData('text/plain'));
-        });
+        };
+        document.addEventListener('dragstart', element.__task15aNativeDragObserver);
       });
       await marker.dragTo(art, { sourcePosition, targetPosition });
       const nativeDragPayloads = await marker.evaluate((element) => element.__task15aNativeDragPayloads);
+      await removeNativeDragObserver();
       expect(nativeDragPayloads).toHaveLength(1);
       expect(JSON.parse(nativeDragPayloads[0])).toEqual(expect.objectContaining({
         dragType: 'npc-marker-move', markerId: ownedMarkerId, scope: 'public', originMapId: 'art',
@@ -385,6 +395,7 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
       expect(await markerOwner.evaluate((element) => ({ x: element.style.left, y: element.style.top }))).toEqual(originalPosition);
     } finally {
       try {
+        await removeNativeDragObserver();
         // Cancel unfinished forms, then delete only this UUID-named pin through
         // its own UI. Admin reads prove ownership and server acknowledgement.
         for (const heading of [noteHeading, moveHeading]) {
@@ -398,8 +409,18 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
           }).toBe(1);
           await marker.focus();
           await page.keyboard.press('Escape');
-          await markerOwner.getByTitle('Elimina', { exact: true }).click();
-          await markerOwner.getByTitle('Conferma', { exact: true }).click();
+          await expect(marker).toBeFocused();
+          // The controls extend beyond the pin's clear drag footprint. Use
+          // their native tab order so nearby pins cannot intercept cleanup.
+          for (const title of ['Elimina', 'Conferma']) {
+            const control = markerOwner.getByTitle(title, { exact: true });
+            await page.keyboard.press('Tab');
+            await expect(control).toBeFocused();
+            await expect(control).toBeVisible();
+            await expect(control).toHaveCSS('opacity', '1');
+            await expect(control).toBeInViewport();
+            await page.keyboard.press('Enter');
+          }
         }
         await expect(marker).toHaveCount(0);
         await expect.poll(async () => (await ownedMarkerQuery.get()).size).toBe(0);
