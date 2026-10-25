@@ -36,11 +36,11 @@
 
 **Interfaces:** EchiMapPicture({mapId, alt, eager=false, children, className, ...surfaceEvents}) owns the exact coordinate surface and renders children overlays; supports art/precisa. Manifest records original SHA256/dimensions and each variant dimensions/bytes/SHA256. maps:generate regenerates, maps:check validates content/decode/budget and manifest.
 
-- [ ] Add failing component tests for eager/lazyactivation,320pxIO, noURLs beforeactivation, noIOfallback, orderedformatfailureandterminalerror,cleanupandreservedgeometry.
-- [ ] Add failing generator/check tests for missing/tampered/wrongaspect assets and bytes.
-- [ ] Generate exact-ratio responsive sizes at1/4,1/2,full master dimensions inAVIF/WebP; choose quality from measured readability/budget, record values. PinSharpdevdependency.
-- [ ] Implement picture atomically; verify realWebKit no duplicatefallback; remove image-onlyhover scaling; keepdrag/markerhandlersonthecoordinate surface.
-- [ ] Run maps:check, focusedNode/Jest and baseline Echi/MapEditor/NpcSidebar tests. Self-review and commit. Independent task review before marking accepted.
+- [x] Add failing component tests for eager/lazyactivation,320pxIO, noURLs beforeactivation, noIOfallback, orderedformatfailureandterminalerror,cleanupandreservedgeometry.
+- [x] Add failing generator/check tests for missing/tampered/wrongaspect assets and bytes.
+- [x] Generate exact-ratio responsive sizes at1/4,1/2,full master dimensions inAVIF/WebP; choose quality from measured readability/budget, record values. PinSharpdevdependency.
+- [x] Implement picture atomically; verify realWebKit no duplicatefallback; remove image-onlyhover scaling; keepdrag/markerhandlersonthecoordinate surface.
+- [x] Run maps:check, focusedNode/Jest and baseline Echi/MapEditor/NpcSidebar tests. Self-review and commit. Independent task review before marking accepted.
 
 ### Task 2: Zoom and tooltip usability
 
@@ -48,8 +48,8 @@
 
 **Interfaces:** Preserve existing public/private marker/NPC command contracts. Popup position uses current viewport, boundedwidth/height, scrollablecontent, trigger+popupfocus/pointerownership andEscape; marker coordinate wrapper remainsownedbyTask1.
 
-- [ ] Write regressions for narrowviewport tooltip bounds, focus moving into popup, Escape, marker accessibility and popup clipping.
-- [ ] Implement local viewport/focus/layout repairs; boundsidebarheight underlg. Do not change subscriptions/query/counts.
+- [x] Write regressions for narrowviewport tooltip bounds, focus moving into popup, Escape, marker accessibility and popup clipping.
+- [x] Implement local viewport/focus/layout repairs; boundsidebarheight underlg. Do not change subscriptions/query/counts.
 - [ ] Run relevant frontend tests and browser wholepage200%zoom/edges/lastnotes checks. Self-review, commit and independent task review.
 
 ### Task 3: SPA release cache continuity
@@ -58,20 +58,24 @@
 
 **Interfaces:** Preserve environmentselection/buildhardening; retain only validatedsame-sitepreviouspublichashedstaticassets, withmanifest boundedexpiry andobservablecounts. Newrequested-pathHTMLheadersrevalidate whileexplicitstatic/runtimepoliciesremainvalid. NoprivateDBorFunctionsread/write.
 
-- [ ] Add failing header tests forroot,Echi,trailing-slash,unknownSPAroute,staticandruntimeexceptions.
-- [ ] Add meaningful retention tests foroldentry/chunkavailability,expiry,targetmismatch,pathtraversal,hashmismatch/partialdownload and hardening preservation.
-- [ ] Implement minimalguardedpreviousassetpreservationafterbuild/beforeHostingupload. Nevermakeexistingoldentry404duringfirsttransition.
-- [ ] Run existingreleaseguard/deploy/buildtests plus newcoverage. Independentreview cachecontract and commit.
+- [x] Add failing header tests forroot,Echi,trailing-slash,unknownSPAroute,staticandruntimeexceptions.
+- [x] Add meaningful retention tests foroldentry/chunkavailability,expiry,targetmismatch,pathtraversal,hashmismatch/partialdownload and hardening preservation.
+- [x] Implement minimalguardedpreviousassetpreservationafterbuild/beforeHostingupload. Nevermakeexistingoldentry404duringfirsttransition.
+- [x] Run existingreleaseguard/deploy/buildtests plus newcoverage. Independentreview cachecontract and commit.
 - [ ] Preparebrowserprofileontheoldreleasebeforenextpublish. Laterverifyfreshnessanddistinctold/newbundlehasheswithordinarynavigationbeforeanyreload.
 
 ### Task 4: Integrated acceptance, PR and rollout
 
 **Files:** Create docs/coordinator/task-15a-echi-maps/acceptance-checklist.md, currentcontrol/reviewrecords and fresh evidence pointers; browser15Ascenarios and controlledQAhelpers. Keepsecretfixtures/manifestsignoredoroutsiderepo.
 
-- [ ] Reconstruct an explicit15criterionchecklist from userobjective/historicalrunbook; labelnewcontractandoldhistoricalevidenceclearly.
+- [x] Reconstruct an explicit15criterionchecklist from userobjective/historicalrunbook; labelnewcontractandoldhistoricalevidenceclearly.
 - [ ] Run appropriatefullfrontend/build/harnesschecks, completebrowsermatrix and independentwholebranchreview. Fixallactionablefindings.
 - [ ] Open/attachfeature->devsPR, recordreal15minreviewdeadline, inspectcommentsafterdeadline, repeatonupdate, mergeafterCI/review.
 - [ ] Onactualdevs guardedHostingdeploywithpreviousassets; verifyliveversion/headers/hashidentity and all15criteria manually includingcachetransition andownedCRUDserverchecks. Fixandreview/redeploy/retest ifneeded.
 - [ ] Whenfullyaccepted open/attachdevs->mainPR, obeysame15minreviewinterval,inspectcommentsandCI,merge.
 - [ ] Onactualmain deploysame reviewedsourceusingproductionconfig, preservingoldassets andalloriginaldata; repeatallmanualaffectedflowsandpaginatedcleanupverification.
 - [ ] Verifybothsourcereleasesaligned,CIgreen,originaldataunchanged,QAabsent;removeonlymergedtemporarybranchesandownedprocesses,cleanGitstatus;savefinalreportandstop_goalcomplete. Ifrequiredsurface/accessgenuinelyunavailablefinishallindependentworkandreportexactblockinsteadoffalsecompletion.
+
+## Current evidence before PR / live rollout
+
+Product tasks1-3 have independent PASS reviews, including all five P2 fixes and the manifest-write cleanup. Source commits: f81d5ca, c29918c, 048d9c5, 5ea70a7, 05f44cc and c43b613. Repeatable CI/browser coverage is committed as3e43c8. Final integrated frontend suite:192 suites/1821 tests PASS; actual Chromium/WebKit app routes:14/14 PASS including dependencies. Native map lifecycle:20/20 PASS, original fixture6/6, candidate decode regression PASS. Map-only cold bodies:698802 desktop/198815 mobile, zero PNG. These results do not substitute for final live deployment/manual acceptance. Live WebKit obtained a real App Check exchange HTTP200 with TTL3600 without debug or protection changes; enforced endpoint and ordinary user session remain separate checks.
