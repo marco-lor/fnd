@@ -4,6 +4,7 @@ const { test, expect } = require('./measured-test');
 const { configureOwnedPerformanceEnvironment, projectId } = require('../../../scripts/performance/common');
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const fixtureManifest = require('../../fixture-manifest.json');
 const {
   drainPageConnections,
   installBootstrap,
@@ -279,7 +280,8 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
     const allMarkers = page.locator('[data-echi-map] button[aria-haspopup="dialog"]');
     const noteHeading = page.getByRole('heading', { name: 'Aggiungi Nota Pubblica', exact: true });
     const moveHeading = page.getByRole('heading', { name: 'Conferma Spostamento NPC', exact: true });
-    await expect(allMarkers).toHaveCount(2000);
+    const initialCount = fixtureManifest.counts.map_markers;
+    await expect(allMarkers).toHaveCount(initialCount);
     configureOwnedPerformanceEnvironment();
     if (projectId !== 'demo-fnd-perf' || process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') {
       throw new Error('Native marker verification requires the owned demo Firestore emulator.');
@@ -289,32 +291,40 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
     const ownedMarkerQuery = serverMarkers.where('text', '==', temporaryName).where('createdBy', '==', 'perf-player');
     let ownedMarkerId;
     try {
+      await expect.poll(async () => (await serverMarkers.count().get()).data().count).toBe(initialCount);
       await art.scrollIntoViewIfNeeded();
-      // Pick two exposed map points. Do not force a drop through a sticky
-      // palette or an existing marker, and do not synthesize drag events.
-      const positions = await art.evaluate((element) => {
+      // Leave room for the entire new pin, including its hover scale. A
+      // transparent marker wrapper can intercept even when no button is hit.
+      const findClearMapPoint = (awayFrom = null) => art.evaluate((element, avoid) => {
         const rect = element.getBoundingClientRect();
+        const markers = [...element.querySelectorAll('button[aria-haspopup="dialog"]')]
+          .map((button) => button.parentElement.getBoundingClientRect());
         const points = [];
-        for (let y = Math.max(0, rect.top) + 24; y < Math.min(window.innerHeight, rect.bottom) - 24; y += 32) {
-          for (let x = rect.left + 24; x < rect.right - 24; x += 32) {
-            const hit = document.elementFromPoint(x, y);
-            if (hit?.closest('[data-echi-map]') !== element || hit.closest('button')) continue;
-            const point = { x: x - rect.left, y: y - rect.top };
-            if (points.length && Math.hypot(point.x - points[0].x, point.y - points[0].y) < 120) continue;
-            points.push(point);
-            if (points.length === 2) return points;
+        for (let y = Math.max(64, rect.top + 64); y < Math.min(window.innerHeight - 64, rect.bottom - 64); y += 32) {
+          for (let x = Math.max(64, rect.left + 64); x < Math.min(window.innerWidth - 64, rect.right - 64); x += 32) {
+            if (avoid && Math.hypot(x - rect.left - avoid.x, y - rect.top - avoid.y) < 120) continue;
+            if (markers.some((markerRect) => markerRect.left < x + 24 && markerRect.right > x - 24
+              && markerRect.top < y + 24 && markerRect.bottom > y - 24)) continue;
+            const exposed = [-24, 0, 24].every((dx) => [-24, 0, 24].every((dy) => {
+              const hit = document.elementFromPoint(x + dx, y + dy);
+              return hit?.closest('[data-echi-map]') === element && !hit.closest('[data-echi-map] > div[draggable]');
+            }));
+            if (exposed) points.push({ x: x - rect.left, y: y - rect.top });
           }
         }
-        return points;
-      });
-      expect(positions).toHaveLength(2);
+        points.sort((a, b) => Math.hypot(a.x - rect.width / 2, a.y - rect.height / 2)
+          - Math.hypot(b.x - rect.width / 2, b.y - rect.height / 2));
+        return points[0] || null;
+      }, awayFrom);
+      const creationPosition = await findClearMapPoint();
+      expect(creationPosition).not.toBeNull();
       const publicPalette = page.getByText('Public Pin', { exact: true }).locator('../..');
-      await publicPalette.getByRole('button', { name: 'Trascina: NPC', exact: true }).dragTo(art, { targetPosition: positions[0] });
+      await publicPalette.getByRole('button', { name: 'Trascina: NPC', exact: true }).dragTo(art, { targetPosition: creationPosition });
       await expect(noteHeading).toBeVisible();
       await noteHeading.locator('..').getByRole('textbox').fill(temporaryName);
       await noteHeading.locator('..').getByRole('button', { name: 'Salva', exact: true }).click();
       await expect(marker).toHaveCount(1);
-      await expect(allMarkers).toHaveCount(2001);
+      await expect(allMarkers).toHaveCount(initialCount + 1);
       await expect.poll(async () => {
         const owned = await ownedMarkerQuery.get();
         ownedMarkerId = owned.docs[0]?.id;
@@ -324,7 +334,50 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
       await expect(marker.locator('img')).toHaveCount(0);
       const originalPosition = await markerOwner.evaluate((element) => ({ x: element.style.left, y: element.style.top }));
       await page.keyboard.press('Escape');
-      await marker.dragTo(art, { targetPosition: positions[1] });
+      await marker.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+      const sourcePosition = await marker.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        for (const y of [0.5, 0.25, 0.75]) {
+          for (const x of [0.5, 0.25, 0.75]) {
+            const point = { x: rect.width * x, y: rect.height * y };
+            if (document.elementFromPoint(rect.left + point.x, rect.top + point.y)?.closest('button') === element) return point;
+          }
+        }
+        return null;
+      });
+      expect(sourcePosition).not.toBeNull();
+      const currentMarkerPosition = await markerOwner.evaluate((element) => {
+        const mapRect = element.closest('[data-echi-map]').getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2 - mapRect.left, y: rect.top + rect.height / 2 - mapRect.top };
+      });
+      const targetPosition = await findClearMapPoint(currentMarkerPosition);
+      expect(targetPosition).not.toBeNull();
+      const sourceHit = await marker.evaluate((element, point) => {
+        const rect = element.getBoundingClientRect();
+        return document.elementFromPoint(rect.left + point.x, rect.top + point.y)?.closest('button') === element;
+      }, sourcePosition);
+      const targetHit = await art.evaluate((element, point) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + point.x, rect.top + point.y);
+        return hit?.closest('[data-echi-map]') === element && !hit.closest('[data-echi-map] > div[draggable]');
+      }, targetPosition);
+      await attachJson(testInfo, 'task15a-native-marker-drag-hit-points', { creationPosition, sourcePosition, targetPosition, sourceHit, targetHit });
+      expect(sourceHit).toBe(true);
+      expect(targetHit).toBe(true);
+      await marker.evaluate((element) => {
+        element.__task15aNativeDragPayloads = [];
+        // Observe after React's root listener has populated the native payload.
+        document.addEventListener('dragstart', (event) => {
+          if (event.target === element) element.__task15aNativeDragPayloads.push(event.dataTransfer.getData('text/plain'));
+        });
+      });
+      await marker.dragTo(art, { sourcePosition, targetPosition });
+      const nativeDragPayloads = await marker.evaluate((element) => element.__task15aNativeDragPayloads);
+      expect(nativeDragPayloads).toHaveLength(1);
+      expect(JSON.parse(nativeDragPayloads[0])).toEqual(expect.objectContaining({
+        dragType: 'npc-marker-move', markerId: ownedMarkerId, scope: 'public', originMapId: 'art',
+      }));
       await expect(moveHeading).toBeVisible();
       await expect(moveHeading.locator('..')).toContainText(temporaryName);
       await moveHeading.locator('..').getByRole('button', { name: 'Annulla', exact: true }).click();
@@ -353,8 +406,8 @@ test('Task 15A a bare NPC marker button supports native drag and cancelled movem
         if (ownedMarkerId) await expect.poll(async () => (await serverMarkers.doc(ownedMarkerId).get()).exists).toBe(false);
         // The browser configuration runs one worker; wait for the emulator's
         // restored count, rather than accepting an optimistic local deletion.
-        await expect.poll(async () => (await serverMarkers.count().get()).data().count).toBe(2000);
-        await expect(allMarkers).toHaveCount(2000);
+        await expect.poll(async () => (await serverMarkers.count().get()).data().count).toBe(initialCount);
+        await expect(allMarkers).toHaveCount(initialCount);
       } finally {
         await deleteApp(adminApp);
       }
