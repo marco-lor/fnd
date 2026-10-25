@@ -903,6 +903,8 @@ export default function NpcSidebar({
               expectedRevision: receiptExpectedRevision,
               prepareEntity: () => setDoc(npcRef, {
                 nome,
+                imageUrl: '',
+                imagePath: '',
                 description,
                 notes,
                 createdBy: user.uid,

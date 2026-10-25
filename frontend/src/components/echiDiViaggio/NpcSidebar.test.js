@@ -1,8 +1,21 @@
 import React, { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NpcSidebar from './NpcSidebar';
-import { deleteDoc, doc, getDocs, onSnapshot } from '../../performance/firestore';
+import { addDoc, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from '../../performance/firestore';
+import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
+import { runTask07ConsumerUpload, runWithTask07MediaOperationReceipt } from '../../data/media/mediaConsumerAdapter';
 import { deleteObject } from 'firebase/storage';
+
+jest.mock('../../data/media/mediaFeatureFlags', () => ({
+  ...jest.requireActual('../../data/media/mediaFeatureFlags'),
+  isTask07MediaV1WriteEnabled: jest.fn(),
+}));
+
+jest.mock('../../data/media/mediaConsumerAdapter', () => ({
+  ...jest.requireActual('../../data/media/mediaConsumerAdapter'),
+  runTask07ConsumerUpload: jest.fn(),
+  runWithTask07MediaOperationReceipt: jest.fn(),
+}));
 
 jest.mock('../firebaseConfig', () => ({
   db: {},
@@ -23,6 +36,7 @@ jest.mock('../../performance/firestore', () => ({
   orderBy: jest.fn((field, direction) => ({ field, direction })),
   query: jest.fn((base) => base),
   serverTimestamp: jest.fn(() => ({ seconds: 0 })),
+  setDoc: jest.fn(() => Promise.resolve()),
   updateDoc: jest.fn(() => Promise.resolve()),
   where: jest.fn((field, op, value) => ({ field, op, value })),
   writeBatch: jest.fn(() => ({
@@ -71,6 +85,10 @@ function HoverStateHarness() {
 describe('NpcSidebar', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    isTask07MediaV1WriteEnabled.mockResolvedValue(false);
+    serverTimestamp.mockReturnValue({ seconds: 0 });
+    if (!URL.createObjectURL) URL.createObjectURL = jest.fn(() => 'blob:npc-preview');
+    if (!URL.revokeObjectURL) URL.revokeObjectURL = jest.fn();
     doc.mockImplementation((db, ...segments) => ({
       path: segments.join('/'),
     }));
@@ -269,6 +287,39 @@ describe('NpcSidebar', () => {
     expect(hasCrossComponentWarning).toBe(false);
 
     consoleErrorSpy.mockRestore();
+  });
+
+  test('prepares a Rules-compatible NPC placeholder before canonical image upload', async () => {
+    isTask07MediaV1WriteEnabled.mockResolvedValueOnce(true);
+    doc.mockImplementationOnce(() => ({ id: 'new-npc', path: 'echi_npcs/new-npc' }));
+    runWithTask07MediaOperationReceipt.mockImplementationOnce(({ invoke, expectedRevision, previousAssetId, signal }) => invoke({
+      operationId: 'npc-create-operation', expectedRevision, previousAssetId, signal,
+    }));
+    runTask07ConsumerUpload.mockImplementationOnce(async ({ prepareEntity }) => {
+      await prepareEntity();
+      return { handled: true, status: 'complete' };
+    });
+    render(<NpcSidebar user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} stickyOffset={104} />);
+    fireEvent.click(screen.getByRole('button', { name: '+ Add NPC' }));
+    fireEvent.change(screen.getByPlaceholderText('Nome NPC...'), { target: { value: '  New guide  ' } });
+    fireEvent.change(screen.getByPlaceholderText('NPC description...'), { target: { value: '  Local guide  ' } });
+    fireEvent.change(screen.getByPlaceholderText('NPC notes...'), { target: { value: '  Meet at dawn  ' } });
+    fireEvent.change(screen.getByDisplayValue((value, element) => element.tagName === 'INPUT' && element.type === 'file'), {
+      target: { files: [new File(['portrait'], 'guide.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create NPC' }));
+
+    await waitFor(() => expect(setDoc).toHaveBeenCalledWith(
+      { id: 'new-npc', path: 'echi_npcs/new-npc' },
+      {
+        nome: 'New guide', imageUrl: '', imagePath: '',
+        description: 'Local guide', notes: 'Meet at dawn',
+        createdBy: 'dm-1', createdByRole: 'dm',
+        createdAt: { seconds: 0 }, updatedAt: { seconds: 0 },
+      },
+    ));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Add NPC' })).not.toBeInTheDocument());
+    expect(addDoc).not.toHaveBeenCalled();
   });
 
   test('deletes a canonical NPC document without directly deleting private Storage', async () => {

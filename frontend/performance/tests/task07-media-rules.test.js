@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const assert = require('node:assert/strict');
 const {after, before, test} = require('node:test');
 const {
   assertFails,
@@ -13,6 +14,7 @@ const {
   doc,
   getDoc,
   getDocs,
+  serverTimestamp,
   setDoc,
   updateDoc,
 } = require('firebase/firestore');
@@ -252,6 +254,18 @@ const sourceMetadata = (manifest, overrides = {}) => ({
   ...Object.fromEntries(
     Object.entries(overrides).filter(([key]) => key !== 'customMetadata')
   ),
+});
+
+const canonicalNpcPlaceholder = () => ({
+  nome: 'Canonical NPC preparation',
+  imageUrl: '',
+  imagePath: '',
+  description: 'Prepared before the server media attachment',
+  notes: 'NPC preparation rules regression',
+  createdBy: USERS.dm.uid,
+  createdByRole: 'dm',
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
 });
 
 let environment;
@@ -642,6 +656,117 @@ test('Task 07 ledgers and cleanup records remain server-only', async () => {
       firestore,
       `media_asset_cleanup/${FIXTURES.intent.assetId}`
     ), {state: 'pending'}));
+  }
+});
+
+test('DM canonical NPC preparation requires both empty legacy image fields', async () => {
+  const npcPath = 'echi_npcs/task07-canonical-npc-prepare';
+  const omittedFields = [
+    ['imageUrl'],
+    ['imagePath'],
+    ['imageUrl', 'imagePath'],
+  ];
+  const rejectedPaths = omittedFields.map((_fields, index) => (
+    `${npcPath}-missing-${index}`
+  ));
+  const dm = environment.authenticatedContext(USERS.dm.uid).firestore();
+  try {
+    // This is the NpcSidebar prepareEntity payload, before any media exists.
+    await assertSucceeds(setDoc(doc(dm, npcPath), canonicalNpcPlaceholder()));
+    const prepared = (await assertSucceeds(getDoc(doc(dm, npcPath)))).data();
+    assert.equal(prepared.imageUrl, '');
+    assert.equal(prepared.imagePath, '');
+    assert.equal(prepared.createdBy, USERS.dm.uid);
+    assert.equal(Object.hasOwn(prepared, 'media'), false);
+    assert.equal(Object.hasOwn(prepared, 'task07MediaRevision'), false);
+
+    for (const [index, fields] of omittedFields.entries()) {
+      const incomplete = canonicalNpcPlaceholder();
+      for (const field of fields) delete incomplete[field];
+      const rejected = doc(dm, rejectedPaths[index]);
+      await assertFails(setDoc(rejected, incomplete));
+      assert.equal((await assertSucceeds(getDoc(rejected))).exists(), false);
+    }
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      for (const pathName of [npcPath, ...rejectedPaths]) {
+        await deleteDoc(doc(context.firestore(), pathName));
+      }
+    });
+  }
+});
+
+test('server-attached NPC media survives client edits and rejects client control changes', async () => {
+  const npcPath = 'echi_npcs/task07-canonical-npc-attached';
+  const dm = environment.authenticatedContext(USERS.dm.uid).firestore();
+  const npc = doc(dm, npcPath);
+  const attachedAt = new Date('2026-08-01T00:00:00.000Z');
+  const canonicalMedia = {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId: assetId('6'),
+    kind: 'npc',
+    state: 'ready',
+    generation: '7',
+    audience: 'signed-in',
+    ownerUid: USERS.dm.uid,
+    original: {
+      ...FIXTURES.signedIn.generated.original,
+      path: `media_assets/v1/signed-in/${USERS.dm.uid}/${assetId('6')}/7/original`,
+    },
+    variants: {},
+    processing: {authoritative: true, fallbackCode: null},
+  };
+  try {
+    await assertSucceeds(setDoc(npc, canonicalNpcPlaceholder()));
+    const prepared = (await getDoc(npc)).data();
+    // Clients cannot perform the attachment, even with the DM role.
+    await assertFails(updateDoc(npc, {media: canonicalMedia}));
+    assert.equal(Object.hasOwn((await getDoc(npc)).data(), 'media'), false);
+
+    // The real attachment uses an Admin transaction. Seed its resulting patch;
+    // this bypass models server state, not a successful client Rules check.
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), npcPath), {
+        media: canonicalMedia,
+        imageUrl: '',
+        imagePath: canonicalMedia.original.path,
+        task07MediaRevision: 1,
+        mediaUpdatedAt: attachedAt,
+      });
+    });
+
+    await assertSucceeds(updateDoc(npc, {
+      description: 'Ordinary edit after canonical attachment',
+      notes: 'Updated without changing server media',
+      updatedAt: serverTimestamp(),
+    }));
+    const edited = (await assertSucceeds(getDoc(npc))).data();
+    assert.equal(edited.description, 'Ordinary edit after canonical attachment');
+    assert.deepEqual(edited.media, canonicalMedia);
+    assert.equal(edited.imageUrl, '');
+    assert.equal(edited.imagePath, canonicalMedia.original.path);
+    assert.equal(edited.task07MediaRevision, 1);
+    assert.equal(edited.mediaUpdatedAt.toMillis(), attachedAt.getTime());
+    assert.equal(edited.createdAt.toMillis(), prepared.createdAt.toMillis());
+    assert.equal(edited.createdBy, USERS.dm.uid);
+    assert.equal(edited.createdByRole, 'dm');
+
+    for (const patch of [
+      {task07MediaRevision: 2},
+      {mediaUpdatedAt: serverTimestamp()},
+      {media: {...canonicalMedia, assetId: assetId('7')}},
+      {media: deleteField()},
+      {imagePath: 'echi_npcs/client-replacement.png'},
+      {imageUrl: 'https://legacy.test/client-replacement.png'},
+    ]) {
+      await assertFails(updateDoc(npc, patch));
+    }
+    assert.deepEqual((await getDoc(npc)).data(), edited);
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), npcPath));
+    });
   }
 });
 
