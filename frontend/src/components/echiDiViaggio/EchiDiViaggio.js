@@ -1,5 +1,6 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { collection, onSnapshot } from '../../performance/firestore';
 import { useAuth } from '../../AuthContext';
 import EchiMapPicture from './EchiMapPicture';
@@ -8,6 +9,7 @@ import NpcSidebar from './NpcSidebar';
 import { db } from '../firebaseConfig';
 import { useShellLayout } from '../common/shellLayout';
 import MediaImage from '../common/MediaImage';
+import useViewportPopup from './useViewportPopup';
 
 const getNormalizedText = (value, fallback) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -90,6 +92,12 @@ const MapMarkerItem = ({
   const [isNpcImageBroken, setIsNpcImageBroken] = useState(false);
   const [isNpcHoverOpen, setIsNpcHoverOpen] = useState(false);
   const hoverCloseTimerRef = useRef(null);
+  const triggerRef = useRef(null);
+  const pointerInMarkerRef = useRef(false);
+  const pointerInPopupRef = useRef(false);
+  const dismissedRef = useRef(false);
+  const focusPopupOnOpenRef = useRef(false);
+  const { popupRef, popupStyle } = useViewportPopup(triggerRef.current, isNpcHoverOpen, 288, 'above');
 
   const isNpcMarker = marker?.markerType === 'npc' || marker?.iconType === 'npc';
   const hasNpcInfo = isNpcMarker && !!npcData;
@@ -106,6 +114,14 @@ const MapMarkerItem = ({
   const isNpcMovable = isNpcMarker && editMode && canEdit && !isDeleting;
 
   useEffect(() => {
+    if (!isNpcHoverOpen) pointerInPopupRef.current = false;
+    if (isNpcHoverOpen && focusPopupOnOpenRef.current) {
+      focusPopupOnOpenRef.current = false;
+      popupRef.current?.focus({ preventScroll: true });
+    }
+  }, [isNpcHoverOpen, popupRef]);
+
+  useEffect(() => {
     setIsNpcImageBroken(false);
   }, [npcImageUrl, marker?.id]);
 
@@ -117,28 +133,46 @@ const MapMarkerItem = ({
   };
 
   const openNpcHoverCard = () => {
-    if (!hasNpcInfo || isDeleting) return;
+    if (isDeleting || dismissedRef.current) return;
     clearNpcHoverClose();
     setIsNpcHoverOpen(true);
   };
 
   const scheduleNpcHoverClose = () => {
-    if (!hasNpcInfo) return;
     clearNpcHoverClose();
     hoverCloseTimerRef.current = setTimeout(() => {
+      if (triggerRef.current?.contains(document.activeElement)
+        || popupRef.current?.contains(document.activeElement)
+        || pointerInMarkerRef.current
+        || pointerInPopupRef.current) return;
       setIsNpcHoverOpen(false);
       hoverCloseTimerRef.current = null;
     }, NPC_HOVER_CLOSE_DELAY_MS);
   };
 
   useEffect(() => {
-    if (isDeleting || !hasNpcInfo) {
+    if (isDeleting) {
       clearNpcHoverClose();
       setIsNpcHoverOpen(false);
     }
-  }, [isDeleting, hasNpcInfo]);
+  }, [isDeleting]);
 
   useEffect(() => () => clearNpcHoverClose(), []);
+
+  useEffect(() => {
+    if (!isNpcHoverOpen) return undefined;
+    const dismiss = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismissedRef.current = true;
+      clearNpcHoverClose();
+      setIsNpcHoverOpen(false);
+      if (popupRef.current?.contains(document.activeElement)) triggerRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, [isNpcHoverOpen, popupRef]);
 
   const handleDeleteClick = (e) => {
     e.stopPropagation();
@@ -185,13 +219,48 @@ const MapMarkerItem = ({
     <div
       className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
-      onMouseEnter={openNpcHoverCard}
-      onMouseLeave={scheduleNpcHoverClose}
+      onMouseEnter={() => {
+        pointerInMarkerRef.current = true;
+        openNpcHoverCard();
+      }}
+      onMouseLeave={() => {
+        pointerInMarkerRef.current = false;
+        if (!triggerRef.current?.contains(document.activeElement)) dismissedRef.current = false;
+        scheduleNpcHoverClose();
+      }}
       draggable={isNpcMovable}
       onDragStart={handleNpcMarkerDragStart}
       onDragEnd={handleNpcMarkerDragEnd}
     >
-      <div className={`w-full h-full hover:scale-125 transition-transform duration-200 relative ${isNpcMovable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={hasNpcInfo ? npcNome : (marker.text || 'Segnaposto')}
+        aria-haspopup="dialog"
+        aria-expanded={isNpcHoverOpen}
+        aria-controls={isNpcHoverOpen ? `marker-popup-${scopeLabel}-${marker.id}` : undefined}
+        onFocus={openNpcHoverCard}
+        onBlur={() => {
+          if (!pointerInMarkerRef.current) dismissedRef.current = false;
+          scheduleNpcHoverClose();
+        }}
+        onClick={() => {
+          if (isDeleting) return;
+          dismissedRef.current = false;
+          if (popupRef.current) popupRef.current.focus({ preventScroll: true });
+          else {
+            focusPopupOnOpenRef.current = true;
+            setIsNpcHoverOpen(true);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            popupRef.current?.focus({ preventScroll: true });
+          }
+        }}
+        className={`w-full h-full hover:scale-125 transition-transform duration-200 relative focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200 rounded-full ${isNpcMovable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
+      >
         {hasNpcImage ? (
           <span className="relative block w-full h-full" aria-hidden="true">
             <span className="absolute inset-0 rounded-full bg-black/70 shadow-xl shadow-black/70 scale-110"></span>
@@ -222,14 +291,14 @@ const MapMarkerItem = ({
             Privato
           </span>
         )}
-      </div>
+      </button>
 
       {editMode && canEdit && (
         <>
           <button
             onClick={isDeleting ? handleCancelDelete : handleDeleteClick}
             className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-700 z-30 shadow-md border border-white/20 transition-all duration-200 ${
-              isDeleting ? 'translate-x-6 opacity-100' : 'opacity-0 group-hover/marker:opacity-100'
+              isDeleting ? 'translate-x-6 opacity-100' : 'opacity-0 group-hover/marker:opacity-100 group-focus-within/marker:opacity-100'
             }`}
             title={isDeleting ? 'Annulla' : 'Elimina'}
           >
@@ -248,23 +317,29 @@ const MapMarkerItem = ({
         </>
       )}
 
-      <div
-        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 transition-opacity duration-300 pointer-events-none z-30 ${
-          hasNpcInfo ? 'w-72' : 'w-64'
-        } ${
-          isDeleting
-            ? 'opacity-0'
-            : hasNpcInfo
-              ? (isNpcHoverOpen ? 'opacity-100' : 'opacity-0')
-              : 'opacity-0 group-hover/marker:opacity-100'
-        }`}
+      {isNpcHoverOpen && !isDeleting && createPortal(<div
+        ref={popupRef}
+        id={`marker-popup-${scopeLabel}-${marker.id}`}
+        role="dialog"
+        aria-label={hasNpcInfo ? npcNome : (marker.text || 'Segnaposto')}
+        tabIndex={0}
+        className="z-[140] rounded-lg shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200"
+        style={popupStyle}
+        onMouseEnter={() => {
+          pointerInPopupRef.current = true;
+          clearNpcHoverClose();
+        }}
+        onMouseLeave={() => {
+          pointerInPopupRef.current = false;
+          scheduleNpcHoverClose();
+        }}
+        onFocus={clearNpcHoverClose}
+        onBlur={scheduleNpcHoverClose}
       >
         {hasNpcInfo ? (
           <div
-            className="w-72 max-h-56 overflow-y-auto pointer-events-auto bg-slate-950/95 text-white p-3 rounded-lg border border-slate-600/70 shadow-xl text-xs leading-relaxed relative"
+            className="bg-slate-950/95 text-white p-3 rounded-lg border border-slate-600/70 text-xs leading-relaxed relative"
             style={{ borderColor: markerColor }}
-            onMouseEnter={openNpcHoverCard}
-            onMouseLeave={scheduleNpcHoverClose}
           >
             <div className="flex items-start gap-2 pb-2 border-b border-slate-700/70">
               <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-500/70 bg-slate-800/80 shrink-0">
@@ -301,7 +376,6 @@ const MapMarkerItem = ({
               <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Notes</p>
               <p className="text-[12px] text-slate-300 whitespace-pre-wrap break-words">{npcNotes}</p>
             </div>
-            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-950/95"></div>
           </div>
         ) : (
           <div
@@ -309,10 +383,9 @@ const MapMarkerItem = ({
             style={{ borderColor: markerColor }}
           >
             {marker.text}
-            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
           </div>
         )}
-      </div>
+      </div>, document.body)}
     </div>
   );
 };

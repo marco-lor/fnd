@@ -37,14 +37,12 @@ import {
   hasCanonicalTask07MediaAssetId,
 } from '../common/canonicalMediaAsset';
 import useObjectUrl from '../common/useObjectUrl';
+import useViewportPopup from './useViewportPopup';
 
 const deleteNpcV2 = getCallable('deleteNpcV2');
 
 const MAX_NPC_IMAGE_BYTES = 5 * 1024 * 1024;
 const HOVER_CARD_WIDTH = 344;
-const HOVER_CARD_MIN_HEIGHT = 236;
-const HOVER_GAP = 12;
-const HOVER_VIEWPORT_PADDING = 8;
 const HOVER_CLOSE_DELAY_MS = 120;
 const SIDEBAR_BOTTOM_GAP = 8;
 const SIDEBAR_FADE_HEIGHT = 56;
@@ -64,38 +62,14 @@ const parseStoragePathFromUrl = (url) => {
 
 const getNpcStoragePath = (npc) => npc?.imagePath || parseStoragePathFromUrl(npc?.imageUrl || '');
 
-const computeHoverPosition = (anchorRect) => {
-  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1366;
-  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
-
-  let direction = 'right';
-  let left = anchorRect.right + HOVER_GAP;
-  if (left + HOVER_CARD_WIDTH > viewportWidth - HOVER_VIEWPORT_PADDING) {
-    direction = 'left';
-    left = anchorRect.left - HOVER_GAP - HOVER_CARD_WIDTH;
-  }
-
-  left = Math.max(
-    HOVER_VIEWPORT_PADDING,
-    Math.min(left, viewportWidth - HOVER_CARD_WIDTH - HOVER_VIEWPORT_PADDING)
-  );
-
-  const preferredTop = anchorRect.top + (anchorRect.height / 2) - (HOVER_CARD_MIN_HEIGHT / 2);
-  const top = Math.max(
-    HOVER_VIEWPORT_PADDING,
-    Math.min(preferredTop, viewportHeight - HOVER_CARD_MIN_HEIGHT - HOVER_VIEWPORT_PADDING)
-  );
-
-  return { left, top, direction };
-};
-
 const NpcTile = ({
   npc,
   isActive,
   isDimmed,
   onHoverStart,
   onHoverEnd,
-  onTileEnter,
+  onEnterPopup,
+  onActivate,
   canDragToMap,
   onNpcDragStart,
   onNpcDragEnd
@@ -138,15 +112,23 @@ const NpcTile = ({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onMouseEnter={(e) => {
-          onTileEnter(npc.id);
-          onHoverStart(npc, e.currentTarget);
+          onHoverStart(npc, e.currentTarget, 'pointer');
         }}
-        onMouseLeave={onHoverEnd}
+        onMouseLeave={(e) => onHoverEnd(e, 'pointer')}
         onFocus={(e) => {
-          onTileEnter(npc.id);
-          onHoverStart(npc, e.currentTarget);
+          onHoverStart(npc, e.currentTarget, 'focus');
         }}
-        onBlur={onHoverEnd}
+        onClick={(e) => onActivate(npc, e.currentTarget)}
+        onBlur={(e) => onHoverEnd(e, 'focus')}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            onEnterPopup();
+          }
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={isActive}
+        aria-controls={isActive ? `npc-sidebar-popup-${npc.id}` : undefined}
         className={`w-full px-2 py-2 flex items-center gap-2 text-left transition-opacity duration-300 ease-out motion-reduce:transition-none ${
           canDragToMap ? 'cursor-grab active:cursor-grabbing' : ''
         }`}
@@ -181,7 +163,8 @@ const NpcTile = ({
 const NpcHoverPortal = ({
   open,
   npc,
-  position,
+  popupRef,
+  popupStyle,
   direction,
   canEditNpc,
   canDeleteNpc,
@@ -190,28 +173,33 @@ const NpcHoverPortal = ({
   onDelete,
   onOpenImageZoom,
   onMouseEnter,
-  onMouseLeave
+  onMouseLeave,
+  onFocus,
+  onBlur
 }) => {
   const prefersReducedMotion = useReducedMotion();
   if (typeof document === 'undefined') return null;
 
-  const hoverOffsetX = direction === 'left' ? 10 : -10;
-
   return createPortal(
-    <AnimatePresence>
-      {open && npc && position && (
+    open && npc ? (
         <motion.div
-          key={`${npc.id}-${direction}`}
+          key={npc.id}
+          ref={popupRef}
+          id={`npc-sidebar-popup-${npc.id}`}
+          role="dialog"
+          aria-label={`NPC: ${getNpcNome(npc)}`}
+          tabIndex={-1}
           className="fixed z-[140]"
-          style={{ left: `${position.left}px`, top: `${position.top}px`, width: `${HOVER_CARD_WIDTH}px` }}
+          style={popupStyle}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
-          initial={prefersReducedMotion ? { opacity: 1, x: 0, y: 0, scale: 1 } : { opacity: 0, x: hoverOffsetX, y: 6, scale: 0.97 }}
-          animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
-          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: hoverOffsetX * -0.5, y: 4, scale: 0.985 }}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          initial={{ opacity: prefersReducedMotion ? 1 : 0 }}
+          animate={{ opacity: 1 }}
           transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4 max-h-[72vh] overflow-y-auto">
+          <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4">
             <div className="flex items-start gap-3">
               <div className="group/portrait relative w-16 h-16 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
                 {hasMediaAsset(npc, { variant: 'thumbnail' }) ? (
@@ -296,8 +284,7 @@ const NpcHoverPortal = ({
             </div>
           </div>
         </motion.div>
-      )}
-    </AnimatePresence>,
+      ) : null,
     document.body
   );
 };
@@ -603,8 +590,22 @@ export default function NpcSidebar({
   const [isListHovered, setIsListHovered] = useState(false);
   const [zoomedNpcImage, setZoomedNpcImage] = useState(null);
   const hoverCloseTimerRef = useRef(null);
+  const hoverAnchorRef = useRef(null);
+  const pointerAnchorRef = useRef(null);
+  const pointerInPopupRef = useRef(false);
+  const dismissedAnchorRef = useRef(null);
+  const focusPopupOnOpenRef = useRef(false);
+  const { popupRef, popupStyle, direction } = useViewportPopup(npcHover?.anchorEl, !!npcHover, HOVER_CARD_WIDTH);
   const createImagePreviewUrl = useObjectUrl(createImageFile);
   const editImagePreviewUrl = useObjectUrl(editImageFile);
+
+  useEffect(() => {
+    if (!npcHover) pointerInPopupRef.current = false;
+    if (npcHover && focusPopupOnOpenRef.current) {
+      focusPopupOnOpenRef.current = false;
+      popupRef.current?.focus({ preventScroll: true });
+    }
+  }, [npcHover, popupRef]);
 
   useEffect(() => {
     if (!user) {
@@ -674,31 +675,21 @@ export default function NpcSidebar({
   }, [zoomedNpcImage]);
 
   useEffect(() => {
-    if (!npcHover?.anchorEl) return undefined;
-
-    const updateHoverPosition = () => {
-      const rect = npcHover.anchorEl.getBoundingClientRect();
-      const { left, top, direction } = computeHoverPosition(rect);
-      setNpcHover((prev) => {
-        if (!prev) return prev;
-        if (prev.anchorEl !== npcHover.anchorEl) return prev;
-        return {
-          ...prev,
-          position: { left, top },
-          direction
-        };
-      });
+    const anchor = npcHover?.anchorEl;
+    if (!anchor || zoomedNpcImage) return undefined;
+    const dismiss = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismissedAnchorRef.current = anchor;
+      clearTimeout(hoverCloseTimerRef.current);
+      setNpcHover(null);
+      setHoveredNpcId('');
+      if (popupRef.current?.contains(document.activeElement)) anchor.focus({ preventScroll: true });
     };
-
-    updateHoverPosition();
-    window.addEventListener('resize', updateHoverPosition);
-    window.addEventListener('scroll', updateHoverPosition, true);
-
-    return () => {
-      window.removeEventListener('resize', updateHoverPosition);
-      window.removeEventListener('scroll', updateHoverPosition, true);
-    };
-  }, [npcHover?.anchorEl]);
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, [npcHover?.anchorEl, zoomedNpcImage, popupRef]);
 
   const role = (userData?.role || '').toLowerCase();
 
@@ -731,25 +722,36 @@ export default function NpcSidebar({
   const scheduleNpcHoverClose = () => {
     clearHoverCloseTimer();
     hoverCloseTimerRef.current = setTimeout(() => {
+      const anchor = hoverAnchorRef.current;
+      if (anchor?.contains(document.activeElement)
+        || popupRef.current?.contains(document.activeElement)
+        || pointerInPopupRef.current
+        || (anchor && pointerAnchorRef.current === anchor)) return;
       setNpcHover(null);
       setHoveredNpcId('');
       hoverCloseTimerRef.current = null;
     }, HOVER_CLOSE_DELAY_MS);
   };
 
-  const openNpcHover = (npc, anchorEl) => {
+  const openNpcHover = (npc, anchorEl, source) => {
     if (!npc || !anchorEl) return;
-
+    if (source === 'pointer') pointerAnchorRef.current = anchorEl;
+    if (dismissedAnchorRef.current === anchorEl) return;
     clearHoverCloseTimer();
+    hoverAnchorRef.current = anchorEl;
     setHoveredNpcId(npc.id);
-    const anchorRect = anchorEl.getBoundingClientRect();
-    const { left, top, direction } = computeHoverPosition(anchorRect);
-    setNpcHover({
-      npc,
-      anchorEl,
-      position: { left, top },
-      direction
-    });
+    setNpcHover({ npc, anchorEl });
+  };
+
+  const handleTileLeave = (event, source) => {
+    if (source === 'pointer') pointerAnchorRef.current = null;
+    const anchor = event.currentTarget;
+    if (dismissedAnchorRef.current === anchor
+      && pointerAnchorRef.current !== anchor
+      && (source === 'focus' || !anchor.contains(document.activeElement))) {
+      dismissedAnchorRef.current = null;
+    }
+    scheduleNpcHoverClose();
   };
 
   const handleNpcListMouseEnter = () => {
@@ -1206,7 +1208,7 @@ export default function NpcSidebar({
   return (
     <div className="self-stretch">
       <aside
-        className="z-40 h-auto lg:sticky lg:h-[calc(100vh-var(--npc-offset))]"
+        className="z-40 h-[min(24rem,60vh)] lg:sticky lg:h-[calc(100vh-var(--npc-offset))]"
         style={{ top: sidebarTop, '--npc-offset': sidebarOffset }}
       >
         <div className="bg-slate-900/85 border border-slate-700 rounded-2xl shadow-2xl backdrop-blur-sm flex flex-col overflow-hidden h-full">
@@ -1253,11 +1255,16 @@ export default function NpcSidebar({
                     <NpcTile
                       key={npc.id}
                       npc={npc}
-                      isActive={hoveredNpcId === npc.id}
+                      isActive={npcHover?.npc?.id === npc.id}
                       isDimmed={!!hoveredNpcId && hoveredNpcId !== npc.id}
                       onHoverStart={openNpcHover}
-                      onHoverEnd={scheduleNpcHoverClose}
-                      onTileEnter={setHoveredNpcId}
+                      onHoverEnd={handleTileLeave}
+                      onEnterPopup={() => popupRef.current?.focus({ preventScroll: true })}
+                      onActivate={(selectedNpc, anchor) => {
+                        dismissedAnchorRef.current = null;
+                        focusPopupOnOpenRef.current = true;
+                        openNpcHover(selectedNpc, anchor, 'activation');
+                      }}
                       canDragToMap={canDragToMap}
                       onNpcDragStart={onNpcDragStart}
                       onNpcDragEnd={onNpcDragEnd}
@@ -1312,16 +1319,25 @@ export default function NpcSidebar({
       <NpcHoverPortal
         open={!!npcHover}
         npc={npcHover?.npc || null}
-        position={npcHover?.position || null}
-        direction={npcHover?.direction || 'right'}
+        popupRef={popupRef}
+        popupStyle={popupStyle}
+        direction={direction}
         canEditNpc={canEditNpc}
         canDeleteNpc={canDeleteNpc}
         isDeleting={deletingNpcId === npcHover?.npc?.id}
         onEdit={handleOpenNpcEdit}
         onDelete={handleDeleteNpc}
         onOpenImageZoom={openNpcImageZoom}
-        onMouseEnter={clearHoverCloseTimer}
-        onMouseLeave={scheduleNpcHoverClose}
+        onMouseEnter={() => {
+          pointerInPopupRef.current = true;
+          clearHoverCloseTimer();
+        }}
+        onMouseLeave={() => {
+          pointerInPopupRef.current = false;
+          scheduleNpcHoverClose();
+        }}
+        onFocus={clearHoverCloseTimer}
+        onBlur={scheduleNpcHoverClose}
       />
 
       <NpcImageZoomModal imageData={zoomedNpcImage} onClose={closeNpcImageZoom} />

@@ -1,10 +1,11 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import EchiDiViaggio from './EchiDiViaggio';
 import { useAuth } from '../../AuthContext';
 import { useShellLayout } from '../common/shellLayout';
 import NpcSidebar from './NpcSidebar';
 import { useMapEditing } from './MapEditor';
+import { onSnapshot } from '../../performance/firestore';
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
@@ -30,7 +31,7 @@ jest.mock('../firebaseConfig', () => ({
 }));
 jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
-jest.mock('firebase/firestore', () => ({
+jest.mock('../../performance/firestore', () => ({
   collection: jest.fn((db, path) => ({ path })),
   onSnapshot: jest.fn((target, onNext) => {
     onNext({ docs: [] });
@@ -68,9 +69,84 @@ describe('EchiDiViaggio', () => {
     useShellLayout.mockReturnValue({
       topInset: 96,
     });
-    useMapEditing
-      .mockReturnValueOnce(buildMapEditingState())
-      .mockReturnValueOnce(buildMapEditingState());
+    useMapEditing.mockReset();
+    useMapEditing.mockReturnValue(buildMapEditingState());
+    onSnapshot.mockImplementation((target, onNext) => {
+      onNext({ docs: [] });
+      return () => {};
+    });
+  });
+
+  test('opens an edge marker with keyboard focus in a viewport-bounded portal outside map clipping', () => {
+    const state = buildMapEditingState();
+    state.markers = [{ id: 'edge-marker', mapId: 'art', x: 0, y: 0, text: 'Edge lookout', iconType: 'pin' }];
+    useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
+    const { container } = render(<EchiDiViaggio />);
+    const marker = screen.getByRole('button', { name: /Edge lookout/ });
+    act(() => marker.focus());
+    const popup = screen.getByRole('dialog', { name: /Edge lookout/ });
+    expect(popup).toHaveTextContent('Edge lookout');
+    expect(document.body).toContainElement(popup);
+    expect(container).not.toContainElement(popup);
+    expect(popup).toHaveStyle({ position: 'fixed', overflowY: 'auto' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /Edge lookout/ })).not.toBeInTheDocument();
+    expect(marker).toHaveFocus();
+    fireEvent.focus(marker);
+    expect(screen.queryByRole('dialog', { name: /Edge lookout/ })).not.toBeInTheDocument();
+    fireEvent.click(marker);
+    expect(screen.getByRole('dialog', { name: /Edge lookout/ })).toHaveFocus();
+  });
+
+  test('keeps NPC final notes available when focus enters a marker popup and cleans up on unmount', () => {
+    jest.useFakeTimers();
+    try {
+      const state = buildMapEditingState();
+      state.markers = [{ id: 'npc-marker', mapId: 'art', x: 100, y: 100, npcId: 'guide', markerType: 'npc' }];
+      useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
+      onSnapshot.mockImplementation((target, onNext) => {
+        onNext({ docs: [{ id: 'guide', data: () => ({ nome: 'Guide', notes: 'Last marker note' }) }] });
+        return () => {};
+      });
+      const { unmount } = render(<EchiDiViaggio />);
+      const marker = screen.getByRole('button', { name: /Guide/ });
+      act(() => marker.focus());
+      const popup = screen.getByRole('dialog', { name: /Guide/ });
+      expect(popup).toHaveTextContent('Last marker note');
+      act(() => popup.focus());
+      fireEvent.mouseLeave(marker);
+      act(() => jest.advanceTimersByTime(300));
+      expect(popup).toHaveFocus();
+      expect(popup).toBeInTheDocument();
+      unmount();
+      act(() => jest.runOnlyPendingTimers());
+      expect(popup).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('a marker dismissed under the pointer closes normally after a later visit', () => {
+    jest.useFakeTimers();
+    try {
+      const state = buildMapEditingState();
+      state.markers = [{ id: 'edge-marker', mapId: 'art', x: 0, y: 0, text: 'Edge lookout', iconType: 'pin' }];
+      useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
+      render(<EchiDiViaggio />);
+      const marker = screen.getByRole('button', { name: /Edge lookout/ });
+      fireEvent.mouseEnter(marker);
+      fireEvent.mouseLeave(marker);
+      fireEvent.mouseEnter(screen.getByRole('dialog', { name: /Edge lookout/ }));
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.mouseLeave(marker);
+      fireEvent.mouseEnter(marker);
+      expect(screen.getByRole('dialog', { name: /Edge lookout/ })).toBeInTheDocument();
+      fireEvent.mouseLeave(marker);
+      act(() => jest.advanceTimersByTime(300));
+      expect(screen.queryByRole('dialog', { name: /Edge lookout/ })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('uses shell metrics for sticky offsets instead of querying the legacy navbar', () => {
