@@ -68,7 +68,6 @@ const NpcTile = ({
   isDimmed,
   onHoverStart,
   onHoverEnd,
-  onEnterPopup,
   onActivate,
   canDragToMap,
   onNpcDragStart,
@@ -123,7 +122,7 @@ const NpcTile = ({
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
-            onEnterPopup();
+            onActivate(npc, e.currentTarget);
           }
         }}
         aria-haspopup="dialog"
@@ -735,9 +734,16 @@ export default function NpcSidebar({
 
   const openNpcHover = (npc, anchorEl, source) => {
     if (!npc || !anchorEl) return;
-    if (source === 'pointer') pointerAnchorRef.current = anchorEl;
+    if (source === 'pointer') {
+      pointerAnchorRef.current = anchorEl;
+      // Hover must not replace the tile or popup currently owned by focus.
+      if (hoverAnchorRef.current !== anchorEl
+        && (hoverAnchorRef.current?.contains(document.activeElement)
+          || popupRef.current?.contains(document.activeElement))) return;
+    }
     if (dismissedAnchorRef.current === anchorEl) return;
     clearHoverCloseTimer();
+    if (hoverAnchorRef.current !== anchorEl) pointerInPopupRef.current = false;
     hoverAnchorRef.current = anchorEl;
     setHoveredNpcId(npc.id);
     setNpcHover({ npc, anchorEl });
@@ -1259,7 +1265,6 @@ export default function NpcSidebar({
                       isDimmed={!!hoveredNpcId && hoveredNpcId !== npc.id}
                       onHoverStart={openNpcHover}
                       onHoverEnd={handleTileLeave}
-                      onEnterPopup={() => popupRef.current?.focus({ preventScroll: true })}
                       onActivate={(selectedNpc, anchor) => {
                         dismissedAnchorRef.current = null;
                         focusPopupOnOpenRef.current = true;

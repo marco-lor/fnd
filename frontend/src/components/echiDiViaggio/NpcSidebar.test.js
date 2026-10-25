@@ -81,11 +81,11 @@ describe('NpcSidebar', () => {
     });
   });
 
-  const renderWithNpc = () => {
+  const renderWithNpc = (extraNpcs = []) => {
     onSnapshot.mockImplementation((target, onNext) => {
       onNext({ docs: [{ id: 'npc-guide', data: () => ({
         nome: 'Guide', description: 'A local guide', notes: 'Final note',
-      }) }] });
+      }) }, ...extraNpcs] });
       return () => {};
     });
     return render(<NpcSidebar user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} stickyOffset={104} />);
@@ -112,6 +112,66 @@ describe('NpcSidebar', () => {
       bounds.mockRestore();
       window.innerWidth = originalWidth;
       window.innerHeight = originalHeight;
+    }
+  });
+
+  test('keeps the focused NPC action owner when a different tile is hovered', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+      const guide = screen.getByRole('button', { name: /Guide/ });
+      const scout = screen.getByRole('button', { name: /Scout/ });
+      act(() => guide.focus());
+      const guidePopup = screen.getByRole('dialog', { name: 'NPC: Guide' });
+      const editGuide = screen.getByRole('button', { name: 'Edit' });
+      act(() => editGuide.focus());
+      fireEvent.mouseEnter(scout);
+      fireEvent.mouseLeave(scout);
+      act(() => jest.advanceTimersByTime(300));
+      expect(editGuide).toHaveFocus();
+      expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toBe(guidePopup);
+      expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('ArrowDown enters its initiating NPC after a different tile is hovered', () => {
+    renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+    const guide = screen.getByRole('button', { name: /Guide/ });
+    const scout = screen.getByRole('button', { name: /Scout/ });
+    act(() => guide.focus());
+    fireEvent.mouseEnter(scout);
+    fireEvent.keyDown(guide, { key: 'ArrowDown' });
+    expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toHaveFocus();
+    expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(guide).toHaveFocus();
+    fireEvent.keyDown(guide, { key: 'ArrowDown' });
+    expect(screen.getByRole('dialog', { name: 'NPC: Guide' })).toHaveFocus();
+  });
+
+  test('explicit activation can select another NPC while the first popup owns focus', () => {
+    jest.useFakeTimers();
+    try {
+      renderWithNpc([{ id: 'npc-scout', data: () => ({ nome: 'Scout', notes: 'Scout note' }) }]);
+      const guide = screen.getByRole('button', { name: /Guide/ });
+      const scout = screen.getByRole('button', { name: /Scout/ });
+      act(() => guide.focus());
+      act(() => screen.getByRole('button', { name: 'Edit' }).focus());
+      fireEvent.mouseEnter(screen.getByRole('dialog', { name: 'NPC: Guide' }));
+      fireEvent.click(scout);
+      expect(screen.getByRole('dialog', { name: 'NPC: Scout' })).toHaveFocus();
+      expect(screen.queryByRole('dialog', { name: 'NPC: Guide' })).not.toBeInTheDocument();
+      act(() => screen.getByRole('button', { name: '+ Add NPC' }).focus());
+      act(() => jest.advanceTimersByTime(300));
+      expect(screen.queryByRole('dialog', { name: 'NPC: Scout' })).not.toBeInTheDocument();
+      fireEvent.click(scout);
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      expect(screen.getByDisplayValue('Scout')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Scout note')).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
     }
   });
 

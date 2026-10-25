@@ -126,22 +126,23 @@ describe('EchiDiViaggio', () => {
     }
   });
 
-  test('a marker dismissed under the pointer closes normally after a later visit', () => {
+  test('a marker closes after Escape in its portal, explicit reopening and outside focus without another marker leave', () => {
     jest.useFakeTimers();
     try {
       const state = buildMapEditingState();
       state.markers = [{ id: 'edge-marker', mapId: 'art', x: 0, y: 0, text: 'Edge lookout', iconType: 'pin' }];
       useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
-      render(<EchiDiViaggio />);
+      render(<><button type="button">Outside marker controls</button><EchiDiViaggio /></>);
       const marker = screen.getByRole('button', { name: /Edge lookout/ });
       fireEvent.mouseEnter(marker);
-      fireEvent.mouseLeave(marker);
-      fireEvent.mouseEnter(screen.getByRole('dialog', { name: /Edge lookout/ }));
+      const popup = screen.getByRole('dialog', { name: /Edge lookout/ });
+      fireEvent.mouseLeave(marker, { relatedTarget: popup });
+      fireEvent.mouseEnter(popup, { relatedTarget: marker });
       fireEvent.keyDown(document, { key: 'Escape' });
-      fireEvent.mouseLeave(marker);
-      fireEvent.mouseEnter(marker);
-      expect(screen.getByRole('dialog', { name: /Edge lookout/ })).toBeInTheDocument();
-      fireEvent.mouseLeave(marker);
+      expect(popup).not.toBeInTheDocument();
+      fireEvent.click(marker);
+      expect(screen.getByRole('dialog', { name: /Edge lookout/ })).toHaveFocus();
+      act(() => screen.getByRole('button', { name: 'Outside marker controls' }).focus());
       act(() => jest.advanceTimersByTime(300));
       expect(screen.queryByRole('dialog', { name: /Edge lookout/ })).not.toBeInTheDocument();
     } finally {

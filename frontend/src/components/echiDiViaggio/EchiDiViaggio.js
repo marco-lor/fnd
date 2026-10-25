@@ -219,15 +219,6 @@ const MapMarkerItem = ({
     <div
       className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
-      onMouseEnter={() => {
-        pointerInMarkerRef.current = true;
-        openNpcHoverCard();
-      }}
-      onMouseLeave={() => {
-        pointerInMarkerRef.current = false;
-        if (!triggerRef.current?.contains(document.activeElement)) dismissedRef.current = false;
-        scheduleNpcHoverClose();
-      }}
       draggable={isNpcMovable}
       onDragStart={handleNpcMarkerDragStart}
       onDragEnd={handleNpcMarkerDragEnd}
@@ -239,6 +230,15 @@ const MapMarkerItem = ({
         aria-haspopup="dialog"
         aria-expanded={isNpcHoverOpen}
         aria-controls={isNpcHoverOpen ? `marker-popup-${scopeLabel}-${marker.id}` : undefined}
+        onMouseEnter={() => {
+          pointerInMarkerRef.current = true;
+          openNpcHoverCard();
+        }}
+        onMouseLeave={() => {
+          pointerInMarkerRef.current = false;
+          if (!triggerRef.current?.contains(document.activeElement)) dismissedRef.current = false;
+          scheduleNpcHoverClose();
+        }}
         onFocus={openNpcHoverCard}
         onBlur={() => {
           if (!pointerInMarkerRef.current) dismissedRef.current = false;
