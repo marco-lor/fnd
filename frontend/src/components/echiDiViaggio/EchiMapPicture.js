@@ -137,7 +137,12 @@ function EchiMapPicture({ mapId, alt, eager = false, children, className = '', s
       && attemptRef.current === currentAttempt;
     try {
       if (typeof image.decode === 'function') await image.decode();
-      if (isCurrentRequest()) setLoaded(true);
+      if (isCurrentRequest()) {
+        const selectedIndex = selectedAttempt(candidate, currentAttempt);
+        attemptRef.current = selectedIndex;
+        setAttempt((previous) => ({ ...previous, index: selectedIndex }));
+        setLoaded(true);
+      }
     } catch {
       if (isCurrentRequest()) failImage(image);
     }

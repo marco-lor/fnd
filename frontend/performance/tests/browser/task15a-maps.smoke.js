@@ -122,6 +122,17 @@ async function withEchi({ browser, baseURL }, testInfo, options, run) {
     reducedMotion: 'reduce',
   });
   await installDeterministicFontRoutes(context);
+  if (options.nativeMediaExclusions) {
+    await context.addInitScript((excludedTypes) => {
+      const setAttribute = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function assignSourceMedia(name, value) {
+        if (this instanceof HTMLSourceElement && name === 'type' && excludedTypes.includes(value)) {
+          setAttribute.call(this, 'media', 'not all');
+        }
+        return setAttribute.call(this, name, value);
+      };
+    }, options.nativeMediaExclusions);
+  }
   await installBootstrap(context, { id: 'echi-di-viaggio', role, route: ECHI_ROUTE }, 1);
   const entries = await installMapTraffic(context, options);
   const page = await context.newPage();
@@ -528,6 +539,42 @@ for (const profile of [
       expect(entries.filter(({ format }) => format === 'png')).toEqual([]);
       assertNoRetiredAttempts(entries);
     });
+  });
+}
+
+for (const selectedFormat of ['webp', 'png']) {
+  test(`Task 15A native media selection reports ${selectedFormat} without replacing picture sources`, async ({ browser, baseURL }, testInfo) => {
+    let releaseArt;
+    const beforeFirstArt = new Promise((resolve) => { releaseArt = resolve; });
+    const nativeMediaExclusions = selectedFormat === 'png' ? ['image/avif', 'image/webp'] : ['image/avif'];
+    try {
+      await withEchi({ browser, baseURL }, testInfo, { beforeFirstArt, releaseFirstArt: releaseArt, nativeMediaExclusions }, async ({ page, art, entries }) => {
+        // Nonmatching media queries exercise the browser's own source skipping;
+        // this does not claim that the engine lacks support for either MIME.
+        const picture = await art.locator('picture').elementHandle();
+        const image = await art.locator('picture img').elementHandle();
+        const sources = await art.locator('picture source').elementHandles();
+        const sourceUrls = await art.locator('picture source').evaluateAll((elements) => elements.map((source) => source.getAttribute('srcset')));
+        await expect(art).toHaveAttribute('data-map-format', 'avif');
+        releaseArt();
+        await expect(art).toHaveAttribute('data-map-state', 'loaded');
+        await expect(art).toHaveAttribute('data-map-format', selectedFormat);
+        expect(await image.evaluate((element) => element.currentSrc)).toMatch(new RegExp(`\\.${selectedFormat}(?:[?#]|$)`));
+        await page.setViewportSize({ width: 1180, height: 720 });
+        await settleTraffic(page, entries);
+        await expect(art).toHaveAttribute('data-map-state', 'loaded');
+        await expect(art).toHaveAttribute('data-map-format', selectedFormat);
+        expect(await art.locator('picture').evaluate((element, original) => element === original, picture)).toBe(true);
+        expect(await art.locator('picture img').evaluate((element, original) => element === original, image)).toBe(true);
+        expect(await art.locator('picture source').evaluateAll((elements, originals) => elements.length === originals.length && elements.every((element, index) => element === originals[index]), sources)).toBe(true);
+        expect(await art.locator('picture source').evaluateAll((elements) => elements.map((source) => source.getAttribute('srcset')))).toEqual(sourceUrls);
+        const artEntries = entries.filter(({ mapId }) => mapId === 'art');
+        expect(artEntries.every(({ format }) => format === selectedFormat)).toBe(true);
+        if (selectedFormat === 'png') expect(artEntries).toHaveLength(1);
+      });
+    } finally {
+      releaseArt();
+    }
   });
 }
 
