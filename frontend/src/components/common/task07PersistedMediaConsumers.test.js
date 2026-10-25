@@ -27,7 +27,9 @@ const directTagAllowlist = new Set([
 
   // These tags render imported assets or object URLs created from a selected File.
   'dmDashboard/elements/playerInfo/overlays/AddVarieItemOverlay.js',
-  'echiDiViaggio/EchiDiViaggio.js',
+  // Static imported maps own exact marker geometry and one-way picture activation;
+  // they have no persisted registry media descriptor for MediaImage to consume.
+  'echiDiViaggio/EchiMapPicture.js',
   'echiDiViaggio/NpcSidebar.js',
   'home/elements/Inventory.js',
 

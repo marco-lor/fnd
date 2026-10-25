@@ -2,8 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot } from '../../performance/firestore';
 import { useAuth } from '../../AuthContext';
-import mappaArt from '../../assets/images/maps/mappa_art.png';
-import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
+import EchiMapPicture from './EchiMapPicture';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
 import NpcSidebar from './NpcSidebar';
 import { db } from '../firebaseConfig';
@@ -654,18 +653,14 @@ function EchiDiViaggio() {
               <h2 className="text-2xl font-serif text-[#FFA500] mb-6 border-b border-gray-600 pb-2">
                 Mappa Artistica
               </h2>
-              <div
-                className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group"
+              <EchiMapPicture
+                mapId="art"
+                alt="Mappa Artistica"
+                eager
+                className={`relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group ${isDragging ? 'cursor-crosshair' : ''}`}
                 onDragOver={handleMapDragOver}
                 onDrop={(e) => handleMapDrop(e, 'art')}
               >
-                <img
-                  src={mappaArt}
-                  alt="Mappa Artistica"
-                  className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${
-                    isDragging ? 'cursor-crosshair' : 'hover:scale-[1.01]'
-                  }`}
-                />
                 {renderMarkersForMap(publicMarkers, {
                   mapId: 'art',
                   editMode: publicEditMode,
@@ -686,25 +681,20 @@ function EchiDiViaggio() {
                   onNpcMoveDragStart: handleNpcMoveDragStart,
                   onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
-              </div>
+              </EchiMapPicture>
             </div>
 
             <div className="bg-gray-800/80 p-2 rounded-2xl border border-gray-700 shadow-2xl backdrop-blur-sm">
               <h2 className="text-2xl font-serif text-[#FFA500] mb-6 border-b border-gray-600 pb-2">
                 Mappa Dettagliata
               </h2>
-              <div
-                className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group"
+              <EchiMapPicture
+                mapId="precisa"
+                alt="Mappa Dettagliata"
+                className={`relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group ${isDragging ? 'cursor-crosshair' : ''}`}
                 onDragOver={handleMapDragOver}
                 onDrop={(e) => handleMapDrop(e, 'precisa')}
               >
-                <img
-                  src={mappaPrecisa}
-                  alt="Mappa Dettagliata"
-                  className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${
-                    isDragging ? 'cursor-crosshair' : 'hover:scale-[1.01]'
-                  }`}
-                />
                 {renderMarkersForMap(publicMarkers, {
                   mapId: 'precisa',
                   editMode: publicEditMode,
@@ -725,7 +715,7 @@ function EchiDiViaggio() {
                   onNpcMoveDragStart: handleNpcMoveDragStart,
                   onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
-              </div>
+              </EchiMapPicture>
             </div>
           </div>
         </div>
