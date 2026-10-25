@@ -12,8 +12,12 @@ const digest = (v: any) => createHash('sha256').update(JSON.stringify(canonical(
 const signature = (v: any, key: string) => createHmac('sha256', key).update(JSON.stringify(canonical(v))).digest('hex');
 const fail = (s: string): never => { throw new HttpsError('failed-precondition', s); };
 const id = (v: any) => typeof v === 'string' && v.length > 0 && v.length < 1500 && !v.includes('/') ? v : fail('Invalid catalog ID.');
-const active = (m: Row) => { if (m.state !== 'active' || m.schemaVersion !== VERSION || m.collation !== COLLATION || m.icu !== process.versions.icu)
+// ICU identifies the migration runtime, not reader compatibility: rank already
+// materializes that generation's ordering. New ordering writes validate ranks.
+const active = (m: Row) => { if (m.state !== 'active' || m.schemaVersion !== VERSION || m.collation !== COLLATION)
     fail('Catalog migration is incomplete or incompatible.'); };
+const migrationRuntime = (m: Row) => { if (m.icu !== process.versions.icu)
+    fail('Catalog migration ICU differs from this runtime; use the original runtime or rebuild.'); };
 async function actor(tx: admin.firestore.Transaction, db: admin.firestore.Firestore, uid: string) {
     const [u, t] = await tx.getAll(db.doc(`users/${uid}`), db.doc(`user_deletion_jobs/${uid}`));
     if (!u.exists || t.exists || u.get('deletionState') === 'pending')
@@ -120,8 +124,12 @@ export const task09WriteCatalogItem = onCall({ region }, async (r) => {
             if (!isItem(next, itemId))
                 fail('Invalid item shape.');
             const summary = projectSummary({ ...next, id: itemId }, version, 0);
+            const current = summaries.docs.find(d => d.id === itemId)?.data();
+            if (old.exists && (!current || !validSummary(current) || current.id !== itemId))
+                fail('Catalog projection missing or invalid.');
             try {
-                summary.rank = allocateRank(summaries.docs.map(d => d.data()), summary);
+                // Price, visibility, text and nested-media edits do not reorder.
+                summary.rank = old.exists && current && current.name === summary.name ? current.rank : allocateRank(summaries.docs.map(d => d.data()), summary);
             }
             catch (e) {
                 fail(String(e));
@@ -185,10 +193,12 @@ export async function migrateCatalog(db: admin.firestore.Firestore, action: 'beg
         }
         if (action === 'activate' && m.state === 'active') {
             active(m);
+            migrationRuntime(m);
             return { state: 'active', total: m.total };
         }
         if (m.state !== 'building')
             fail('Begin migration first.');
+        migrationRuntime(m);
         const source = await tx.get(db.collection('items').orderBy(FieldPath.documentId()));
         const rows = source.docs.filter(d => isItem(d.data(), d.id)).map(d => projectSummary({ ...d.data(), id: d.id }, d.get('catalogVersion') || 1, 0)).sort(compareNames);
         rows.forEach((d, i) => { d.rank = i * 1024; });
