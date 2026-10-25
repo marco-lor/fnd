@@ -1,5 +1,5 @@
 import {scanTask07MediaTargetReferences} from './mediaAssetLifecycleCore';
-/** Version 1 uses the runtime's en-US ICU collation, pinned in activation metadata. */
+/** Version 1 materializes en-US collation in rank; readers preserve that order. */
 export const VERSION = 1;
 export const COLLATION = 'en-US';
 export type Row = Record<string, any>;
@@ -39,6 +39,10 @@ export function projectSummary(d: Row, version: number, rank: number): Row {
 export const compareNames = (a: Row, b: Row) => a.name.toLowerCase().localeCompare(b.name.toLowerCase(), COLLATION) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 export function allocateRank(rows: Row[], next: Row): number {
     const ordered = rows.filter(r => r.id !== next.id).sort(compareNames);
+    // A runtime update may change collation. Never insert into historical ranks
+    // unless the remaining catalog agrees with the current comparator.
+    if (ordered.some((row, i) => !Number.isFinite(row.rank) || (i > 0 && ordered[i - 1].rank >= row.rank)))
+        throw new Error('Catalog ordering is incompatible with this runtime; rebuild required.');
     const rightIndex = ordered.findIndex(r => compareNames(next, r) < 0);
     const right = rightIndex < 0 ? null : ordered[rightIndex];
     const left = rightIndex < 0 ? ordered[ordered.length - 1] : ordered[rightIndex - 1];
@@ -51,7 +55,7 @@ const selected = (v: any) => Array.isArray(v) && v.length && !v.includes('All') 
 export function evaluateSummaries(rows: Row[], f: Row): Row[] {
     const matches = (key: string, v: any) => !selected(f[key]).length || selected(f[key]).includes(v);
     const score = (r: Row) => selected(f.selectedBaseParams).reduce((s: number, k: string) => s + (r.base[k] || 0), 0) + selected(f.selectedCombatParams).reduce((s: number, k: string) => s + (r.combat[k] || 0), 0);
-    return rows.filter(r => (!String(f.searchTerm || '').trim() || r.searchName.includes(String(f.searchTerm).toLowerCase())) && matches('selectedSlot', r.slot) && matches('selectedHands', r.hands == null ? undefined : String(r.hands)) && matches('selectedTipo', r.tipo) && matches('selectedItemType', r.item_type) && (!selected(f.selectedSpecialParams).length || selected(f.selectedSpecialParams).some((k: string) => r.special.includes(k))) && (!f.onlyAffordable || r.price <= number(f.userGold))).sort((a, b) => score(b) - score(a) || compareNames(a, b));
+    return rows.filter(r => (!String(f.searchTerm || '').trim() || r.searchName.includes(String(f.searchTerm).toLowerCase())) && matches('selectedSlot', r.slot) && matches('selectedHands', r.hands == null ? undefined : String(r.hands)) && matches('selectedTipo', r.tipo) && matches('selectedItemType', r.item_type) && (!selected(f.selectedSpecialParams).length || selected(f.selectedSpecialParams).some((k: string) => r.special.includes(k))) && (!f.onlyAffordable || r.price <= number(f.userGold))).sort((a, b) => score(b) - score(a) || a.rank - b.rank);
 }
 export const advanced = (f: Row) => !!String(f.searchTerm || '').trim() || !!f.onlyAffordable || ['selectedSlot', 'selectedHands', 'selectedTipo', 'selectedItemType', 'selectedSpecialParams', 'selectedBaseParams', 'selectedCombatParams'].some(k => selected(f[k]).length);
 export function facetValues(rows: Row[]): Row {

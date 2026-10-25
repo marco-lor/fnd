@@ -5,6 +5,7 @@ The default Bazaar loads 50 catalog summaries at a time and fetches full detail 
 ## Implementation
 
 - Trusted catalog page/detail/write callables, deterministic ranks, cursor/revision fencing, visibility checks, projection indexes and guarded source/summary/media updates.
+- Default pages and advanced-filter score ties use the generation's materialized ranks. A later ICU version alone does not invalidate an active catalog. Creates and renames validate the existing ranks against the current name comparator before allocating a rank; unchanged-name edits, deletion and media updates preserve ordering.
 - Four editors and deletion use trusted catalog writes. Task07 media lifecycle updates retain catalog projections; acquired inventory snapshots remain independent of catalog changes.
 - Shared bounded detail cache, delayed hover reads, immediate pinning, stable comparison panel, memoized cards/filters and debounced search/persistence.
 - Resumable catalog migration with reviewed plans, state/code/runtime checks and exclusive backups before writes. The live operator binds production to main/fatins and staging to devs/fatin-test; the separate performance operator is emulator-only.
@@ -31,6 +32,23 @@ Full Task09 performance acceptance remains open: the real 20-card rapid cold/war
 September 6 deployment to fatin-test included seven catalog/media Functions, Firestore rules/indexes and Hosting. All three catalog indexes reached READY. Migration activated generation1/revision2 with 59 source items, 59 summaries and 59 media documents; source business fields were unchanged. Temporary backend smoke identity was removed after testing first-page50, 53 unique visible rows across two pages, full detail, advanced search and anonymous rejection.
 
 September 9 manual QA reused the user's existing in-app player tab. The loaded script was main.f8a0a331.js. Images, 50-card first page, three-card last page, pinned Arco Corto detail across page/search changes, substring plus affordability filters, persistence after reload, empty/reset states, sort selection, purchase dialog cancellation and Home/Bazaar navigation passed. Error-level Browser logs were empty. No purchase was confirmed and no business data was changed. Admin editing, completed purchases and numerical sort correctness were not independently exercised in this live pass.
+
+## ICU compatibility recovery
+
+The earlier reader rejected `catalogControl/bazaar.icu` when it differed from the deployed Function's ICU, even if the projection was complete. The corrected reader preserves the stored rank order and still requires `state: active`, `schemaVersion: 1`, `collation: en-US`, valid summaries, matching revisions and authorized visibility. A runtime ICU change alone requires no data migration. Creates or renames still fail with a rebuild-required error if the remaining ranks disagree with the current comparator; unchanged-name edits, deletion and media updates do not allocate new ranks. Migration building, resume and activation retain their ICU constraints.
+
+Use this recovery only after checking that control metadata is active with schema 1/en-US and that its summary/media projections are valid. For missing, inactive, building or incompatible projections, use the migration runbooks below. Live recovery of the current incident has not been verified by this document.
+
+1. Build and test the corrected Functions. From `frontend` on the actual `devs` branch, deploy the seven existing catalog/media Functions through the explicit staging wrapper:
+
+   ```powershell
+   node scripts/firebase-deploy.js --environment staging --project fatin-test --site fatin-test --bucket fatin-test.firebasestorage.app --only functions:task09CatalogPage,functions:task09CatalogDetail,functions:task09WriteCatalogItem,functions:task07AttachMediaAsset,functions:task07ConfirmMediaReference,functions:task07RetireMediaAsset,functions:cleanupTask07RemovedCatalogItemMedia
+   ```
+
+2. In the authenticated Fatin Test frontend, verify the first page, subsequent page without duplicates, pinned detail, search/filter/reset and selected-stat sorting. Confirm that page/detail callables succeed and the migration error is absent; check visibility with the appropriate player/DM accounts. Verify controlled unchanged-name edit, create/rename, delete and media cases against disposable staging items before accepting the writer changes.
+3. After staging acceptance and merge to `main`, run `npm run fb:deploy:task09:functions` from `frontend` on the actual `main` branch, then repeat the authenticated production read smoke and inspect Function errors. Retain the previous Function release for rollback.
+
+For an already active, valid projection, this repair changes only those Functions: no Firestore rules/index deployment, Hosting deployment, migration or catalog data rewrite is required. Keep the existing generation and runtime metadata; do not manually rewrite ICU to bypass validation. Record deployment and smoke evidence separately before claiming either environment is restored.
 
 ## Staging migration runbook
 

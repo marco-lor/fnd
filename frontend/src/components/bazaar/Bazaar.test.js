@@ -27,7 +27,8 @@ jest.mock('../../data/bazaarCatalogRepository', () => {
     },error),
     catalogDetail: async id=>rows.find(r=>r.id===id),
     catalogPage: async input=>{
-      const summaries=rows.map((r,i)=>core.projectSummary(r,1,i));
+      const summaries=rows.map(r=>core.projectSummary(r,1,0)).sort(core.compareNames);
+      summaries.forEach((row,i)=>{row.rank=i*1024;});
       const all=core.evaluateSummaries(summaries,input.filters);
       const offset=input.cursor?.offset||0;
       return {revision:input.revision,rows:all.slice(offset,offset+50),cursor:offset+50<all.length?{offset:offset+50}:null,facets:input.facets?core.facetValues(summaries):null};
