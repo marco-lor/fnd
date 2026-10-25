@@ -193,12 +193,19 @@ async function retainPreviousAssets({selection, buildDir, api, download, now = D
     const manifest = {schemaVersion: 1, projectId: selection.projectId, hostingSite: selection.hostingSite, assets};
     const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
     if (manifestBytes.length > limits.maxManifestBytes) throw new Error('Retention manifest byte limit exceeded.');
+    const stagedManifest = path.join(staging, 'manifest');
+    fs.writeFileSync(stagedManifest, manifestBytes, {flag: 'wx'});
     for (const {stagedPath, destination} of staged) {
       fs.mkdirSync(path.dirname(destination), {recursive: true});
       fs.copyFileSync(stagedPath, destination, fs.constants.COPYFILE_EXCL);
       copiedFiles.push(destination);
     }
-    fs.writeFileSync(path.join(buildDir, MANIFEST_PATH), manifestBytes, {flag: 'wx'});
+    const manifestDestination = path.join(buildDir, MANIFEST_PATH);
+    const manifestDescriptor = fs.openSync(manifestDestination, 'wx');
+    // Ownership starts at exclusive creation, before any partial write can fail.
+    copiedFiles.push(manifestDestination);
+    try { fs.writeFileSync(manifestDescriptor, fs.readFileSync(stagedManifest)); }
+    finally { fs.closeSync(manifestDescriptor); }
     return {liveVersion, retainedFiles: assets.length, retainedBytes, expiredFiles, examinedFiles: candidates.length};
   } catch (error) {
     for (const filePath of copiedFiles) fs.rmSync(filePath, {force: true});

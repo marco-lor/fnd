@@ -213,3 +213,50 @@ test('a previously retained file with a changed content digest aborts rather tha
   await assert.rejects(() => call('retainPreviousAssets', f.options), /digest/i);
   assert.equal(fs.existsSync(path.join(f.buildDir, oldMain)), false);
 });
+test('a partial final manifest write rolls back owned output while native build files stay unchanged', async t => {
+  const f = fixture(t);
+  const destination = path.join(f.buildDir, manifestPath);
+  const nativeIndex = fs.readFileSync(path.join(f.buildDir, 'index.html'));
+  const nativeMain = fs.readFileSync(path.join(f.buildDir, newMain));
+  const originalOpen = fs.openSync;
+  const originalWrite = fs.writeFileSync;
+  let finalDescriptor;
+  let partialBytes;
+  let copiedAssetsPresent;
+  t.mock.method(fs, 'openSync', (file, ...args) => {
+    const descriptor = originalOpen(file, ...args);
+    if (file === destination) finalDescriptor = descriptor;
+    return descriptor;
+  });
+  t.mock.method(fs, 'writeFileSync', (file, bytes, ...args) => {
+    if (file === destination || file === finalDescriptor) {
+      originalWrite(file, Buffer.from(bytes).subarray(0, 8), ...args);
+      partialBytes = fs.statSync(destination).size;
+      copiedAssetsPresent = [oldMain, oldChunk].every(asset => fs.existsSync(path.join(f.buildDir, asset)));
+      throw Object.assign(new Error('Injected ENOSPC during final manifest write'), {code: 'ENOSPC'});
+    }
+    return originalWrite(file, bytes, ...args);
+  });
+  await assert.rejects(() => call('retainPreviousAssets', f.options), {code: 'ENOSPC'});
+  assert.equal(partialBytes, 8);
+  assert.equal(copiedAssetsPresent, true);
+  assert.equal(fs.existsSync(destination), false);
+  assert.equal(fs.existsSync(path.join(f.buildDir, oldMain)), false);
+  assert.equal(fs.existsSync(path.join(f.buildDir, oldChunk)), false);
+  assert.deepEqual(fs.readFileSync(path.join(f.buildDir, 'index.html')), nativeIndex);
+  assert.deepEqual(fs.readFileSync(path.join(f.buildDir, newMain)), nativeMain);
+});
+test('a manifest created by another writer before final publication is neither overwritten nor removed', async t => {
+  const f = fixture(t);
+  const destination = path.join(f.buildDir, manifestPath);
+  let reads = 0;
+  f.options.api.latestVersion = async () => {
+    if (++reads === 3) fs.writeFileSync(destination, 'independent manifest');
+    return version;
+  };
+  await assert.rejects(() => call('retainPreviousAssets', f.options), {code: 'EEXIST'});
+  assert.equal(fs.readFileSync(destination, 'utf8'), 'independent manifest');
+  assert.equal(fs.existsSync(path.join(f.buildDir, oldMain)), false);
+  assert.equal(fs.existsSync(path.join(f.buildDir, oldChunk)), false);
+  assert.equal(fs.readFileSync(path.join(f.buildDir, newMain), 'utf8'), 'new main');
+});
