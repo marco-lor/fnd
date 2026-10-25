@@ -304,7 +304,7 @@ describe('NpcSidebar', () => {
     fireEvent.change(screen.getByPlaceholderText('Nome NPC...'), { target: { value: '  New guide  ' } });
     fireEvent.change(screen.getByPlaceholderText('NPC description...'), { target: { value: '  Local guide  ' } });
     fireEvent.change(screen.getByPlaceholderText('NPC notes...'), { target: { value: '  Meet at dawn  ' } });
-    fireEvent.change(screen.getByDisplayValue(''), {
+    fireEvent.change(screen.getByDisplayValue((value, element) => element.tagName === 'INPUT' && element.type === 'file'), {
       target: { files: [new File(['portrait'], 'guide.png', { type: 'image/png' })] },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create NPC' }));
