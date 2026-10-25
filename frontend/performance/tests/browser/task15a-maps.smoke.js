@@ -108,15 +108,16 @@ async function settleTraffic(page, entries) {
 }
 
 async function withEchi({ browser, baseURL }, testInfo, options, run) {
+  const role = options.role || 'player';
   const context = await browser.newContext({
     baseURL,
-    storageState: storageStateForRole('player'),
+    storageState: storageStateForRole(role),
     viewport: options.viewport || { width: 1440, height: 360 },
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
   });
   await installDeterministicFontRoutes(context);
-  await installBootstrap(context, { id: 'echi-di-viaggio', role: 'player', route: ECHI_ROUTE }, 1);
+  await installBootstrap(context, { id: 'echi-di-viaggio', role, route: ECHI_ROUTE }, 1);
   const entries = await installMapTraffic(context, options);
   const page = await context.newPage();
   const pageErrors = [];
@@ -265,6 +266,45 @@ test('Task 15A Echi popup focus survives competing hover and closes after Escape
     await expect(marker).toBeFocused();
   });
 });
+
+for (const viewport of [{ width: 720, height: 500 }, { width: 320, height: 450 }]) {
+  test(`Task 15A NPC create and edit cards stay reachable at ${viewport.width}x${viewport.height}`, async ({ browser, baseURL }, testInfo) => {
+    await withEchi({ browser, baseURL }, testInfo, { viewport, role: 'dm' }, async ({ page }) => {
+      const assertWithinViewport = async (locator) => {
+        const bounds = await locator.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.y).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height + 1);
+      };
+      const cancelCardWithKeyboard = async (title) => {
+        const heading = page.getByRole('heading', { name: title, exact: true });
+        const card = heading.locator('..');
+        await expect(heading).toBeVisible();
+        await assertWithinViewport(card);
+        await assertWithinViewport(heading);
+        expect(await card.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+        await card.getByPlaceholder('NPC notes...').focus();
+        await page.keyboard.press('Tab');
+        const cancel = card.getByRole('button', { name: 'Cancel', exact: true });
+        await expect(cancel).toBeFocused();
+        await expect.poll(() => card.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await assertWithinViewport(cancel);
+        await page.keyboard.press('Enter');
+        await expect(heading).toHaveCount(0);
+      };
+
+      await page.getByRole('button', { name: '+ Add NPC', exact: true }).click();
+      await cancelCardWithKeyboard('Add NPC');
+      const tile = page.locator('aside').getByRole('button', { name: /Fixture NPC 0\b/ });
+      await tile.focus();
+      await tile.press('ArrowDown');
+      await page.getByRole('dialog', { name: 'NPC: Fixture NPC 0', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click();
+      await cancelCardWithKeyboard('Edit NPC');
+    });
+  });
+}
 
 for (const profile of [
   { name: 'desktop', viewport: { width: 1440, height: 360 } },

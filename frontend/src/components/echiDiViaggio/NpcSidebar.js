@@ -362,7 +362,7 @@ const NpcCreateModal = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[110] p-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-600 bg-slate-900 shadow-2xl p-5">
+      <div className="w-full max-w-lg max-h-[calc(100vh-2rem)] supports-[height:100dvh]:max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl border border-slate-600 bg-slate-900 shadow-2xl p-5">
         <h3 className="text-xl font-semibold text-amber-300 mb-4">Add NPC</h3>
 
         <div className="space-y-3">
@@ -466,7 +466,7 @@ const NpcEditModal = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[110] p-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-600 bg-slate-900 shadow-2xl p-5">
+      <div className="w-full max-w-lg max-h-[calc(100vh-2rem)] supports-[height:100dvh]:max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl border border-slate-600 bg-slate-900 shadow-2xl p-5">
         <h3 className="text-xl font-semibold text-sky-300 mb-4">Edit NPC</h3>
 
         <div className="space-y-3">
