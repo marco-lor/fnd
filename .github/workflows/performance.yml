@@ -36,6 +36,8 @@ jobs:
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
       - run: npm run perf:test
+      - run: npm run maps:check
+      - run: npm run maps:test
       - run: npm run task13:test:models
       - run: npm run perf:check-firestore-imports
       - run: npm run perf:check-shared-config-boundaries
@@ -116,6 +118,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
       - run: npm ci
+      - run: npm run release:test
       - run: npm run build:performance
       - run: npm run perf:verify-disabled
       - run: npm run perf:build
