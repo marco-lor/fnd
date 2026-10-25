@@ -22,15 +22,35 @@
     "predeploy": [
       "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" hosting",
       "node \"$PROJECT_DIR/scripts/verify-runtime-prerequisites.js\"",
-      "node \"$PROJECT_DIR/scripts/build-production.js\""
+      "node \"$PROJECT_DIR/scripts/build-production.js\"",
+      "node --use-system-ca \"$PROJECT_DIR/scripts/retain-hosting-assets.js\"",
+      "node \"$PROJECT_DIR/scripts/build-production.js\" --verify-only"
     ],
     "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      },
       {
         "source": "/static/**",
         "headers": [
           {
             "key": "Cache-Control",
             "value": "public, max-age=0, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/fatins-runtime/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "private, max-age=300"
           }
         ]
       },
