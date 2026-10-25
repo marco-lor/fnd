@@ -237,6 +237,7 @@ const MapMarkerItem = ({
       <button
         ref={triggerRef}
         type="button"
+        draggable={isNpcMovable}
         aria-label={hasNpcInfo ? npcNome : (marker.text || 'Segnaposto')}
         aria-haspopup="dialog"
         aria-expanded={isNpcHoverOpen}

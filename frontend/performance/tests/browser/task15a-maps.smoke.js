@@ -1,5 +1,9 @@
 const fs = require('node:fs/promises');
+const { randomUUID } = require('node:crypto');
 const { test, expect } = require('./measured-test');
+const { configureOwnedPerformanceEnvironment, projectId } = require('../../../scripts/performance/common');
+const { initializeApp, deleteApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 const {
   drainPageConnections,
   installBootstrap,
@@ -264,6 +268,97 @@ test('Task 15A Echi popup focus survives competing hover and closes after Escape
     await page.keyboard.press('Escape');
     await expect(markerPopup).toHaveCount(0);
     await expect(marker).toBeFocused();
+  });
+});
+
+test('Task 15A a bare NPC marker button supports native drag and cancelled movement', async ({ browser, baseURL }, testInfo) => {
+  await withEchi({ browser, baseURL }, testInfo, { viewport: { width: 1440, height: 900 } }, async ({ page, art }) => {
+    const temporaryName = `Task15A native drag ${testInfo.project.name} ${randomUUID()}`;
+    const marker = art.getByRole('button', { name: temporaryName, exact: true });
+    const markerOwner = marker.locator('..');
+    const allMarkers = page.locator('[data-echi-map] button[aria-haspopup="dialog"]');
+    const noteHeading = page.getByRole('heading', { name: 'Aggiungi Nota Pubblica', exact: true });
+    const moveHeading = page.getByRole('heading', { name: 'Conferma Spostamento NPC', exact: true });
+    await expect(allMarkers).toHaveCount(2000);
+    configureOwnedPerformanceEnvironment();
+    if (projectId !== 'demo-fnd-perf' || process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') {
+      throw new Error('Native marker verification requires the owned demo Firestore emulator.');
+    }
+    const adminApp = initializeApp({ projectId }, `task15a-marker-drag-${randomUUID()}`);
+    const serverMarkers = getFirestore(adminApp).collection('map_markers');
+    const ownedMarkerQuery = serverMarkers.where('text', '==', temporaryName).where('createdBy', '==', 'perf-player');
+    let ownedMarkerId;
+    try {
+      await art.scrollIntoViewIfNeeded();
+      // Pick two exposed map points. Do not force a drop through a sticky
+      // palette or an existing marker, and do not synthesize drag events.
+      const positions = await art.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const points = [];
+        for (let y = Math.max(0, rect.top) + 24; y < Math.min(window.innerHeight, rect.bottom) - 24; y += 32) {
+          for (let x = rect.left + 24; x < rect.right - 24; x += 32) {
+            const hit = document.elementFromPoint(x, y);
+            if (hit?.closest('[data-echi-map]') !== element || hit.closest('button')) continue;
+            const point = { x: x - rect.left, y: y - rect.top };
+            if (points.length && Math.hypot(point.x - points[0].x, point.y - points[0].y) < 120) continue;
+            points.push(point);
+            if (points.length === 2) return points;
+          }
+        }
+        return points;
+      });
+      expect(positions).toHaveLength(2);
+      const publicPalette = page.getByText('Public Pin', { exact: true }).locator('../..');
+      await publicPalette.getByRole('button', { name: 'Trascina: NPC', exact: true }).dragTo(art, { targetPosition: positions[0] });
+      await expect(noteHeading).toBeVisible();
+      await noteHeading.locator('..').getByRole('textbox').fill(temporaryName);
+      await noteHeading.locator('..').getByRole('button', { name: 'Salva', exact: true }).click();
+      await expect(marker).toHaveCount(1);
+      await expect(allMarkers).toHaveCount(2001);
+      await expect.poll(async () => {
+        const owned = await ownedMarkerQuery.get();
+        ownedMarkerId = owned.docs[0]?.id;
+        return owned.size;
+      }).toBe(1);
+      // A linked portrait's image drag must not mask button drag behavior.
+      await expect(marker.locator('img')).toHaveCount(0);
+      const originalPosition = await markerOwner.evaluate((element) => ({ x: element.style.left, y: element.style.top }));
+      await page.keyboard.press('Escape');
+      await marker.dragTo(art, { targetPosition: positions[1] });
+      await expect(moveHeading).toBeVisible();
+      await expect(moveHeading.locator('..')).toContainText(temporaryName);
+      await moveHeading.locator('..').getByRole('button', { name: 'Annulla', exact: true }).click();
+      await expect(moveHeading).toHaveCount(0);
+      expect(await markerOwner.evaluate((element) => ({ x: element.style.left, y: element.style.top }))).toEqual(originalPosition);
+    } finally {
+      try {
+        // Cancel unfinished forms, then delete only this UUID-named pin through
+        // its own UI. Admin reads prove ownership and server acknowledgement.
+        for (const heading of [noteHeading, moveHeading]) {
+          if (await heading.count()) await heading.locator('..').getByRole('button', { name: 'Annulla', exact: true }).click();
+        }
+        if (await marker.count()) {
+          await expect.poll(async () => {
+            const owned = await ownedMarkerQuery.get();
+            ownedMarkerId = owned.docs[0]?.id;
+            return owned.size;
+          }).toBe(1);
+          await marker.focus();
+          await page.keyboard.press('Escape');
+          await markerOwner.getByTitle('Elimina', { exact: true }).click();
+          await markerOwner.getByTitle('Conferma', { exact: true }).click();
+        }
+        await expect(marker).toHaveCount(0);
+        await expect.poll(async () => (await ownedMarkerQuery.get()).size).toBe(0);
+        if (ownedMarkerId) await expect.poll(async () => (await serverMarkers.doc(ownedMarkerId).get()).exists).toBe(false);
+        // The browser configuration runs one worker; wait for the emulator's
+        // restored count, rather than accepting an optimistic local deletion.
+        await expect.poll(async () => (await serverMarkers.count().get()).data().count).toBe(2000);
+        await expect(allMarkers).toHaveCount(2000);
+      } finally {
+        await deleteApp(adminApp);
+      }
+    }
   });
 });
 
