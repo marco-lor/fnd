@@ -198,8 +198,8 @@ async function moveLowerMapTop(page, precise, top) {
 async function hoverVisibleMap(page, surface) {
   const point = await surface.evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    for (let y = Math.max(0, rect.top) + 8; y < Math.min(innerHeight, rect.bottom) - 8; y += 24) {
-      for (let x = Math.max(0, rect.left) + 8; x < Math.min(innerWidth, rect.right) - 8; x += 24) {
+    for (let y = Math.max(0, rect.top) + 8; y < Math.min(window.innerHeight, rect.bottom) - 8; y += 24) {
+      for (let x = Math.max(0, rect.left) + 8; x < Math.min(window.innerWidth, rect.right) - 8; x += 24) {
         if (document.elementFromPoint(x, y)?.closest('[data-echi-map]') === element) return { x, y };
       }
     }
@@ -255,6 +255,11 @@ test('Task 15A Echi popup focus survives competing hover and closes after Escape
     expect(bounds.y).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(1441);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(901);
+    await page.keyboard.press('Escape');
+    await expect(markerPopup).toHaveCount(0);
+    await expect(marker).toBeFocused();
+    await marker.press('ArrowDown');
+    await expect(markerPopup).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(markerPopup).toHaveCount(0);
     await expect(marker).toBeFocused();

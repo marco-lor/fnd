@@ -138,6 +138,17 @@ const MapMarkerItem = ({
     setIsNpcHoverOpen(true);
   };
 
+  const activateNpcHoverCard = () => {
+    if (isDeleting) return;
+    dismissedRef.current = false;
+    clearNpcHoverClose();
+    if (popupRef.current) popupRef.current.focus({ preventScroll: true });
+    else {
+      focusPopupOnOpenRef.current = true;
+      setIsNpcHoverOpen(true);
+    }
+  };
+
   const scheduleNpcHoverClose = () => {
     clearNpcHoverClose();
     hoverCloseTimerRef.current = setTimeout(() => {
@@ -244,19 +255,11 @@ const MapMarkerItem = ({
           if (!pointerInMarkerRef.current) dismissedRef.current = false;
           scheduleNpcHoverClose();
         }}
-        onClick={() => {
-          if (isDeleting) return;
-          dismissedRef.current = false;
-          if (popupRef.current) popupRef.current.focus({ preventScroll: true });
-          else {
-            focusPopupOnOpenRef.current = true;
-            setIsNpcHoverOpen(true);
-          }
-        }}
+        onClick={activateNpcHoverCard}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown') {
             event.preventDefault();
-            popupRef.current?.focus({ preventScroll: true });
+            activateNpcHoverCard();
           }
         }}
         className={`w-full h-full hover:scale-125 transition-transform duration-200 relative focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200 rounded-full ${isNpcMovable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}

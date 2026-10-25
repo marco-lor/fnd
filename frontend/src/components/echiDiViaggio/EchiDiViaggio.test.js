@@ -126,6 +126,32 @@ describe('EchiDiViaggio', () => {
     }
   });
 
+  test.each([
+    { name: 'ordinary marker', marker: { text: 'Edge lookout', iconType: 'pin' }, label: 'Edge lookout' },
+    { name: 'NPC marker', marker: { npcId: 'guide', markerType: 'npc' }, label: 'Guide' },
+  ])('reopens a dismissed $name with repeated ArrowDown', ({ marker: markerData, label }) => {
+    const state = buildMapEditingState();
+    state.markers = [{ id: 'keyboard-marker', mapId: 'art', x: 0, y: 0, ...markerData }];
+    useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
+    onSnapshot.mockImplementation((target, onNext) => {
+      onNext({ docs: [{ id: 'guide', data: () => ({ nome: 'Guide', notes: 'Last marker note' }) }] });
+      return () => {};
+    });
+    render(<EchiDiViaggio />);
+    const marker = screen.getByRole('button', { name: label });
+    act(() => marker.focus());
+    fireEvent.keyDown(marker, { key: 'ArrowDown' });
+    expect(screen.getByRole('dialog', { name: label })).toHaveFocus();
+
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(marker).toHaveFocus();
+      expect(screen.queryByRole('dialog', { name: label })).not.toBeInTheDocument();
+      fireEvent.keyDown(marker, { key: 'ArrowDown' });
+      expect(screen.getByRole('dialog', { name: label })).toHaveFocus();
+    }
+  });
+
   test('a marker closes after Escape in its portal, explicit reopening and outside focus without another marker leave', () => {
     jest.useFakeTimers();
     try {
