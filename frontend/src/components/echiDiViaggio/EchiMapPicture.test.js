@@ -123,6 +123,31 @@ describe('EchiMapPicture request and coordinate surface', () => {
     expect(surface(container)).toHaveAttribute('data-map-format', 'png');
   });
 
+  test.each(['webp', 'png'])('records a successful native %s selection only after decode without changing picture sources', async (selectedFormat) => {
+    const { container } = render(<EchiMapPicture mapId="art" alt="Artistica" eager />);
+    const picture = container.querySelector('picture');
+    const image = screen.getByRole('img');
+    const sources = [...picture.querySelectorAll('source')];
+    const sourceAttributes = sources.map((source) => source.outerHTML);
+    const originalPng = image.getAttribute('src');
+    Object.defineProperty(image, 'currentSrc', { value: `https://site.test/art-704.${selectedFormat}` });
+    let resolveDecode;
+    image.decode = () => new Promise((resolve) => { resolveDecode = resolve; });
+
+    fireEvent.load(image);
+    expect(surface(container)).toHaveAttribute('data-map-format', 'avif');
+    expect(surface(container)).toHaveAttribute('data-map-state', 'loading');
+    await act(async () => resolveDecode());
+
+    expect(surface(container)).toHaveAttribute('data-map-format', selectedFormat);
+    expect(surface(container)).toHaveAttribute('data-map-state', 'loaded');
+    expect(container.querySelector('picture')).toBe(picture);
+    expect(picture.querySelector('img')).toBe(image);
+    expect([...picture.querySelectorAll('source')]).toEqual(sources);
+    expect(sources.map((source) => source.outerHTML)).toEqual(sourceAttributes);
+    expect(image).toHaveAttribute('src', originalPng);
+  });
+
   test('keeps the connected picture and image through fallback without reassigning the PNG URL', () => {
     const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
     const assign = jest.spyOn(HTMLImageElement.prototype, 'src', 'set').mockImplementation(function setSource(value) {
