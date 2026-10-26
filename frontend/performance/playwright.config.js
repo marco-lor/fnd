@@ -14,6 +14,14 @@ const { resolveTask07SoakRuntime } = require('../scripts/performance/task07-soak
 
 const portableJavaHome = resolvePortableJavaHome();
 const task07SoakRuntime = resolveTask07SoakRuntime();
+// Local managed environments can supply a native WebKit launcher explicitly.
+// GitHub CI keeps Playwright's installed engine and its normal launch settings.
+const webkitOperatorOverrides = {
+  ...(process.env.FND_TASK15A_WEBKIT_EXECUTABLE ? {
+    launchOptions: { executablePath: process.env.FND_TASK15A_WEBKIT_EXECUTABLE },
+  } : {}),
+  ...(process.env.FND_TASK15A_WEBKIT_HEADED === '1' ? { headless: false } : {}),
+};
 const emulatorConfigRoot = path.join(frontendRoot, '.perf-emulator-data', 'config');
 ensureDirectory(emulatorConfigRoot);
 const emulatorEnvironment = {
@@ -60,6 +68,9 @@ module.exports = defineConfig({
   ],
   use: {
     baseURL: 'http://127.0.0.1:5000',
+    ...(process.env.FND_PERF_BROWSER_PROXY ? {
+      proxy: { server: process.env.FND_PERF_BROWSER_PROXY, bypass: '127.0.0.1,localhost' },
+    } : {}),
     viewport: manifest.viewport,
     deviceScaleFactor: manifest.viewport.deviceScaleFactor,
     locale: manifest.locale,
@@ -127,14 +138,14 @@ module.exports = defineConfig({
     {
       name: 'firefox-smoke',
       dependencies: ['auth-setup'],
-      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser)\.smoke\.js$/,
+      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser|task15a-maps)\.smoke\.js$/,
       use: { browserName: 'firefox' },
     },
     {
       name: 'webkit-smoke',
       dependencies: ['auth-setup'],
-      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser)\.smoke\.js$/,
-      use: { browserName: 'webkit' },
+      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser|task15a-maps)\.smoke\.js$/,
+      use: { browserName: 'webkit', ...webkitOperatorOverrides },
     },
     {
       name: 'task07-chromium',
@@ -155,7 +166,7 @@ module.exports = defineConfig({
       name: 'task07-webkit',
       dependencies: ['auth-setup'],
       testMatch: /task07-media-cross-browser\.smoke\.js/,
-      use: { browserName: 'webkit' },
+      use: { browserName: 'webkit', ...webkitOperatorOverrides },
     },
     {
       name: 'task07-soak',
