@@ -230,10 +230,10 @@ async function hoverVisibleMap(page, surface) {
 function startNpcPopupOpacityTrace(label) {
   const trace = { frames: [], done: false };
   window.__task15NpcOpacityTrace = trace;
-  const started = performance.now();
   let firstVisibleAt;
   let firstNode;
   let reachedFullOpacity = false;
+  let settledFrameCount = 0;
   const sample = () => {
     const element = [...document.querySelectorAll('[role="dialog"]')]
       .find((candidate) => candidate.getAttribute('aria-label') === label);
@@ -245,6 +245,7 @@ function startNpcPopupOpacityTrace(label) {
     if (firstNode) {
       const opacity = element ? Number(getComputedStyle(element).opacity) : null;
       if (opacity >= 0.99) reachedFullOpacity = true;
+      if (reachedFullOpacity) settledFrameCount += 1;
       trace.frames.push({
         elapsed: now - firstVisibleAt,
         sameNode: element === firstNode,
@@ -253,7 +254,10 @@ function startNpcPopupOpacityTrace(label) {
         afterFullOpacity: reachedFullOpacity,
       });
     }
-    if ((firstVisibleAt !== undefined && now - firstVisibleAt >= 650) || now - started >= 5000) {
+    if (firstVisibleAt !== undefined && (
+      (now - firstVisibleAt >= 650 && settledFrameCount >= 6)
+      || now - firstVisibleAt >= 15_000
+    )) {
       trace.done = true;
       return;
     }
@@ -268,9 +272,10 @@ test('Task 15A NPC hover cards stay opaque after their entrance animation when s
   }, async ({ page }) => {
     for (const number of [0, 1]) {
       const name = `Fixture NPC ${number}`;
+      await page.bringToFront();
       await page.evaluate(startNpcPopupOpacityTrace, `NPC: ${name}`);
       await page.locator('aside').getByRole('button', { name: new RegExp(`${name}\\b`) }).hover();
-      await page.waitForFunction(() => window.__task15NpcOpacityTrace.done);
+      await page.waitForFunction(() => window.__task15NpcOpacityTrace.done, null, { timeout: 20_000 });
       const trace = await page.evaluate(() => window.__task15NpcOpacityTrace);
       await attachJson(testInfo, `task15a-npc-${number}-entrance-opacity`, trace);
       expect(trace.frames.length).toBeGreaterThan(5);
