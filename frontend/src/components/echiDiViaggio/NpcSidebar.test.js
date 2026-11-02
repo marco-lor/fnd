@@ -100,13 +100,9 @@ describe('NpcSidebar', () => {
   });
 
   const renderWithNpc = (extraNpcs = []) => {
-    onSnapshot.mockImplementation((target, onNext) => {
-      onNext({ docs: [{ id: 'npc-guide', data: () => ({
-        nome: 'Guide', description: 'A local guide', notes: 'Final note',
-      }) }, ...extraNpcs] });
-      return () => {};
-    });
-    return render(<NpcSidebar user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} stickyOffset={104} />);
+    const npcs = [{ id: 'npc-guide', nome: 'Guide', description: 'A local guide', notes: 'Final note' },
+      ...extraNpcs.map((document) => ({ ...document.data(), id: document.id }))];
+    return render(<NpcSidebar npcs={npcs} user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} stickyOffset={104} />);
   };
 
   test('bounds the popup to a 320 CSS pixel viewport and makes long content scrollable', () => {
@@ -289,6 +285,33 @@ describe('NpcSidebar', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  test('opening a local mutation does not erase the supplied reader error', () => {
+    render(<NpcSidebar user={{ uid: 'dm-1' }} userData={{ role: 'dm' }} npcs={[]} npcError="Unable to load NPC list." />);
+    fireEvent.click(screen.getByRole('button', { name: '+ Add NPC' }));
+    expect(screen.getByText('Unable to load NPC list.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Add NPC' })).toBeInTheDocument();
+  });
+
+  test('saving a portrait after a shared update uses the latest media revision without replacing the edit draft', async () => {
+    isTask07MediaV1WriteEnabled.mockResolvedValue(true);
+    const props = { user: { uid: 'dm-1' }, userData: { role: 'dm' } };
+    const first = { id: 'guide', nome: 'Guide', notes: '', description: '', task07MediaRevision: 1 };
+    const view = render(<NpcSidebar {...props} npcs={[first]} />);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /Guide/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByPlaceholderText('NPC notes...'), { target: { value: 'My draft' } });
+    const assetId = `m_${'b'.repeat(40)}`;
+    view.rerender(<NpcSidebar {...props} npcs={[{ ...first, notes: 'Remote edit', task07MediaRevision: 4, media: { assetId } }]} />);
+    expect(screen.getByPlaceholderText('NPC notes...')).toHaveValue('My draft');
+    fireEvent.change(screen.getByDisplayValue((value, element) => element.tagName === 'INPUT' && element.type === 'file'), {
+      target: { files: [new File(['portrait'], 'guide.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(runWithTask07MediaOperationReceipt).toHaveBeenCalledWith(expect.objectContaining({
+      entityId: 'guide', expectedRevision: 4, previousAssetId: assetId,
+    })));
+  });
+
   test('prepares a Rules-compatible NPC placeholder before canonical image upload', async () => {
     isTask07MediaV1WriteEnabled.mockResolvedValueOnce(true);
     doc.mockImplementationOnce(() => ({ id: 'new-npc', path: 'echi_npcs/new-npc' }));
@@ -333,14 +356,11 @@ describe('NpcSidebar', () => {
         },
       }),
     };
-    onSnapshot.mockImplementation((target, onNext) => {
-      onNext({ docs: [canonicalNpc] });
-      return () => {};
-    });
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(
       <NpcSidebar
+        npcs={[{ ...canonicalNpc.data(), id: canonicalNpc.id }]}
         user={{ uid: 'dm-1' }}
         userData={{ role: 'dm' }}
         stickyOffset={104}
@@ -370,14 +390,11 @@ describe('NpcSidebar', () => {
         imagePath: 'echi_npcs/dm-1/legacy.png',
       }),
     };
-    onSnapshot.mockImplementation((target, onNext) => {
-      onNext({ docs: [legacyNpc] });
-      return () => {};
-    });
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(
       <NpcSidebar
+        npcs={[{ ...legacyNpc.data(), id: legacyNpc.id }]}
         user={{ uid: 'dm-1' }}
         userData={{ role: 'dm' }}
         stickyOffset={104}
