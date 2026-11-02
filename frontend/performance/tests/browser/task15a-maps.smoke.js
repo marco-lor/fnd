@@ -119,7 +119,7 @@ async function withEchi({ browser, baseURL }, testInfo, options, run) {
     storageState: storageStateForRole(role),
     viewport: options.viewport || { width: 1440, height: 360 },
     deviceScaleFactor: 1,
-    reducedMotion: 'reduce',
+    reducedMotion: options.reducedMotion || 'reduce',
   });
   await installDeterministicFontRoutes(context);
   if (options.nativeMediaExclusions) {
@@ -226,6 +226,61 @@ async function hoverVisibleMap(page, surface) {
   await page.mouse.move(point.x, point.y);
   await expect.poll(() => surface.evaluate((element) => element.matches(':hover'))).toBe(true);
 }
+
+function startNpcPopupOpacityTrace(label) {
+  const trace = { frames: [], done: false };
+  window.__task15NpcOpacityTrace = trace;
+  const started = performance.now();
+  let firstVisibleAt;
+  let firstNode;
+  let reachedFullOpacity = false;
+  const sample = () => {
+    const element = [...document.querySelectorAll('[role="dialog"]')]
+      .find((candidate) => candidate.getAttribute('aria-label') === label);
+    const now = performance.now();
+    if (element && !firstNode) {
+      firstNode = element;
+      firstVisibleAt = now;
+    }
+    if (firstNode) {
+      const opacity = element ? Number(getComputedStyle(element).opacity) : null;
+      if (opacity >= 0.99) reachedFullOpacity = true;
+      trace.frames.push({
+        elapsed: now - firstVisibleAt,
+        sameNode: element === firstNode,
+        present: !!element,
+        opacity,
+        afterFullOpacity: reachedFullOpacity,
+      });
+    }
+    if ((firstVisibleAt !== undefined && now - firstVisibleAt >= 650) || now - started >= 5000) {
+      trace.done = true;
+      return;
+    }
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+}
+
+test('Task 15A NPC hover cards stay opaque after their entrance animation when switching NPCs', async ({ browser, baseURL }, testInfo) => {
+  await withEchi({ browser, baseURL }, testInfo, {
+    viewport: { width: 1440, height: 900 }, reducedMotion: 'no-preference',
+  }, async ({ page }) => {
+    for (const number of [0, 1]) {
+      const name = `Fixture NPC ${number}`;
+      await page.evaluate(startNpcPopupOpacityTrace, `NPC: ${name}`);
+      await page.locator('aside').getByRole('button', { name: new RegExp(`${name}\\b`) }).hover();
+      await page.waitForFunction(() => window.__task15NpcOpacityTrace.done);
+      const trace = await page.evaluate(() => window.__task15NpcOpacityTrace);
+      await attachJson(testInfo, `task15a-npc-${number}-entrance-opacity`, trace);
+      expect(trace.frames.length).toBeGreaterThan(5);
+      expect(trace.frames.every((frame) => frame.present && frame.sameNode)).toBe(true);
+      const settledFrames = trace.frames.filter((frame) => frame.afterFullOpacity);
+      expect(settledFrames.length).toBeGreaterThan(5);
+      expect(settledFrames.every((frame) => frame.opacity >= 0.95), 'A visible NPC card must not flash transparent when its entrance animation finishes').toBe(true);
+    }
+  });
+});
 
 test('Task 15A Echi popup focus survives competing hover and closes after Escape and outside focus', async ({ browser, baseURL }, testInfo) => {
   await withEchi({ browser, baseURL }, testInfo, { viewport: { width: 1440, height: 900 } }, async ({ page, art }) => {

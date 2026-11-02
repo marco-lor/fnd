@@ -38,6 +38,7 @@ import {
 } from '../common/canonicalMediaAsset';
 import useObjectUrl from '../common/useObjectUrl';
 import useViewportPopup from './useViewportPopup';
+import './NpcSidebar.css';
 
 const deleteNpcV2 = getCallable('deleteNpcV2');
 
@@ -176,27 +177,23 @@ const NpcHoverPortal = ({
   onFocus,
   onBlur
 }) => {
-  const prefersReducedMotion = useReducedMotion();
   if (typeof document === 'undefined') return null;
 
   return createPortal(
     open && npc ? (
-        <motion.div
+        <div
           key={npc.id}
           ref={popupRef}
           id={`npc-sidebar-popup-${npc.id}`}
           role="dialog"
           aria-label={`NPC: ${getNpcNome(npc)}`}
           tabIndex={-1}
-          className="fixed z-[140]"
+          className="npc-hover-card fixed z-[140]"
           style={popupStyle}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
           onFocus={onFocus}
           onBlur={onBlur}
-          initial={{ opacity: prefersReducedMotion ? 1 : 0 }}
-          animate={{ opacity: 1 }}
-          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
         >
           <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4">
             <div className="flex items-start gap-3">
@@ -282,7 +279,7 @@ const NpcHoverPortal = ({
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
       ) : null,
     document.body
   );
