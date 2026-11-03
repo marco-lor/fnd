@@ -61,6 +61,11 @@ Fatins production deployment, validation, or accepted baseline.
 
 ## Task 07 media validation
 
+The Home media-shell scenario measures the initial inventory window after browser
+observers and finite page assets settle. It freezes the image request count before
+loading more inventory items or filtering. Diagnostics retain the initial requests
+and the cumulative requests after those interactions separately.
+
 Task 07 has deliberately serial entry points so local validation cannot create a
 large browser or test-worker fan-out:
 

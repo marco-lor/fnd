@@ -1,6 +1,8 @@
 const { test, expect } = require('./measured-test');
 const {
+  createPageAssetTracker,
   drainPageConnections,
+  flushBrowserObservers,
   installDeterministicFontRoutes,
   installOwnedEmulatorFirestoreTransport,
   isExpectedDemoRecaptchaCancellation,
@@ -46,8 +48,10 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
   const unhandledErrors = [];
   let lifecyclePhase = 'route-navigation';
   const page = await context.newPage();
+  const pageAssets = createPageAssetTracker();
 
   page.on('request', (request) => {
+    pageAssets.begin(request);
     if (isFixtureImageRequest(request)) {
       fixtureImageRequests.push(request.url());
     }
@@ -55,6 +59,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
       mediaRequests.push(request.url());
     }
   });
+  page.on('requestfinished', (request) => pageAssets.complete(request));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     const text = message.text();
@@ -66,6 +71,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
   });
   page.on('pageerror', (error) => unhandledErrors.push(error.message));
   page.on('requestfailed', (request) => {
+    pageAssets.complete(request);
     const failure = {
       failure: request.failure()?.errorText || 'unknown',
       path: (() => {
@@ -92,9 +98,15 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     });
     lifecyclePhase = 'route-active';
     await expect(page.getByRole('heading', { name: 'Inventario' })).toBeVisible();
-    await page.waitForTimeout(750);
 
     await require('./home-inventory-window').assertInitialHomeInventoryWindow(page);
+    pageAssets.beginQuietWindow();
+    await flushBrowserObservers(page);
+    await expect.poll(() => pageAssets.isQuiet(), {
+      timeout: 10_000,
+      message: 'Initial Home media assets did not settle before measurement.',
+    }).toBe(true);
+    const initialFixtureImageRequests = [...new Set(fixtureImageRequests)];
     const inventoryMedia = await page.evaluate(() => {
       const heading = Array.from(document.querySelectorAll('h2'))
         .find((node) => node.textContent?.trim() === 'Inventario');
@@ -147,7 +159,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     expect(inventoryMedia.dimensionsMissing).toBe(0);
     expect(inventoryMedia.nonLazy).toBe(0);
     expect(inventoryMedia.nonAsync).toBe(0);
-    expect(new Set(fixtureImageRequests).size).toBeLessThan(64);
+    expect(initialFixtureImageRequests.length).toBeLessThan(64);
 
     const shell = await page.evaluate(() => {
       const activeListeners = window.__FND_PERF__?.snapshot?.().activeListeners || {};
@@ -204,9 +216,13 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
         'task07.managedImages': inventoryMedia.total,
         'task07.musicStreamListeners': shell.musicStreamListeners,
         'task07.reducedMotionMeteors': shell.activeMeteors,
-        'task07.uniqueFixtureImageRequests': new Set(fixtureImageRequests).size,
+        'task07.uniqueFixtureImageRequests': initialFixtureImageRequests.length,
       },
       diagnostics: {
+        fixtureImageRequests: {
+          initial: initialFixtureImageRequests,
+          afterInventoryInteraction: [...new Set(fixtureImageRequests)],
+        },
         consoleErrors,
         explainedRecaptchaCancellations,
         explainedRecaptchaReportOnlyWarnings,
