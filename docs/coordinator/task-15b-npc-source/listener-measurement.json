@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-02",
+  "baselineCommit": "9f770f3d6551b38f5adbfb31765f11abf8dd65fe",
+  "method": "Real page/sidebar/map readers with mocked Firestore boundary; identical local fixture before/after; no live billed-read or wire-byte claim",
+  "fixture": {
+    "npcCount": 500,
+    "publicMarkerCount": 2000,
+    "npcCreatedAt": "2026-01-01T00:00:00.000Z",
+    "portraits": "omitted"
+  },
+  "before": {
+    "activeNpcListeners": 2,
+    "initialNpcDocumentDeliveries": 1000,
+    "cleanupGate": "not reached: one-listener assertion failed"
+  },
+  "after": {
+    "activeNpcListeners": 1,
+    "initialNpcDocumentDeliveries": 500,
+    "activeNpcListenersAfterCleanup": 0,
+    "physicalUnsubscribeCalls": 1
+  }
+}

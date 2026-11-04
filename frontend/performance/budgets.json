@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "task13Foes": {"maxSnapshotDocuments": 26, "maxInitialRows": 25, "maxInitialThumbnails": 25, "maxSerializedRatio": 0.06, "maxUnaffectedCommits": 0, "enforcedBy": ["task13:test:models", "src/components/foesHub/task13b-performance.test.js", "task13:test:emulator"]},
+  "task15bNpcs": { "maxActiveRouteListeners": 1, "maxListenersAfterCleanup": 0, "enforcedBy": ["src/components/echiDiViaggio/EchiNpcs.integration.test.js"] },
   "budgets": [
     {
       "id": "task13-foes-unaffected-commits",

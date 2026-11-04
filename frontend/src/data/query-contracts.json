@@ -84,16 +84,16 @@
       "sources": [{ "file": "components/dmDashboard/elements/playerInfo/sections/PlayerInfoDiceRollsRow.js", "occurrence": 1 }]
     },
     {
-      "id": "echi-npcs-map-current",
+      "id": "echi-npcs-shared",
       "kind": "collection",
-      "queryKey": "echi.npcs.map.subscribe.v1",
-      "ownerTask": "Task 15",
-      "currentScope": "Complete echi_npcs collection used by active map; unbounded",
-      "targetOrdering": [{ "field": "createdAt", "direction": "DESCENDING" }, { "field": "__name__", "direction": "DESCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["createdAt", "__name__"] },
-      "realtimePolicy": "Target active map first 100-row page",
-      "activation": "deferred",
-      "sources": [{ "file": "components/echiDiViaggio/EchiDiViaggio.js", "occurrence": 1 }]
+      "queryKey": "echi.npcs.subscribe.v1",
+      "ownerTask": "Task 15B",
+      "currentScope": "Complete echi_npcs collection, including records without createdAt; no limit",
+      "targetOrdering": [{ "field": "__name__", "direction": "ASCENDING" }],
+      "cursor": { "version": 1, "status": "deferred", "fields": ["__name__"] },
+      "realtimePolicy": "One actor/access-scoped route reader shared by map lookup and locally derived createdAt DESC / document-ID DESC sidebar; zero after cleanup. Pagination deferred.",
+      "activation": "active",
+      "sources": [{ "file": "data/echiNpcsRepository.js", "occurrence": 1 }]
     },
     {
       "id": "echi-map-markers-current",
@@ -106,18 +106,6 @@
       "realtimePolicy": "Target active map/privacy window, maximum 250",
       "activation": "deferred",
       "sources": [{ "file": "components/echiDiViaggio/MapEditor.js", "occurrence": 1 }]
-    },
-    {
-      "id": "echi-npcs-sidebar-current",
-      "kind": "collection",
-      "queryKey": "echi.npcs.sidebar.subscribe.v1",
-      "ownerTask": "Task 15",
-      "currentScope": "All echi_npcs ordered createdAt DESC; unbounded",
-      "targetOrdering": [{ "field": "createdAt", "direction": "DESCENDING" }, { "field": "__name__", "direction": "DESCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["createdAt", "__name__"] },
-      "realtimePolicy": "Target active map first 100-row page",
-      "activation": "deferred",
-      "sources": [{ "file": "components/echiDiViaggio/NpcSidebar.js", "occurrence": 1 }]
     },
     {
       "id": "foes-hub-current",
@@ -595,6 +583,7 @@
     }
   ],
   "repositoryQueries": [
+    { "id": "task15b-npcs-complete-listener", "ownerTask": "Task 15B", "activation": "active", "indexMode": "automatic" },
     {"id":"task13-foe-pages","ownerTask":"Task 13","activation":"active","requiredIndexId":"task13-foe-order"},
     {"id": "task12-codex-rank-pages", "ownerTask": "Task 12", "activation": "active", "indexMode": "automatic", "currentScope": "Generation/category path scoped, one ascending rank field plus ascending document ID; no composite filter. Verified by Task12 emulator bounded-query and full-reachability tests."},
     { "id": "task09-catalog-revision-and-detail", "ownerTask": "Task 09", "activation": "active", "indexMode": "automatic" },
