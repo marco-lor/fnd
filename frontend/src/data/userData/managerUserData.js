@@ -14,7 +14,6 @@ export const MANAGER_DETAIL_DOMAINS = Object.freeze([
 ]);
 export const MANAGER_MAX_EXPANDED = 3;
 export const MANAGER_USER_PAGE_SIZE = 10;
-const MANAGER_USER_DIRECTORY_ROLE = 'player';
 
 const asRecord = (value) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -71,6 +70,32 @@ export const composeManagerUser = (directoryEntry, domains = {}) => {
   });
 };
 
+const WEBMASTER_SUMMARY_DOMAINS = [
+  USER_DATA_DOMAINS.PROGRESSION,
+  USER_DATA_DOMAINS.RESOURCES,
+  USER_DATA_DOMAINS.SETTINGS,
+];
+
+// The compact summary projection is published only for player accounts.
+const subscribeWebmasterSummary = (entry, { next, error }) => {
+  const domains = {};
+  const received = new Set();
+  const stops = WEBMASTER_SUMMARY_DOMAINS.map((domain) => subscribeUserDomain(entry.id, domain, {
+    next: (value) => {
+      domains[domain] = value;
+      received.add(domain);
+      if (received.size === WEBMASTER_SUMMARY_DOMAINS.length) {
+        next(composeManagerUser(entry, domains));
+      }
+    },
+    error: (cause) => {
+      received.delete(domain);
+      error(cause);
+    },
+  }));
+  return () => stops.forEach((stop) => stop());
+};
+
 export const useManagerUserData = (enabled = true, {
   cursor = null, pageSize = MANAGER_USER_PAGE_SIZE, search = '',
 } = {}) => {
@@ -110,7 +135,7 @@ export const useManagerUserData = (enabled = true, {
       const sequence = (record.sequence || 0) + 1;
       record.sequence = sequence;
       const isCurrent = () => active && records.get(record.entry.id) === record && record.sequence === sequence;
-      record.stop = subscribeManagerSummary(record.entry.id, {
+      const observer = {
         next: (summary) => {
           if (!isCurrent()) return;
           record.error = null;
@@ -123,7 +148,10 @@ export const useManagerUserData = (enabled = true, {
           record.error = error;
           publish();
         },
-      });
+      };
+      record.stop = record.entry.role === 'webmaster'
+        ? subscribeWebmasterSummary(record.entry, observer)
+        : subscribeManagerSummary(record.entry.id, observer);
     };
     const subscribeDirectory = () => {
       stopDirectory?.();
@@ -135,19 +163,23 @@ export const useManagerUserData = (enabled = true, {
           directoryError = null;
           directoryReady = true;
           page = nextPage;
-          entries = nextPage.items || [];
+          // Advance using the directory cursor even when this page hides an unnamed webmaster.
+          entries = (nextPage.items || []).filter((entry) => (
+            entry.role !== 'webmaster' || Boolean(entry.characterId)
+          ));
           const ids = new Set(entries.map((entry) => entry.id));
           for (const [uid, record] of records) {
             if (!ids.has(uid)) { record.stop?.(); records.delete(uid); }
           }
           entries.forEach((entry) => {
             const existing = records.get(entry.id);
-            if (existing) {
+            if (existing && existing.entry.role === entry.role) {
               existing.entry = entry;
               if (existing.summary) existing.user = compose(entry, existing.summary, existing.user);
             } else {
               const record = { entry, error: null };
               records.set(entry.id, record);
+              existing?.stop?.();
               subscribeRecord(record);
             }
           });
@@ -158,7 +190,7 @@ export const useManagerUserData = (enabled = true, {
           directoryError = error;
           publish();
         },
-      }, { role: MANAGER_USER_DIRECTORY_ROLE, cursor, pageSize, search });
+      }, { playerRoster: true, cursor, pageSize, search });
     };
     setState({ users: [], unavailableUsers: [], loading: Boolean(enabled), error: null, hasMore: false, nextCursor: null, pageSize });
     if (!enabled) return undefined;

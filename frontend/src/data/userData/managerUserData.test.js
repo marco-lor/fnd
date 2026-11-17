@@ -123,7 +123,7 @@ describe('composeManagerUser', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(getUserDirectoryPage).not.toHaveBeenCalled();
     expect(subscribeUserDomain).not.toHaveBeenCalled();
-    expect(subscribeUserDirectoryPage).toHaveBeenCalledWith(expect.any(Object), {role: 'player', search: 'al', pageSize: 10, cursor: null});
+    expect(subscribeUserDirectoryPage).toHaveBeenCalledWith(expect.any(Object), {playerRoster: true, search: 'al', pageSize: 10, cursor: null});
     const original = result.current.users;
     act(() => observers.a.next({stats: {level: 2}, settings: {}}));
     expect(result.current.users[0]).not.toBe(original[0]);
@@ -133,6 +133,45 @@ describe('composeManagerUser', () => {
     expect(result.current.users).toBe(unchanged);
     unmount(); expect(directoryStop).toHaveBeenCalledTimes(1);
     stops.forEach((stop) => expect(stop).toHaveBeenCalledTimes(1));
+  });
+
+  test('shows webmaster characters and skips webmaster accounts without a character', () => {
+    const cursor = {version: 1};
+    subscribeUserDirectoryPage.mockImplementation((observer) => {
+      observer.next({
+        items: [
+          {id: 'player', label: 'Unnamed character', role: 'player', characterId: ''},
+          {id: 'nyx', label: 'Nyx', role: 'webmaster', characterId: 'Nyx'},
+          {id: 'admin', label: 'Unnamed character', role: 'webmaster', characterId: ''},
+        ],
+        hasMore: true,
+        cursor,
+      });
+      return jest.fn();
+    });
+    subscribeManagerSummary.mockImplementation((_uid, observer) => {
+      observer.next({stats: {}, settings: {}});
+      return jest.fn();
+    });
+    const nyx = {};
+    subscribeUserDomain.mockImplementation((uid, domain, observer) => {
+      expect(uid).toBe('nyx');
+      nyx[domain] = observer;
+      return jest.fn();
+    });
+    const {result} = renderHook(() => useManagerUserData(true));
+    expect(result.current.users.map(({id}) => id)).toEqual(['player']);
+    expect(subscribeManagerSummary.mock.calls.map(([id]) => id)).toEqual(['player']);
+    act(() => nyx.progression.next({stats: {level: 6, combatTokensAvailable: 2}}));
+    act(() => nyx.resources.next({stats: {hpCurrent: 23}}));
+    act(() => nyx.settings.next({settings: {lock_param_base: true}}));
+    expect(result.current.users.map(({id}) => id)).toEqual(['player', 'nyx']);
+    expect(result.current.users[1]).toEqual(expect.objectContaining({
+      stats: {level: 6, combatTokensAvailable: 2, hpCurrent: 23},
+      settings: {lock_param_base: true},
+    }));
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.nextCursor).toBe(cursor);
   });
 
   test('errors belong to their UID; unrelated successes cannot hide them and removal clears them', () => {
