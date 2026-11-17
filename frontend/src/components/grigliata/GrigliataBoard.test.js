@@ -95,7 +95,7 @@ test('bounds token media leases and excludes offscreen tokens after priority sel
   expect(selectedIds).not.toContain('offscreen');
 });
 
-test('defers tiny overview token media except active, selected, and viewer-owned art', () => {
+test('loads visible token media at low zoom while keeping priority tokens first', () => {
   const tokenAt = (tokenId, overrides = {}) => ({
     tokenId,
     imageUrl: `https://example.com/${tokenId}.png`,
@@ -111,11 +111,8 @@ test('defers tiny overview token media except active, selected, and viewer-owned
     }),
     tokenAt('selected', {isSelected: true}),
     tokenAt('active', {isActiveTurn: true}),
-    tokenAt('just-below-useful-size', {
-      renderPosition: {x: 20, y: 20, size: 79.5},
-    }),
-    tokenAt('minimum-useful-size', {
-      renderPosition: {x: 20, y: 20, size: 80},
+    tokenAt('tiny-offscreen', {
+      renderPosition: {x: 2000, y: 2000, size: 50},
     }),
   ];
 
@@ -130,11 +127,10 @@ test('defers tiny overview token media except active, selected, and viewer-owned
     'active',
     'selected',
     'viewer-owned',
-    'minimum-useful-size',
+    'tiny-visible',
+    'manager-movable',
   ]);
-  expect(selectedIds).not.toContain('tiny-visible');
-  expect(selectedIds).not.toContain('manager-movable');
-  expect(selectedIds).not.toContain('just-below-useful-size');
+  expect(selectedIds).not.toContain('tiny-offscreen');
 });
 
 test('keeps token media priority and fixture order stable when candidates exceed the limit', () => {
