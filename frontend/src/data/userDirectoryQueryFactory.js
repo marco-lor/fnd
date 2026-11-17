@@ -1,6 +1,7 @@
 const USER_DIRECTORY_PAGE_SIZE = 50;
 const USER_DIRECTORY_QUERY_KEYS = Object.freeze({
   all: 'directory.users.page.v1',
+  playerRoster: 'directory.users.player-roster.page.v1',
   byRole: Object.freeze({
     player: 'directory.users.by-role.player.page.v1',
     dm: 'directory.users.by-role.dm.page.v1',
@@ -60,6 +61,7 @@ const cursorValues = (cursor, queryKey) => {
 const buildUserDirectoryQuery = ({
   firestore,
   role = null,
+  playerRoster = false,
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
   search = '',
@@ -68,13 +70,18 @@ const buildUserDirectoryQuery = ({
   if (!firestore) throw new TypeError('Directory queries require a Firestore instance.');
   if (!sdk || typeof sdk.query !== 'function') throw new TypeError('Directory queries require Firestore query helpers.');
   const normalizedRole = normalizeRole(role);
+  if (playerRoster && normalizedRole !== null) {
+    throw new TypeError('The player roster cannot be combined with a role filter.');
+  }
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > USER_DIRECTORY_PAGE_SIZE) {
     throw new TypeError(`Directory pageSize must be between 1 and ${USER_DIRECTORY_PAGE_SIZE}.`);
   }
   const normalizedSearch = normalizeDirectorySearch(search);
-  const queryKey = queryKeyForRole(normalizedRole) + (normalizedSearch ? `:search:${normalizedSearch}` : '');
+  const scopeKey = playerRoster ? USER_DIRECTORY_QUERY_KEYS.playerRoster : queryKeyForRole(normalizedRole);
+  const queryKey = scopeKey + (normalizedSearch ? `:search:${normalizedSearch}` : '');
   const constraints = [];
-  if (normalizedRole !== null) constraints.push(sdk.where('role', '==', normalizedRole));
+  if (playerRoster) constraints.push(sdk.where('role', 'in', ['player', 'webmaster']));
+  else if (normalizedRole !== null) constraints.push(sdk.where('role', '==', normalizedRole));
   const upperBound = directorySearchUpperBound(normalizedSearch);
   if (normalizedSearch) constraints.push(sdk.where('normalizedLabel', '>=', normalizedSearch));
   if (upperBound) constraints.push(sdk.where('normalizedLabel', '<', upperBound));

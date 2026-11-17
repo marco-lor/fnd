@@ -89,11 +89,13 @@ export const __buildUserDirectoryQuery = ({
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
   search = '',
+  playerRoster = false,
   firestore = db,
 } = {}) => {
   return buildUserDirectoryQuery({
     firestore,
     role,
+    playerRoster,
     cursor,
     pageSize,
     search,
@@ -165,13 +167,14 @@ export const subscribeUserDirectoryPage = (observer, {
   cursor = null,
   pageSize = USER_DIRECTORY_PAGE_SIZE,
   search = '',
+  playerRoster = false,
 } = {}) => {
-  const built = __buildUserDirectoryQuery({ role, cursor, pageSize, search });
+  const built = __buildUserDirectoryQuery({ role, cursor, pageSize, search, playerRoster });
   let structuralResult = null;
   return subscribeShared({
     metricKey: METRIC_KEYS.subscribe,
     instanceKey: privatePageInstanceKey({
-      role: built.role,
+      role: playerRoster ? 'player-roster' : built.role,
       search: built.search,
       cursor,
       pageSize,
