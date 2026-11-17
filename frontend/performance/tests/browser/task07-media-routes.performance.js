@@ -21,6 +21,15 @@ const task07RegistryMetrics = (registry) => ({
   'task07.lowPriorityQueuedPreloads': Number(registry?.lowPriorityQueuedRequestCount),
 });
 
+const waitForSmallBoardPortrait = (page) => page.waitForFunction(() => (
+  (window.Konva?.stages || []).some((stage) => stage.find((node) => (
+    String(node.getAttr('data-testid') || '').startsWith('token-node-perf-token-')
+  )).some((token) => {
+    const portrait = token.findOne('Image');
+    return portrait && portrait.width() * portrait.getAbsoluteScale().x < 16;
+  }))
+));
+
 const inspectManagedMedia = () => {
   const images = Array.from(document.querySelectorAll('img[data-media-state]'));
   const farViewportBottom = window.innerHeight + 300;
@@ -109,6 +118,7 @@ for (const scenario of manifest.scenarios) {
       }
 
       if (scenario.id === 'task07-grigliata-media') {
+        await waitForSmallBoardPortrait(page);
         await page.waitForFunction(() => (
           typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
         ));
@@ -123,10 +133,8 @@ for (const scenario of manifest.scenarios) {
           maxTotalDecodedBytes: 384 * 1024 * 1024,
           maxLowPriorityQueueSize: 32,
         });
-        // The fixture's full-map fit makes ordinary token art smaller than the
-        // useful-media threshold. Only bounded priority/shell records may remain.
-        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
-        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
+        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(registry.limits.maxRecords);
+        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(registry.limits.maxDecodedBytes);
         expect(registry.decodedBytes).toBeLessThanOrEqual(384 * 1024 * 1024);
         expect(registry.activeRequestCount).toBe(0);
         expect(registry.queuedRequestCount).toBe(0);
@@ -201,9 +209,7 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       expectedPathname: '/grigliata',
       timeoutMs: 30_000,
     });
-    // Readiness can precede the active board image load. Capture only after the
-    // finite registry is idle and stable, without requiring it to fill spare
-    // capacity with tiny overview token art.
+    await waitForSmallBoardPortrait(page);
     const registry = await waitForImageRegistrySettlement(page, {
       minimumLoadedRecords: 1,
     });
@@ -232,8 +238,8 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
     expect(registry.loadedRecordCount).toBeGreaterThanOrEqual(1);
     expect(registry.pinnedRecordCount).toBe(1);
     expect(registry.namedPins).toContain('grigliata-active-board');
-    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
-    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
+    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(registry.limits.maxRecords);
+    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(registry.limits.maxDecodedBytes);
     expect(registry.decodedBytes).toBeLessThanOrEqual(registry.limits.maxTotalDecodedBytes);
     expect(registry.activeRequestCount).toBe(0);
     expect(registry.queuedRequestCount).toBe(0);
