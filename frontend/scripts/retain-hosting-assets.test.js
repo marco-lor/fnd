@@ -133,6 +133,21 @@ test('identity HTTP response still verifies the actual gzip upload digest', asyn
   await call('retainPreviousAssets', f.options);
   assert.equal(fs.readFileSync(path.join(f.buildDir, oldMain), 'utf8'), 'old main');
 });
+test('retains identity downloads when the original upload used the other platform gzip header', async t => {
+  const f = fixture(t);
+  for (const file of f.files) {
+    const uploaded = zlib.gzipSync(f.bodies.get(file.path), {level: 9});
+    uploaded[9] = uploaded[9] === 3 ? 10 : 3;
+    file.hash = sha(uploaded);
+  }
+  f.options.download = async url => ({
+    statusCode: 200,
+    headers: {},
+    body: f.bodies.get(new URL(url).pathname),
+  });
+  await call('retainPreviousAssets', f.options);
+  assert.equal(fs.readFileSync(path.join(f.buildDir, oldMain), 'utf8'), 'old main');
+});
 for (const limits of [{maxFiles: 1}, {maxTotalBytes: 5}, {maxFileBytes: 5}, {timeoutMs: 1}]) test(`enforces resource bound ${JSON.stringify(limits)}`, async t => {
   const f = fixture(t); f.options.limits = limits;
   if (limits.timeoutMs) { let tick = now; f.options.now = () => tick += 100; }

@@ -50,13 +50,17 @@ function verifyDownloadedFile(response, expectedHash, maxBytes) {
   catch (_error) { throw new Error('Invalid, partial, or byte-limit-exceeding gzip download.'); }
   if (bytes.length > maxBytes) throw new Error('Decoded file byte limit exceeded.');
   // Hosting VersionFile.hash hashes the uploaded gzip(level=9) bytes, not HTTP identity bytes.
-  // Prefer the unchanged uploaded gzip stream. Recompression handles identity responses;
-  // if a different compressor cannot reproduce the upload digest, stop the release.
-  if (!(encoding === 'gzip' && sha256(wire) === expectedHash)
-    && sha256(zlib.gzipSync(bytes, {level: 9})) !== expectedHash) {
-    throw new Error('Downloaded asset upload hash / digest mismatch.');
+  if (encoding === 'gzip' && sha256(wire) === expectedHash) return bytes;
+
+  // For identity responses, reproduce the upload from the decoded bytes.
+  // Linux and Windows zlib can differ in the gzip header's OS byte.
+  const recompressed = zlib.gzipSync(bytes, {level: 9});
+  const platformBytes = new Set([recompressed[9], 3, 10]);
+  for (const platformByte of platformBytes) {
+    recompressed[9] = platformByte;
+    if (sha256(recompressed) === expectedHash) return bytes;
   }
-  return bytes;
+  throw new Error('Downloaded asset upload hash / digest mismatch.');
 }
 function assertHardenedAsset(assetPath, bytes) {
   if (/\.(?:js|css)$/.test(assetPath)) {
