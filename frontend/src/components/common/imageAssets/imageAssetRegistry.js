@@ -165,8 +165,8 @@ const toBoundedDrawable = (record, image) => {
   } catch {
     drawable = null;
   }
-  if (!drawable) return image;
   releaseFullResolutionImage(image);
+  if (!drawable) return null;
   if (drawable.dataset) {
     // Runtime metadata for diagnostics/browser probes: a canvas has no src.
     drawable.dataset.fndSourceSrc = record.src;
@@ -536,9 +536,9 @@ const startImageAssetRequest = (record, request) => {
     record.promise = null;
     request.image = null;
 
-    if (image) {
+    const drawable = image ? toBoundedDrawable(record, image) : null;
+    if (drawable) {
       record.nextSrc = '';
-      const drawable = toBoundedDrawable(record, image);
       record.failureCount = 0;
       record.backoffBypassFailureCount = 0;
       record.retryAt = 0;
@@ -561,7 +561,9 @@ const startImageAssetRequest = (record, request) => {
       drainImageAssetRequestQueue();
       return;
     } else {
-      const nextError = normalizeImageAssetLoadError(record, error);
+      const nextError = image
+        ? new Error('Unable to create a bounded portrait image.')
+        : normalizeImageAssetLoadError(record, error);
       record.failureCount += 1;
       record.retryAt = getCurrentTime() + getImageAssetFailureBackoffMs(record.failureCount);
       record.decodedBytes = 0;
@@ -1033,10 +1035,26 @@ const refreshImageAssetRuntimeProfile = () => {
   drainImageAssetRequestQueue();
 };
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', refreshImageAssetRuntimeProfile);
-  window.navigator.connection?.addEventListener?.('change', refreshImageAssetRuntimeProfile);
-}
+export const getCurrentImageAssetRuntimeLimits = () => imageAssetRegistryConfig;
+
+export const subscribeImageAssetRuntimeLimits = (notify) => {
+  if (typeof window === 'undefined') return () => {};
+  const connection = window.navigator.connection;
+  const onChange = () => {
+    refreshImageAssetRuntimeProfile();
+    notify?.();
+  };
+  window.addEventListener('resize', onChange);
+  connection?.addEventListener?.('change', onChange);
+  onChange();
+  return () => {
+    window.removeEventListener('resize', onChange);
+    connection?.removeEventListener?.('change', onChange);
+  };
+};
+
+// The registry still trims idle records when there are no mounted boards.
+subscribeImageAssetRuntimeLimits();
 
 const normalizeNonNegativeInteger = (value, fallback) => (
   Number.isFinite(value) && value >= 0

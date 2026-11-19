@@ -610,10 +610,10 @@ const getRecordDecodedBytes = (record) => {
   );
 };
 
-const getReferencedBoundedDecodedBytes = (excludedKey) => {
+const getReferencedBoundedDecodedBytes = (excludedRecord) => {
   let bytes = 0;
   const add = (record) => {
-    if (record.key !== excludedKey && record.refCount > 0 && record.drawableEdge > 0) {
+    if (record !== excludedRecord && record.refCount > 0 && record.drawableEdge > 0) {
       bytes += (record.decodedBytes || 0) + (record.reservedDecodedBytes || 0);
     }
   };
@@ -655,7 +655,7 @@ const reserveDecodedCapacity = (decodedBytes, protectedRecord, {
         referenced
         && bounded
         && !exceedsUnreferencedBudget
-        && getReferencedBoundedDecodedBytes(protectedRecord.key) + ownDecodedBytes
+        && getReferencedBoundedDecodedBytes(protectedRecord) + ownDecodedBytes
           <= runtime.maxBoundedDecodeOverageBytes
       ) return;
       throw createCapacityPressureError(

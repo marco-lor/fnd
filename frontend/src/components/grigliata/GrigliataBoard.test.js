@@ -1798,6 +1798,36 @@ describe('GrigliataBoard', () => {
       }
     });
 
+    test('resizes loaded portraits when Save-Data changes without a viewport resize', async () => {
+      const original = Object.getOwnPropertyDescriptor(navigator, 'connection');
+      const connection = Object.assign(new EventTarget(), {saveData: false});
+      Object.defineProperty(navigator, 'connection', {configurable: true, value: connection});
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        const {tokens, props} = buildHugeMapBoard({tokenCount: 40});
+        const view = render(<GrigliataBoard {...props} />);
+        await expectEveryPortrait(tokens);
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([512]));
+        act(() => {
+          connection.saveData = true;
+          connection.dispatchEvent(new Event('change'));
+        });
+        await waitFor(() => {
+          const registry = getTokenPortraitRegistryStats();
+          expect(registry.limits.profile).toBe('compact');
+          const latest = getLatestTokenNodeProps(tokenNodeSpy);
+          tokens.forEach(({tokenId}) => expect(latest.get(tokenId).portraitMaxEdge).toBe(256));
+          expect(registry.decodedBytes).toBeLessThanOrEqual(registry.limits.maxTotalDecodedBytes);
+        }, {timeout: 7000});
+        await expectEveryPortrait(tokens);
+        view.unmount();
+      } finally {
+        tokenNodeSpy.mockRestore();
+        if (original) Object.defineProperty(navigator, 'connection', original);
+        else delete navigator.connection;
+      }
+    });
+
     test('degrades to the floor edge, never a blank, when a compact map alone exceeds the budget', async () => {
       useCompactRuntime();
       const tokenNodeSpy = spyOnTokenNodes();
@@ -4141,13 +4171,11 @@ describe('GrigliataBoard', () => {
     }));
     const { rerender } = render(<GrigliataBoard {...props} />);
 
-    await waitFor(() => {
-      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/owned-loading-geometry.png',
-        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
-      );
-    });
     await act(async () => {});
+    expect(useImageAssetSnapshot).not.toHaveBeenCalledWith(
+      'https://example.com/owned-loading-geometry.png',
+      TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
+    );
     expect(useImageAssetSnapshot).not.toHaveBeenCalledWith(
       'https://example.com/ordinary-loading-geometry.png',
         TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
@@ -4163,6 +4191,10 @@ describe('GrigliataBoard', () => {
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
         'https://example.com/ordinary-loading-geometry.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
+      );
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'https://example.com/owned-loading-geometry.png',
         TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
