@@ -69,14 +69,14 @@ test('structural metric completeness honors an auxiliary scenario contract', () 
         id: 'task07-registry-desktop',
         requiredMetrics: [
           'task07.registryRequestConcurrencyLimit',
-          'task07.unpinnedRegistryRecords',
+          'task07.idleRegistryRecords',
         ],
       }],
     },
     browser: { scenarios: [{ scenarioId: 'task07-registry-desktop' }] },
     metrics: {
       'task07-registry-desktop:task07.registryRequestConcurrencyLimit': 4,
-      'task07-registry-desktop:task07.unpinnedRegistryRecords': 72,
+      'task07-registry-desktop:task07.idleRegistryRecords': 72,
     },
     fixture: {},
     fixtureManifest: {},
@@ -88,12 +88,12 @@ test('structural metric completeness honors an auxiliary scenario contract', () 
     .find((evaluation) => evaluation.id === 'metric-completeness');
   assert.equal(gate.status, 'pass');
 
-  delete current.metrics['task07-registry-desktop:task07.unpinnedRegistryRecords'];
+  delete current.metrics['task07-registry-desktop:task07.idleRegistryRecords'];
   gate = evaluateStructuralGates(current)
     .find((evaluation) => evaluation.id === 'metric-completeness');
   assert.equal(gate.status, 'fail');
   assert.deepEqual(gate.missing, [
-    'task07-registry-desktop:task07.unpinnedRegistryRecords',
+    'task07-registry-desktop:task07.idleRegistryRecords',
   ]);
 });
 

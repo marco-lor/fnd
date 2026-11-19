@@ -19,6 +19,7 @@ import {
   PRIVATE_MEDIA_MAX_RECORDS,
   PRIVATE_MEDIA_FAILURE_BACKOFF_MS,
   PRIVATE_VIDEO_CONTENT_TYPES,
+  subscribePrivateMediaCapacity,
 } from './privateMediaAssets';
 
 const canonicalAssetId = (id) => {
@@ -425,13 +426,16 @@ describe('privateMediaAssets', () => {
     const secondLease = acquirePrivateMediaAsset(secondValue);
     await expect(secondLease.promise).rejects.toMatchObject({
       code: 'private-media-decoded-budget-exceeded',
+      capacityPressure: true,
     });
     secondLease.release();
 
+    // Pressure is admitted before the network and is not cached as a failure.
+    expect(runtime.getBlob).toHaveBeenCalledTimes(1);
     expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
       cachedBytes: 4,
       cachedDecodedBytes: 64,
-      recordCount: 2,
+      recordCount: 1,
     }));
     expect(runtime.revokeObjectURL).not.toHaveBeenCalled();
 
@@ -530,11 +534,14 @@ describe('privateMediaAssets', () => {
     const blockedLease = acquirePrivateMediaAsset(secondValue);
     await expect(blockedLease.promise).rejects.toMatchObject({
       code: 'private-media-byte-budget-exceeded',
+      capacityPressure: true,
     });
     blockedLease.release();
+    expect(runtime.getBlob).toHaveBeenCalledTimes(1);
     expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
       cachedBytes: 3,
-      recordCount: 2,
+      reservedBytes: 0,
+      recordCount: 1,
     }));
     expect(runtime.revokeObjectURL).not.toHaveBeenCalled();
 
@@ -610,5 +617,285 @@ describe('privateMediaAssets', () => {
       cachedBytes: 6,
     }));
     expect(runtime.revokeObjectURL).toHaveBeenCalledTimes(9);
+  });
+
+  test('admits compressed bytes before downloading so concurrent fetches never exceed the budget', async () => {
+    const resolvers = [];
+    const runtime = createRuntime({
+      maxCacheBytes: 10,
+      maxRecords: 4,
+      getBlobImplementation: jest.fn((_objectRef, bytes) => new Promise((resolve) => {
+        resolvers.push(() => resolve(new Blob(['x'.repeat(bytes)], { type: 'image/webp' })));
+      })),
+    });
+    const firstLease = acquirePrivateMediaAsset(descriptor('inflight-a', 6));
+    const secondLease = acquirePrivateMediaAsset(descriptor('inflight-b', 6));
+
+    await expect(secondLease.promise).rejects.toMatchObject({
+      code: 'private-media-byte-budget-exceeded',
+      capacityPressure: true,
+    });
+    expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
+      reservedBytes: 6,
+      cachedBytes: 0,
+      recordCount: 1,
+    }));
+    expect(runtime.getBlob).toHaveBeenCalledTimes(1);
+
+    resolvers.splice(0).forEach((resolve) => resolve());
+    await firstLease.promise;
+    expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
+      reservedBytes: 0,
+      cachedBytes: 6,
+    }));
+    firstLease.release();
+    secondLease.release();
+  });
+
+  test('notifies capacity waiters once per release batch and never on a pressure rejection', async () => {
+    createRuntime({ maxCacheBytes: 4, maxRecords: 4 });
+    const listener = jest.fn();
+    const unsubscribe = subscribePrivateMediaCapacity(listener);
+    const heldLease = acquirePrivateMediaAsset(descriptor('notify-held', 4));
+    await heldLease.promise;
+
+    const blockedLease = acquirePrivateMediaAsset(descriptor('notify-blocked', 4));
+    await expect(blockedLease.promise).rejects.toMatchObject({ capacityPressure: true });
+    blockedLease.release();
+    await flushAsync();
+    expect(listener).not.toHaveBeenCalled();
+
+    heldLease.release();
+    await flushAsync();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    const retryLease = acquirePrivateMediaAsset(descriptor('notify-blocked', 4));
+    await expect(retryLease.promise).resolves.toEqual(expect.objectContaining({
+      url: expect.stringMatching(/^blob:private-/),
+    }));
+    retryLease.release();
+    unsubscribe();
+    expect(getPrivateMediaAssetCacheSnapshot().capacityWaiterCount).toBe(0);
+  });
+
+  test.each([
+    { label: '31 of 32', backgroundBytes: 31 },
+    { label: 'exactly 32 of 32', backgroundBytes: 32 },
+  ])('admits bounded portraits through the transient lane while a background holds $label bytes', async ({
+    backgroundBytes,
+  }) => {
+    const runtime = createRuntime({ maxCacheBytes: 32, maxRecords: 8 });
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: runtime.loadStorageApi,
+      createObjectURL: runtime.createObjectURL,
+      revokeObjectURL: runtime.revokeObjectURL,
+      maxCacheBytes: 32,
+      maxRecords: 8,
+      maxTransientPortraitBytes: 4,
+    });
+    const capacityListener = jest.fn();
+    const unsubscribe = subscribePrivateMediaCapacity(capacityListener);
+    const backgroundLease = acquirePrivateMediaAsset(descriptor('lane-background', backgroundBytes, {
+      width: 64,
+      height: 64,
+    }));
+    await backgroundLease.promise;
+
+    // An unbounded consumer of the same size never uses the lane.
+    const unboundedLease = acquirePrivateMediaAsset(descriptor('lane-unbounded', 2));
+    await expect(unboundedLease.promise).rejects.toMatchObject({ capacityPressure: true });
+    unboundedLease.release();
+    // A bounded portrait that would push the aggregate overage past the 4-byte
+    // lane stays blocked (no unlimited growth).
+    const oversizedLease = acquirePrivateMediaAsset(
+      descriptor('lane-oversized', 32 - backgroundBytes + 5),
+      { maxDrawableEdge: 512 }
+    );
+    await expect(oversizedLease.promise).rejects.toMatchObject({ capacityPressure: true });
+    oversizedLease.release();
+
+    const firstPortrait = acquirePrivateMediaAsset(
+      descriptor('lane-portrait-a', 2),
+      { maxDrawableEdge: 512 }
+    );
+    await expect(firstPortrait.promise).resolves.toEqual(expect.objectContaining({
+      url: expect.stringMatching(/^blob:private-/),
+    }));
+    expect(getPrivateMediaAssetCacheSnapshot()).toMatchObject({
+      cachedBytes: backgroundBytes + 2,
+      transientOverageBytes: backgroundBytes + 2 - 32,
+      maxTransientPortraitBytes: 4,
+    });
+
+    // The lane is shared: a second concurrent portrait keeps the aggregate
+    // overage within 4 bytes, a third would exceed it and must wait.
+    const secondPortrait = acquirePrivateMediaAsset(
+      descriptor('lane-portrait-b', 2),
+      { maxDrawableEdge: 512 }
+    );
+    await expect(secondPortrait.promise).resolves.toBeTruthy();
+    const blockedPortrait = acquirePrivateMediaAsset(
+      descriptor('lane-portrait-blocked', 2),
+      { maxDrawableEdge: 512 }
+    );
+    await expect(blockedPortrait.promise).rejects.toMatchObject({ capacityPressure: true });
+    blockedPortrait.release();
+    expect(getPrivateMediaAssetCacheSnapshot().transientOverageBytes).toBeLessThanOrEqual(4);
+    secondPortrait.release();
+    // The portrait decoded its drawable and released: the overage drains.
+    firstPortrait.release();
+    await flushAsync();
+    expect(getPrivateMediaAssetCacheSnapshot()).toMatchObject({
+      cachedBytes: backgroundBytes,
+      transientOverageBytes: 0,
+      reservedBytes: 0,
+    });
+    expect(capacityListener).toHaveBeenCalled();
+    // The background never lost its lease or its object URL.
+    expect(getPrivateMediaAssetCacheSnapshot().records).toEqual([
+      expect.objectContaining({ refCount: 1, bytes: backgroundBytes, status: 'ready' }),
+    ]);
+
+    const thirdPortrait = acquirePrivateMediaAsset(
+      descriptor('lane-portrait-c', 2),
+      { maxDrawableEdge: 512 }
+    );
+    await expect(thirdPortrait.promise).resolves.toBeTruthy();
+    thirdPortrait.release();
+    backgroundLease.release();
+    unsubscribe();
+  });
+
+test.each(['map', 'portrait'])('honors parallel reservations when the %s finishes first', async (first) => {
+  const finish = new Map();
+  createRuntime({
+    maxCacheBytes: 32,
+    getBlobImplementation: (ref, size) => new Promise((resolve) => {
+      finish.set(ref.path, () => resolve({size, type: 'image/webp'}));
+    }),
+  });
+  const assets = {map: descriptor('reserved-map', 32), portrait: descriptor('in-flight-portrait', 2)};
+  const mapLease = acquirePrivateMediaAsset(assets.map);
+  const portraitLease = acquirePrivateMediaAsset(assets.portrait, {maxDrawableEdge: 512});
+  const leases = {map: mapLease, portrait: portraitLease};
+  await flushAsync();
+  expect(getPrivateMediaAssetCacheSnapshot().reservedBytes).toBe(34);
+  for (const id of [first, first === 'map' ? 'portrait' : 'map']) {
+    finish.get(assets[id].path)();
+    await expect(leases[id].promise).resolves.toHaveProperty('url');
+  }
+  expect(getPrivateMediaAssetCacheSnapshot()).toMatchObject({reservedBytes: 0, transientOverageBytes: 2});
+  portraitLease.release();
+  mapLease.release();
+});
+
+test('releasing a failed fallback during backoff does not wake capacity waiters', async () => {
+  const runtime = createRuntime({getBlobImplementation: async () => { throw new Error('missing fallback'); }});
+  const fallback = descriptor('missing-fallback');
+  const failed = acquirePrivateMediaAsset(fallback);
+  await expect(failed.promise).rejects.toThrow('missing fallback');
+  failed.release();
+  await flushAsync();
+  const listener = jest.fn();
+  const unsubscribe = subscribePrivateMediaCapacity(listener);
+  for (let i = 0; i < 2; i += 1) {
+    const lease = acquirePrivateMediaAsset(fallback);
+    await expect(lease.promise).rejects.toThrow('missing fallback');
+    lease.release();
+  }
+  await flushAsync();
+  expect(listener).not.toHaveBeenCalled();
+  expect(runtime.getBlob).toHaveBeenCalledTimes(1);
+  unsubscribe();
+});
+
+test('admits one maximum-size portrait beside a full cache, then reuses that allowance', async () => {
+  const bytes = PRIVATE_MEDIA_MAX_CACHE_BYTES;
+  const runtime = createRuntime({getBlobImplementation: async (_, size) => ({size, type: 'image/webp'})});
+  const map = acquirePrivateMediaAsset(descriptor('full-cache-map', bytes));
+  await map.promise;
+  const options = {maxDrawableEdge: 512};
+  const first = acquirePrivateMediaAsset(descriptor('maximum-portrait', bytes), options);
+  await first.promise;
+  expect(getPrivateMediaAssetCacheSnapshot().transientOverageBytes).toBe(bytes);
+
+  const next = descriptor('waiting-portrait', bytes);
+  const waiting = acquirePrivateMediaAsset(next, options);
+  await expect(waiting.promise).rejects.toMatchObject({capacityPressure: true});
+  waiting.release();
+  expect(runtime.getBlob).toHaveBeenCalledTimes(2);
+  first.release();
+  const retried = acquirePrivateMediaAsset(next, options);
+  await retried.promise;
+  expect(runtime.getBlob).toHaveBeenCalledTimes(3);
+  retried.release();
+  expect(getPrivateMediaAssetCacheSnapshot().transientOverageBytes).toBe(0);
+  map.release();
+});
+
+test('admits bounded portrait drawables beside an oversized referenced map, within the overage cap', async () => {
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({
+        storage: {},
+        ref: (_storage, path) => ({ path }),
+        getBlob: async (_objectRef, bytes) => new Blob(['x'.repeat(bytes)], { type: 'image/webp' }),
+      })),
+      createObjectURL: jest.fn((blob) => `blob:bounded-${blob.size}`),
+      revokeObjectURL: jest.fn(),
+      maxCacheBytes: 64,
+      maxDecodedBytes: 1024,
+      maxTotalDecodedBytes: 4096,
+      maxRecords: 8,
+      maxBoundedDecodeOverageBytes: 400,
+    });
+    // 40x40x4 = 6400 decoded bytes: above the 4096 total cap on its own.
+    const mapLease = acquirePrivateMediaAsset(descriptor('oversized-map', 8, {
+      width: 40,
+      height: 40,
+    }));
+    await mapLease.promise;
+
+    // Full-resolution 8x8 portrait (256 bytes) cannot join the exhausted cap.
+    const fullLease = acquirePrivateMediaAsset(descriptor('full-portrait', 4, {
+      width: 8,
+      height: 8,
+    }));
+    await expect(fullLease.promise).rejects.toMatchObject({
+      code: 'private-media-decoded-budget-exceeded',
+      capacityPressure: true,
+    });
+    fullLease.release();
+
+    // A 16x16 source bounded to 8 px costs 256 bytes: it fits the overage once.
+    const boundedLease = acquirePrivateMediaAsset(descriptor('bounded-a', 4, {
+      width: 16,
+      height: 16,
+    }), { maxDrawableEdge: 8 });
+    await expect(boundedLease.promise).resolves.toEqual(expect.objectContaining({
+      url: expect.stringMatching(/^blob:bounded-/),
+    }));
+    const secondBoundedLease = acquirePrivateMediaAsset(descriptor('bounded-b', 4, {
+      width: 16,
+      height: 16,
+    }), { maxDrawableEdge: 8 });
+    await expect(secondBoundedLease.promise).rejects.toMatchObject({
+      capacityPressure: true,
+    });
+    secondBoundedLease.release();
+
+    // Once the first portrait released its lease, it is evictable and the
+    // second bounded portrait fits; the referenced map is never evicted.
+    boundedLease.release();
+    const retryLease = acquirePrivateMediaAsset(descriptor('bounded-b', 4, {
+      width: 16,
+      height: 16,
+    }), { maxDrawableEdge: 8 });
+    await expect(retryLease.promise).resolves.toBeTruthy();
+    expect(getPrivateMediaAssetCacheSnapshot().records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ refCount: 1, decodedBytes: 6400, status: 'ready' }),
+      expect.objectContaining({ refCount: 1, decodedBytes: 256, status: 'ready' }),
+    ]));
+    retryLease.release();
+    mapLease.release();
   });
 });

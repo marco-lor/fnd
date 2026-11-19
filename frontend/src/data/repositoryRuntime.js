@@ -81,6 +81,17 @@ export const setRepositoryActor = (uidOrNull) => {
 };
 
 /**
+ * Read-only view of the authoritative actor session, for caches outside the
+ * repository layer that must not outlive an auth/access-scope transition.
+ *
+ * @returns {{ actorUid: string|null, generation: number }}
+ */
+export const getRepositorySessionScope = () => ({
+  actorUid,
+  generation: sessionGeneration,
+});
+
+/**
  * Shares an in-flight load and its successful result until invalidation or an
  * authoritative auth transition. Rejections are shared only for bounded
  * retry windows (250 ms, 1 second, then 4 seconds).

@@ -5,15 +5,20 @@ import {
   subscribeToImageAsset,
 } from './imageAssetRegistry';
 
-export function useImageAssetSnapshot(src) {
+// `maxEdge` (optional) asks the registry for a shared drawable bounded to that
+// many px on its longest side; oversized sources drop their full decode.
+export function useImageAssetSnapshot(src, { maxEdge = 0 } = {}) {
   const normalizedSrc = typeof src === 'string' ? src.trim() : '';
+  const normalizedMaxEdge = Number(maxEdge) > 0 ? Math.floor(Number(maxEdge)) : 0;
   const subscribe = useCallback(
-    (listener) => subscribeToImageAsset(normalizedSrc, listener),
-    [normalizedSrc]
+    (listener) => subscribeToImageAsset(normalizedSrc, listener, {
+      maxEdge: normalizedMaxEdge,
+    }),
+    [normalizedMaxEdge, normalizedSrc]
   );
   const getSnapshot = useCallback(
-    () => getImageAssetSnapshot(normalizedSrc),
-    [normalizedSrc]
+    () => getImageAssetSnapshot(normalizedSrc, { maxEdge: normalizedMaxEdge }),
+    [normalizedMaxEdge, normalizedSrc]
   );
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
@@ -22,17 +27,15 @@ export function useImageAssetSnapshot(src) {
       return undefined;
     }
 
-    ensureImageAsset(normalizedSrc).catch(() => null);
+    ensureImageAsset(normalizedSrc, { maxEdge: normalizedMaxEdge }).catch(() => null);
     return undefined;
-  }, [normalizedSrc]);
+  }, [normalizedMaxEdge, normalizedSrc]);
 
   return snapshot;
 }
 
-export default function useImageAsset(src) {
-  const snapshot = useImageAssetSnapshot(src);
+export default function useImageAsset(src, options) {
+  const snapshot = useImageAssetSnapshot(src, options);
 
   return snapshot.image;
 }
-
-

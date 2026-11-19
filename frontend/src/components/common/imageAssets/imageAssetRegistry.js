@@ -48,6 +48,12 @@ export const IMAGE_ASSET_REGISTRY_LIMITS = Object.freeze(
 );
 
 const imageAssetRecords = new Map();
+// Source URL -> stable drawable identity (e.g. authorized private bytes).
+// Bounded records for an aliased URL are keyed by identity, so every URL for
+// the same identity shares one bounded drawable, including after the URL that
+// decoded it was revoked. Full-resolution records stay keyed by URL.
+const imageAssetSourceIdentities = new Map();
+const MAX_IMAGE_ASSET_SOURCE_IDENTITIES = 2048;
 const pendingImageAssetRequests = [];
 const scheduledImageAssetPreloads = new Set();
 const namedImageAssetPins = new Map();
@@ -70,6 +76,107 @@ const EMPTY_IMAGE_ASSET_SNAPSHOT = {
 const normalizeImageAssetSrc = (src) => (
   typeof src === 'string' ? src.trim() : ''
 );
+
+// A bounded record keeps at most `maxEdge` px on its longest side. It is keyed
+// apart from the full-resolution record for the same URL, so a consumer that
+// needs full resolution never receives a downscaled drawable (or vice versa),
+// while every bounded consumer of one source still shares one drawable.
+const normalizeMaxDrawableEdge = (value) => {
+  const edge = Math.floor(Number(value));
+  return Number.isFinite(edge) && edge > 0 ? edge : 0;
+};
+
+// Normalized srcs are trimmed, so no URL key can start with a newline.
+const getIdentityRecordKey = (identityKey, maxEdge) => (
+  identityKey && maxEdge > 0
+    ? `\nfnd-identity:${identityKey}\n#fnd-max-edge=${maxEdge}`
+    : ''
+);
+
+const readImageAssetRecordKey = (src, options) => {
+  const normalizedSrc = normalizeImageAssetSrc(src);
+  const maxEdge = normalizeMaxDrawableEdge(options?.maxEdge);
+  let key = '';
+  let identityKey = '';
+  if (normalizedSrc) {
+    identityKey = maxEdge > 0 ? imageAssetSourceIdentities.get(normalizedSrc) || '' : '';
+    if (identityKey) key = getIdentityRecordKey(identityKey, maxEdge);
+    else key = maxEdge > 0 ? `${normalizedSrc}\n#fnd-max-edge=${maxEdge}` : normalizedSrc;
+  }
+  return { normalizedSrc, maxEdge, key, identityKey };
+};
+
+const getImageNaturalSize = (image) => ({
+  width: Number(image?.naturalWidth || image?.videoWidth || image?.width || 0),
+  height: Number(image?.naturalHeight || image?.videoHeight || image?.height || 0),
+});
+
+// Draws an oversized decoded image into a canvas that fits within maxEdge.
+// Returns null when no 2D canvas is available; the caller then keeps the
+// original image so the portrait still renders.
+const defaultCreateBoundedDrawable = (image, { maxEdge }) => {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    return null;
+  }
+  const { width: sourceWidth, height: sourceHeight } = getImageNaturalSize(image);
+  const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  let context = null;
+  try {
+    context = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+  } catch {
+    context = null;
+  }
+  if (!context || typeof context.drawImage !== 'function') return null;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas;
+};
+
+let createBoundedDrawable = defaultCreateBoundedDrawable;
+
+const releaseFullResolutionImage = (image) => {
+  if (!image) return;
+  image.onload = null;
+  image.onerror = null;
+  try {
+    if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
+    else image.src = '';
+  } catch {
+    // Dropping the full-resolution decode must not fail the bounded result.
+  }
+};
+
+// Replaces an oversized decode with a bounded drawable and drops the
+// full-resolution image, so referenced (never evicted) portraits cost at most
+// maxEdge^2 * 4 bytes each. Sources within the bound keep their image as-is.
+const toBoundedDrawable = (record, image) => {
+  const maxEdge = record.maxDrawableEdge;
+  if (!maxEdge) return image;
+  const { width: sourceWidth, height: sourceHeight } = getImageNaturalSize(image);
+  if (!(Math.max(sourceWidth, sourceHeight) > maxEdge)) return image;
+
+  let drawable = null;
+  try {
+    drawable = createBoundedDrawable(image, { maxEdge, src: record.src });
+  } catch {
+    drawable = null;
+  }
+  if (!drawable) return image;
+  releaseFullResolutionImage(image);
+  if (drawable.dataset) {
+    // Runtime metadata for diagnostics/browser probes: a canvas has no src.
+    drawable.dataset.fndSourceSrc = record.src;
+    drawable.dataset.fndSourceWidth = String(sourceWidth);
+    drawable.dataset.fndSourceHeight = String(sourceHeight);
+    drawable.dataset.fndDrawable = 'bounded-canvas';
+    if (record.identityKey) drawable.dataset.fndDrawableIdentity = 'shared';
+  }
+  return drawable;
+};
 
 const buildImageAssetSnapshot = (record) => record?.snapshot || EMPTY_IMAGE_ASSET_SNAPSHOT;
 
@@ -113,20 +220,50 @@ const touchImageAssetRecord = (record) => {
   record.lastAccessSequence = imageAssetAccessSequence;
 };
 
-const getOrCreateImageAssetRecord = (src) => {
-  const normalizedSrc = normalizeImageAssetSrc(src);
+// Another URL for the same identity: a loaded drawable is shared as-is; an
+// in-flight decode keeps its URL and falls back to this one if it fails; an
+// idle or failed record switches to it (the failure belonged to the old URL).
+const offerImageAssetRecordSource = (record, src) => {
+  if (!record.identityKey || !src || record.src === src) return;
+  if (record.status === 'loaded' && record.image) return;
+  if (record.request) {
+    record.nextSrc = src;
+    return;
+  }
+  record.src = src;
+  record.nextSrc = '';
+  record.failureCount = 0;
+  record.backoffBypassFailureCount = 0;
+  record.retryAt = 0;
+  if (record.status === 'error') {
+    updateImageAssetRecord(record, { status: 'idle', image: null, error: null });
+  }
+};
+
+const getOrCreateImageAssetRecord = (src, options) => {
+  const {
+    normalizedSrc,
+    maxEdge,
+    key,
+    identityKey,
+  } = readImageAssetRecordKey(src, options);
   if (!normalizedSrc) {
     return null;
   }
 
-  const existingRecord = imageAssetRecords.get(normalizedSrc);
+  const existingRecord = imageAssetRecords.get(key);
   if (existingRecord) {
+    offerImageAssetRecordSource(existingRecord, normalizedSrc);
     touchImageAssetRecord(existingRecord);
     return existingRecord;
   }
 
   const nextRecord = {
+    key,
     src: normalizedSrc,
+    nextSrc: '',
+    identityKey,
+    maxDrawableEdge: maxEdge,
     status: 'idle',
     image: null,
     error: null,
@@ -144,23 +281,12 @@ const getOrCreateImageAssetRecord = (src) => {
     lastAccessSequence: 0,
   };
   touchImageAssetRecord(nextRecord);
-  imageAssetRecords.set(normalizedSrc, nextRecord);
+  imageAssetRecords.set(key, nextRecord);
   return nextRecord;
 };
 
 const estimateDecodedImageBytes = (image) => {
-  const width = Number(
-    image?.naturalWidth
-    || image?.videoWidth
-    || image?.width
-    || 0
-  );
-  const height = Number(
-    image?.naturalHeight
-    || image?.videoHeight
-    || image?.height
-    || 0
-  );
+  const { width, height } = getImageNaturalSize(image);
 
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return 0;
@@ -201,6 +327,9 @@ const getImageAssetRegistryTotals = () => {
   let pinnedRecordCount = 0;
   let unpinnedRecordCount = 0;
   let referencedRecordCount = 0;
+  let idleRecordCount = 0;
+  let idleDecodedBytes = 0;
+  let boundedRecordCount = 0;
 
   imageAssetRecords.forEach((record) => {
     const recordDecodedBytes = record.decodedBytes || 0;
@@ -212,6 +341,11 @@ const getImageAssetRegistryTotals = () => {
     pinnedRecordCount += pinned ? 1 : 0;
     unpinnedRecordCount += pinned ? 0 : 1;
     referencedRecordCount += record.refCount > 0 ? 1 : 0;
+    boundedRecordCount += record.maxDrawableEdge > 0 ? 1 : 0;
+    if (!pinned && record.refCount === 0) {
+      idleRecordCount += 1;
+      idleDecodedBytes += recordDecodedBytes;
+    }
   });
 
   return {
@@ -222,6 +356,9 @@ const getImageAssetRegistryTotals = () => {
     pinnedRecordCount,
     unpinnedRecordCount,
     referencedRecordCount,
+    idleRecordCount,
+    idleDecodedBytes,
+    boundedRecordCount,
   };
 };
 
@@ -297,11 +434,11 @@ const trimImageAssetCache = () => {
       continue;
     }
 
-    if (imageAssetRecords.get(record.src) !== record) {
+    if (imageAssetRecords.get(record.key) !== record) {
       continue;
     }
 
-    imageAssetRecords.delete(record.src);
+    imageAssetRecords.delete(record.key);
     decodedBytes = Math.max(0, decodedBytes - (record.decodedBytes || 0));
     unpinnedDecodedBytes = Math.max(0, unpinnedDecodedBytes - (record.decodedBytes || 0));
     unpinnedRecordCount -= 1;
@@ -400,18 +537,29 @@ const startImageAssetRequest = (record, request) => {
     request.image = null;
 
     if (image) {
+      record.nextSrc = '';
+      const drawable = toBoundedDrawable(record, image);
       record.failureCount = 0;
       record.backoffBypassFailureCount = 0;
       record.retryAt = 0;
-      record.decodedBytes = estimateDecodedImageBytes(image);
+      record.decodedBytes = estimateDecodedImageBytes(drawable);
       updateImageAssetRecord(record, {
         status: 'loaded',
-        image,
+        image: drawable,
         error: null,
       });
       touchImageAssetRecord(record);
       notifyImageAssetListeners(record);
-      request.resolve(image);
+      request.resolve(drawable);
+    } else if (record.nextSrc && record.nextSrc !== record.src) {
+      // The decoded URL went away (e.g. a revoked private object URL) while
+      // another URL for the same identity was offered: decode that instead.
+      record.src = record.nextSrc;
+      record.nextSrc = '';
+      updateImageAssetRecord(record, { status: 'idle', image: null, error: null });
+      request.resolve(loadImageAssetRecord(record, { priority: request.priority }));
+      drainImageAssetRequestQueue();
+      return;
     } else {
       const nextError = normalizeImageAssetLoadError(record, error);
       record.failureCount += 1;
@@ -452,17 +600,34 @@ const countQueuedImageAssetRequests = (priority = '') => pendingImageAssetReques
   && (!priority || record.request.priority === priority)
 )).length;
 
+const isQueuedVisibleImageAssetRequest = (record) => (
+  record?.request?.state === 'queued'
+  && record.request.priority !== 'low'
+);
+
+// Visible work that is still displayed or pinned starts first. Visible work
+// whose last subscriber left (e.g. tokens released by a pan) is not cancelled,
+// because an explicit ensure/preload caller may still await it, but it can no
+// longer run ahead of art that is on screen now. Low-priority preloads stay last.
+const findNextImageAssetRequestIndex = () => {
+  const retainedIndex = pendingImageAssetRequests.findIndex((record) => (
+    isQueuedVisibleImageAssetRequest(record)
+    && (record.refCount > 0 || record.pinNames.size > 0)
+  ));
+  if (retainedIndex >= 0) return retainedIndex;
+  const visibleIndex = pendingImageAssetRequests.findIndex(
+    isQueuedVisibleImageAssetRequest
+  );
+  return visibleIndex >= 0 ? visibleIndex : 0;
+};
+
 const drainImageAssetRequestQueue = () => {
   while (
     activeImageAssetRequestCount < imageAssetRegistryConfig.maxConcurrentRequests
     && pendingImageAssetRequests.length > 0
   ) {
-    const visibleIndex = pendingImageAssetRequests.findIndex((record) => (
-      record?.request?.state === 'queued'
-      && record.request.priority !== 'low'
-    ));
     const [record] = pendingImageAssetRequests.splice(
-      visibleIndex >= 0 ? visibleIndex : 0,
+      findNextImageAssetRequestIndex(),
       1
     );
     const request = record?.request;
@@ -471,7 +636,7 @@ const drainImageAssetRequestQueue = () => {
       || !request
       || request.state !== 'queued'
       || request.generation !== imageAssetRegistryGeneration
-      || imageAssetRecords.get(record.src) !== record
+      || imageAssetRecords.get(record.key) !== record
     ) {
       continue;
     }
@@ -527,7 +692,7 @@ const loadImageAssetRecord = (record, { priority = 'visible', bypassBackoff = fa
         && record.pinNames.size === 0
         && record.listeners.size === 0
       ) {
-        imageAssetRecords.delete(record.src);
+        imageAssetRecords.delete(record.key);
       }
       return Promise.resolve(null);
     }
@@ -564,19 +729,19 @@ const loadImageAssetRecord = (record, { priority = 'visible', bypassBackoff = fa
   return loadPromise;
 };
 
-export function getImageAssetSnapshot(src) {
-  const normalizedSrc = normalizeImageAssetSrc(src);
-  if (!normalizedSrc) {
+export function getImageAssetSnapshot(src, options) {
+  const { key } = readImageAssetRecordKey(src, options);
+  if (!key) {
     return EMPTY_IMAGE_ASSET_SNAPSHOT;
   }
 
-  const record = imageAssetRecords.get(normalizedSrc);
+  const record = imageAssetRecords.get(key);
   touchImageAssetRecord(record);
   return buildImageAssetSnapshot(record);
 }
 
-export function subscribeToImageAsset(src, listener) {
-  const record = getOrCreateImageAssetRecord(src);
+export function subscribeToImageAsset(src, listener, options) {
+  const record = getOrCreateImageAssetRecord(src, options);
   if (!record || typeof listener !== 'function') {
     return () => {};
   }
@@ -593,6 +758,47 @@ export function subscribeToImageAsset(src, listener) {
     unsubscribed = true;
     record.listeners.delete(subscription);
     releaseRecord();
+  };
+}
+
+// Registers `src` as one URL of a stable drawable identity (see
+// imageAssetSourceIdentities). Callers vouch that the URL serves exactly the
+// bytes the identity names; entries whose identity has no live record are
+// pruned once the table is full.
+export function registerImageAssetSourceIdentity(src, identityKey) {
+  const normalizedSrc = normalizeImageAssetSrc(src);
+  const normalizedIdentity = typeof identityKey === 'string' ? identityKey : '';
+  if (!normalizedSrc || !normalizedIdentity) return;
+  imageAssetSourceIdentities.delete(normalizedSrc);
+  imageAssetSourceIdentities.set(normalizedSrc, normalizedIdentity);
+  if (imageAssetSourceIdentities.size <= MAX_IMAGE_ASSET_SOURCE_IDENTITIES) return;
+  const liveIdentities = new Set();
+  imageAssetRecords.forEach((record) => {
+    if (record.identityKey) liveIdentities.add(record.identityKey);
+  });
+  for (const [aliasedSrc, aliasedIdentity] of imageAssetSourceIdentities) {
+    if (imageAssetSourceIdentities.size <= MAX_IMAGE_ASSET_SOURCE_IDENTITIES) break;
+    if (!liveIdentities.has(aliasedIdentity)) imageAssetSourceIdentities.delete(aliasedSrc);
+  }
+}
+
+// Retains an already-loaded bounded drawable for `identityKey`, or returns
+// null. The returned `src` resolves to the same record through
+// useImageAssetSnapshot(src, { maxEdge }) even if that URL was revoked.
+export function retainImageAssetDrawable(identityKey, options) {
+  const maxEdge = normalizeMaxDrawableEdge(options?.maxEdge);
+  const key = getIdentityRecordKey(
+    typeof identityKey === 'string' ? identityKey : '',
+    maxEdge
+  );
+  const record = key ? imageAssetRecords.get(key) : null;
+  if (!record || record.status !== 'loaded' || !record.image) return null;
+  if (imageAssetSourceIdentities.get(record.src) !== record.identityKey) {
+    registerImageAssetSourceIdentity(record.src, record.identityKey);
+  }
+  return {
+    src: record.src,
+    release: retainImageAssetRecord(record),
   };
 }
 
@@ -634,7 +840,7 @@ export function pinImageAsset(src, pinName) {
 }
 
 export function ensureImageAsset(src, options) {
-  const record = getOrCreateImageAssetRecord(src);
+  const record = getOrCreateImageAssetRecord(src, options);
   return loadImageAssetRecord(record, options);
 }
 
@@ -798,6 +1004,13 @@ export function __getImageAssetRegistryStats() {
     pinnedRecordCount: totals.pinnedRecordCount,
     unpinnedDecodedBytes: totals.unpinnedDecodedBytes,
     unpinnedRecordCount: totals.unpinnedRecordCount,
+    // Unpinned records nobody references: the only records the unpinned
+    // record/byte caps can evict. Referenced (on-screen) records are never
+    // evicted, so caps bound idle retention once the working set exceeds them.
+    idleRecordCount: totals.idleRecordCount,
+    idleDecodedBytes: totals.idleDecodedBytes,
+    // Records that keep at most a bounded drawable (Grigliata token portraits).
+    boundedRecordCount: totals.boundedRecordCount,
     namedPins: [...namedImageAssetPins.keys()].sort(),
     queuedRequestCount: countQueuedImageAssetRequests(),
     lowPriorityQueuedRequestCount: countQueuedImageAssetRequests('low'),
@@ -808,6 +1021,21 @@ export function __getImageAssetRegistryStats() {
       failureBackoffMs: [...imageAssetRegistryConfig.failureBackoffMs],
     },
   };
+}
+
+// The cache survives route changes and can outlive the viewport profile in
+// which its records were loaded (e.g. desktop -> compact after a resize).
+const refreshImageAssetRuntimeProfile = () => {
+  const nextProfile = isCompactImageAssetRuntime() ? 'compact' : 'desktop';
+  if (imageAssetRegistryConfig.profile === nextProfile) return;
+  imageAssetRegistryConfig = getImageAssetRegistryRuntimeLimits();
+  trimImageAssetCache();
+  drainImageAssetRequestQueue();
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', refreshImageAssetRuntimeProfile);
+  window.navigator.connection?.addEventListener?.('change', refreshImageAssetRuntimeProfile);
 }
 
 const normalizeNonNegativeInteger = (value, fallback) => (
@@ -826,6 +1054,7 @@ export function __configureImageAssetRegistryForTests({
   failureBackoffMs,
   releaseProtectionMs,
   now,
+  createBoundedDrawable: createBoundedDrawableOverride,
 } = {}) {
   const nextFailureBackoffMs = Array.isArray(failureBackoffMs)
     && failureBackoffMs.length > 0
@@ -877,6 +1106,9 @@ export function __configureImageAssetRegistryForTests({
   if (typeof now === 'function') {
     nowProvider = now;
   }
+  if (typeof createBoundedDrawableOverride === 'function') {
+    createBoundedDrawable = createBoundedDrawableOverride;
+  }
 
   trimImageAssetCache();
   drainImageAssetRequestQueue();
@@ -915,11 +1147,13 @@ export function __resetImageAssetRegistry() {
   });
 
   imageAssetRecords.clear();
+  imageAssetSourceIdentities.clear();
   activeImageAssetRequestCount = 0;
   droppedLowPriorityRequestCount = 0;
   imageAssetAccessSequence = 0;
   imageAssetRegistryConfig = getImageAssetRegistryRuntimeLimits();
   nowProvider = () => Date.now();
+  createBoundedDrawable = defaultCreateBoundedDrawable;
 }
 
 
