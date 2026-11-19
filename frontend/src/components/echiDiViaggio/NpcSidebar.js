@@ -9,8 +9,6 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   where,
@@ -551,6 +549,9 @@ const NpcEditModal = ({
 export default function NpcSidebar({
   user,
   userData,
+  npcs = [],
+  npcLoading = false,
+  npcError = '',
   stickyOffset,
   onHoverStateChange,
   canDragToMap = false,
@@ -558,9 +559,7 @@ export default function NpcSidebar({
   onNpcDragEnd
 }) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
-  const [npcs, setNpcs] = useState([]);
-  const [npcLoading, setNpcLoading] = useState(true);
-  const [npcError, setNpcError] = useState('');
+  const [npcMutationError, setNpcMutationError] = useState('');
   const [deletingNpcId, setDeletingNpcId] = useState('');
 
   const [showCreateNpcModal, setShowCreateNpcModal] = useState(false);
@@ -602,38 +601,6 @@ export default function NpcSidebar({
       popupRef.current?.focus({ preventScroll: true });
     }
   }, [npcHover, popupRef]);
-
-  useEffect(() => {
-    if (!user) {
-      setNpcs([]);
-      setNpcLoading(false);
-      return () => {};
-    }
-
-    const npcQuery = query(collection(db, 'echi_npcs'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      npcQuery,
-      (snapshot) => {
-        const rows = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }));
-        setNpcs(rows);
-        setNpcLoading(false);
-      },
-      (error) => {
-        console.error('NPC snapshot error:', error);
-        setNpcError('Unable to load NPC list.');
-        setNpcLoading(false);
-      }
-    );
-
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [user]);
 
   useEffect(() => {
     setNpcHover((prev) => {
@@ -830,7 +797,7 @@ export default function NpcSidebar({
   const handleCreateNpc = async () => {
     if (!canCreateNpc || !user) return;
     setCreateFormError('');
-    setNpcError('');
+    setNpcMutationError('');
 
     const nome = normalizeNome(createNome);
     const description = (createDescription || '').trim();
@@ -989,7 +956,7 @@ export default function NpcSidebar({
   const handleSaveNpcEdit = async () => {
     if (!editingNpc?.id || !canEditNpc) return;
     setEditFormError('');
-    setNpcError('');
+    setNpcMutationError('');
 
     const nome = normalizeNome(editNome);
     const description = (editDescription || '').trim();
@@ -1116,7 +1083,7 @@ export default function NpcSidebar({
             await deleteLegacyStoragePath(oldPath);
           } catch (cleanupError) {
             console.warn('Old NPC image deletion failed after replacement:', cleanupError);
-            setNpcError('NPC image updated, but old image cleanup failed.');
+            setNpcMutationError('NPC image updated, but old image cleanup failed.');
           }
         }
       }
@@ -1139,7 +1106,7 @@ export default function NpcSidebar({
 
   const handleDeleteNpc = async (npc) => {
     if (!canDeleteNpc || !npc?.id) return;
-    setNpcError('');
+    setNpcMutationError('');
 
     const confirmed = window.confirm(`Delete NPC "${getNpcNome(npc)}" and its image permanently?`);
     if (!confirmed) return;
@@ -1178,7 +1145,7 @@ export default function NpcSidebar({
           }
         } catch (error) {
           console.error('Delete linked NPC markers failed after image deletion:', error);
-          setNpcError('Linked map marker cleanup failed. NPC document was not deleted.');
+          setNpcMutationError('Linked map marker cleanup failed. NPC document was not deleted.');
           return;
         }
 
@@ -1186,7 +1153,7 @@ export default function NpcSidebar({
           await deleteDoc(doc(db, 'echi_npcs', npc.id));
         } catch (error) {
           console.error('Delete NPC document failed:', error);
-          setNpcError('Linked map markers were cleaned up, but NPC document deletion failed.');
+          setNpcMutationError('Linked map markers were cleaned up, but NPC document deletion failed.');
           return;
         }
 
@@ -1198,13 +1165,13 @@ export default function NpcSidebar({
             await deleteLegacyStoragePath(path);
           } catch (error) {
             console.warn('Eager NPC image cleanup failed:', error);
-            setNpcError('NPC deleted. Its image cleanup is queued for retry.');
+            setNpcMutationError('NPC deleted. Its image cleanup is queued for retry.');
           }
         }
       }
     } catch (error) {
       console.error('Delete NPC operation failed:', error);
-      setNpcError('NPC deletion could not be completed. You can retry safely.');
+      setNpcMutationError('NPC deletion could not be completed. You can retry safely.');
     } finally {
       setDeletingNpcId('');
     }
@@ -1224,7 +1191,7 @@ export default function NpcSidebar({
                 type="button"
                 onClick={() => {
                   setCreateFormError('');
-                  setNpcError('');
+                  setNpcMutationError('');
                   setShowCreateNpcModal(true);
                 }}
                 className="px-2 py-1 rounded-md border border-amber-400/50 text-amber-200 text-xs hover:bg-amber-500/10 transition-colors"
@@ -1234,9 +1201,9 @@ export default function NpcSidebar({
             )}
           </div>
 
-          {npcError && (
+          {(npcError || npcMutationError) && (
             <div className="mx-3 mt-3 text-xs text-red-300 bg-red-900/20 border border-red-500/30 rounded-md px-2 py-2">
-              {npcError}
+              {npcError || npcMutationError}
             </div>
           )}
 

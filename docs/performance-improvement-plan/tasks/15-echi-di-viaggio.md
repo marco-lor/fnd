@@ -8,11 +8,11 @@ Reduce map transfer by at least 70%, use one NPC data source, and keep marker/NP
 
 ## Evidence
 
-- `mappa_art.png` is 7,994,651 bytes and `mappa_precisa.png` is 6,894,688 bytes; both are imported in `EchiDiViaggio.js`.
-- Page and `NpcSidebar` independently subscribe to all `echi_npcs` (`EchiDiViaggio.js`, `NpcSidebar.js`).
+- Historical Task 15A baseline: `mappa_art.png` is 7,994,651 bytes and `mappa_precisa.png` is 6,894,688 bytes. The page now uses `EchiMapPicture` for responsive delivery; 15B does not change it.
+- Before 15B, the page subscribed to the complete `echi_npcs` collection while the sidebar separately queried `createdAt DESC`, excluding records without that field. 15B shares one complete reader and derives the sidebar order locally.
 - Public/private marker collections are unbounded (`MapEditor.js`).
-- Sidebar hover is lifted to the page and rebuilds marker trees; each marker carries state/effects and a hidden hover-card subtree.
-- NPC sidebar renders the complete list and original portraits (`NpcSidebar.js`).
+- Sidebar hover is lifted to the page and rebuilds marker trees; markers retain individual state/effects and conditional accessible portals. Marker rendering changes remain in 15C.
+- NPC sidebar renders its complete ordered list and requests thumbnail variants. It already uses one shared hover portal; media read mode/fallback needs separate evidence.
 
 ## Implementation elements
 
@@ -49,7 +49,11 @@ Reduce map transfer by at least 70%, use one NPC data source, and keep marker/NP
 
 ## Release units and measurement contract
 
-15A: map formats/delivery with visual approval. 15B: one NPC subscription shared by page/sidebar. 15C: marker query/render redesign only after complete-marker semantics are specified. A/B are independent early candidates.
+15A: map formats/delivery with visual approval. 15C: marker query/render redesign only after complete-marker semantics are specified. A/B are independent early candidates.
+
+15B uses one actor-scoped, route-owned subscription to the complete `echi_npcs` collection through the existing repository runtime. Incremental changes supply a complete raw ID lookup and the sidebar's existing `createdAt DESC`, document-ID DESC order. Missing timestamps remain in map lookup; null and pending timestamps retain ordered-query semantics. The hook binds data/loading/read-error to UID and repository access generation; the sidebar retains its mutations and interaction behavior. Auth/access changes also reset its local popup and form state. No pagination, marker redesign, writer/rule/schema change or media delivery redesign belongs to this unit.
+
+Local 15B evidence and exact commands are in [the implementation evidence](../../coordinator/task-15b-npc-source/local-evidence.md). The latest user scope is code work for `fatin-test`, a guarded staging build, and a reviewed `devs` to `main` PR left unmerged. No deployment, browser acceptance or production change is included.
 
 500 NPCs / 2,000 markers; exact PNG sizes remain 7,994,651 and 6,894,688 bytes in this checkout. Target <=30% combined modern transfer at declared viewport/zoom with readable labels, complete maps and <=1 CSS pixel marker displacement. Do not trade readability for the byte target; record approved exception if necessary.
 

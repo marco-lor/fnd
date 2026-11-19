@@ -1,12 +1,11 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot } from '../../performance/firestore';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import EchiMapPicture from './EchiMapPicture';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
 import NpcSidebar from './NpcSidebar';
-import { db } from '../firebaseConfig';
+import { useEchiNpcs } from '../../data/useEchiNpcs';
 import { useShellLayout } from '../common/shellLayout';
 import MediaImage from '../common/MediaImage';
 import useViewportPopup from './useViewportPopup';
@@ -396,49 +395,14 @@ const MapMarkerItem = ({
 
 function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
   const { topInset } = useShellLayout();
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
-  const [npcById, setNpcById] = useState({});
+  const { npcs, npcById, npcLoading, npcError } = useEchiNpcs();
   const [pendingNpcMove, setPendingNpcMove] = useState(null);
   const [npcMoveError, setNpcMoveError] = useState('');
   const [isSavingNpcMove, setIsSavingNpcMove] = useState(false);
-
-  useEffect(() => {
-    if (!user?.uid) {
-      setNpcById({});
-      return () => {};
-    }
-
-    const unsubscribe = onSnapshot(
-      collection(db, 'echi_npcs'),
-      (snapshot) => {
-        const nextNpcById = {};
-        snapshot.docs.forEach((docSnap) => {
-          const data = docSnap.data();
-          nextNpcById[docSnap.id] = {
-            ...data,
-            id: docSnap.id,
-            nome: getNormalizedText(data?.nome, 'NPC'),
-            imageUrl: getNormalizedText(data?.imageUrl, ''),
-            description: getNormalizedText(data?.description, '-'),
-            notes: getNormalizedText(data?.notes, '-')
-          };
-        });
-        setNpcById(nextNpcById);
-      },
-      (error) => {
-        console.error('NPC lookup snapshot error:', error);
-        setNpcById({});
-      }
-    );
-
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [user?.uid]);
 
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
@@ -691,6 +655,10 @@ function EchiDiViaggio() {
       <main className="relative z-10 p-2 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] gap-4 items-start">
           <NpcSidebar
+            key={`${user.uid}:${repositoryAccessGeneration}`}
+            npcs={npcs}
+            npcLoading={npcLoading}
+            npcError={npcError}
             user={user}
             userData={userData}
             stickyOffset={stickyOffset}

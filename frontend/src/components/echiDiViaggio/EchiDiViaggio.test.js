@@ -1,7 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import EchiDiViaggio from './EchiDiViaggio';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
+import { __resetRepositoryRuntimeForTests } from '../../data/repositoryRuntime';
 import { useShellLayout } from '../common/shellLayout';
 import NpcSidebar from './NpcSidebar';
 import { useMapEditing } from './MapEditor';
@@ -9,6 +10,7 @@ import { onSnapshot } from '../../performance/firestore';
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
+  useAuthSession: jest.fn(),
 }));
 
 jest.mock('../common/shellLayout', () => ({
@@ -33,6 +35,7 @@ jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('../../performance/firestore', () => ({
   collection: jest.fn((db, path) => ({ path })),
+  labelFirestoreTarget: (target) => target,
   onSnapshot: jest.fn((target, onNext) => {
     onNext({ docs: [] });
     return () => {};
@@ -56,6 +59,8 @@ const buildMapEditingState = () => ({
 
 describe('EchiDiViaggio', () => {
   beforeEach(() => {
+    __resetRepositoryRuntimeForTests();
+    useAuthSession.mockImplementation(() => useAuth());
     useAuth.mockReturnValue({
       user: {
         uid: 'user-1',
@@ -71,7 +76,10 @@ describe('EchiDiViaggio', () => {
     });
     useMapEditing.mockReset();
     useMapEditing.mockReturnValue(buildMapEditingState());
-    onSnapshot.mockImplementation((target, onNext) => {
+    onSnapshot.mockImplementation((target, observer) => {
+      const onNext = (value) => (typeof observer === 'function' ? observer : observer.next)({
+        ...value, docChanges: () => value.docs.map((doc, newIndex) => ({ type: 'added', doc, oldIndex: -1, newIndex })),
+      });
       onNext({ docs: [] });
       return () => {};
     });
@@ -104,7 +112,10 @@ describe('EchiDiViaggio', () => {
       const state = buildMapEditingState();
       state.markers = [{ id: 'npc-marker', mapId: 'art', x: 100, y: 100, npcId: 'guide', markerType: 'npc' }];
       useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
-      onSnapshot.mockImplementation((target, onNext) => {
+      onSnapshot.mockImplementation((target, observer) => {
+      const onNext = (value) => (typeof observer === 'function' ? observer : observer.next)({
+        ...value, docChanges: () => value.docs.map((doc, newIndex) => ({ type: 'added', doc, oldIndex: -1, newIndex })),
+      });
         onNext({ docs: [{ id: 'guide', data: () => ({ nome: 'Guide', notes: 'Last marker note' }) }] });
         return () => {};
       });
@@ -133,7 +144,10 @@ describe('EchiDiViaggio', () => {
     const state = buildMapEditingState();
     state.markers = [{ id: 'keyboard-marker', mapId: 'art', x: 0, y: 0, ...markerData }];
     useMapEditing.mockImplementation(({ collectionPath }) => collectionPath[0] === 'map_markers' ? state : buildMapEditingState());
-    onSnapshot.mockImplementation((target, onNext) => {
+    onSnapshot.mockImplementation((target, observer) => {
+      const onNext = (value) => (typeof observer === 'function' ? observer : observer.next)({
+        ...value, docChanges: () => value.docs.map((doc, newIndex) => ({ type: 'added', doc, oldIndex: -1, newIndex })),
+      });
       onNext({ docs: [{ id: 'guide', data: () => ({ nome: 'Guide', notes: 'Last marker note' }) }] });
       return () => {};
     });
