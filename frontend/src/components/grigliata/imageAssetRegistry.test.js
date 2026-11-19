@@ -458,6 +458,114 @@ describe('imageAssetRegistry', () => {
     expect(imageConstructorCallCount).toBe(3);
   });
 
+  test.each([
+    { profile: 'desktop', compact: false },
+    { profile: 'compact', compact: true },
+  ])('settles 200 distinct and 80 shared on-screen portraits under the $profile budget without reloads', async ({
+    compact,
+  }) => {
+    jest.useFakeTimers();
+    let now = 0;
+    const limits = getImageAssetRegistryRuntimeLimits({ compact });
+    __configureImageAssetRegistryForTests({ ...limits, now: () => now });
+    const decodedBytesPerImage = 240 * 160 * 4;
+    let inFlightLoads = 0;
+    let maxInFlightLoads = 0;
+    const loadedSrcs = [];
+
+    class CountingImage {
+      constructor() {
+        imageConstructorCallCount += 1;
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+      }
+
+      set src(value) {
+        this._src = value;
+        if (!value) return;
+        inFlightLoads += 1;
+        maxInFlightLoads = Math.max(maxInFlightLoads, inFlightLoads);
+        Promise.resolve().then(() => {
+          inFlightLoads -= 1;
+          this.naturalWidth = 240;
+          this.naturalHeight = 160;
+          loadedSrcs.push(value);
+          this.onload?.();
+        });
+      }
+
+      get src() {
+        return this._src;
+      }
+    }
+    global.Image = CountingImage;
+
+    const distinctSrcs = Array.from(
+      { length: 200 },
+      (_, index) => `https://example.com/portrait-${index}.png`
+    );
+    const sharedSrc = 'https://example.com/shared-portrait.png';
+    const portraitSrcs = [
+      ...distinctSrcs,
+      ...Array.from({ length: 80 }, () => sharedSrc),
+    ];
+    // Mirror useImageAssetSnapshot: each mounted token subscribes, then ensures.
+    const unsubscribers = portraitSrcs.map((src) => subscribeToImageAsset(src, () => {}));
+    const loads = portraitSrcs.map((src) => ensureImageAsset(src));
+    expect(distinctSrcs.length + 1).toBeGreaterThan(limits.maxRecords);
+
+    const images = await Promise.all(loads);
+    expect(images.every(Boolean)).toBe(true);
+    expect(maxInFlightLoads).toBe(limits.maxConcurrentRequests);
+    expect(imageConstructorCallCount).toBe(201);
+    expect(new Set(loadedSrcs).size).toBe(201);
+    portraitSrcs.forEach((src) => {
+      expect(getImageAssetSnapshot(src).status).toBe('loaded');
+    });
+
+    const settledStats = __getImageAssetRegistryStats();
+    expect(settledStats).toMatchObject({
+      recordCount: 201,
+      loadedRecordCount: 201,
+      referencedRecordCount: 201,
+      unpinnedRecordCount: 201,
+      idleRecordCount: 0,
+      idleDecodedBytes: 0,
+      decodedBytes: decodedBytesPerImage * 201,
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+    });
+    expect(settledStats.decodedBytes).toBeLessThanOrEqual(limits.maxDecodedBytes);
+
+    // Repeated renders and time passing must not evict or re-request the working set.
+    now += limits.releaseProtectionMs * 10;
+    jest.advanceTimersByTime(limits.releaseProtectionMs * 10);
+    await Promise.all(portraitSrcs.map((src) => ensureImageAsset(src)));
+    expect(imageConstructorCallCount).toBe(201);
+    expect(__getImageAssetRegistryStats().loadedRecordCount).toBe(201);
+
+    // Panning away releases the leases: after the protection window, idle
+    // retention falls back to the unpinned record cap, keeping the most recent.
+    unsubscribers.forEach((unsubscribe) => unsubscribe());
+    expect(__getImageAssetRegistryStats().idleRecordCount).toBe(201);
+    now += limits.releaseProtectionMs;
+    jest.advanceTimersByTime(limits.releaseProtectionMs);
+    const releasedStats = __getImageAssetRegistryStats();
+    expect(releasedStats).toMatchObject({
+      recordCount: limits.maxRecords,
+      idleRecordCount: limits.maxRecords,
+      referencedRecordCount: 0,
+      idleDecodedBytes: decodedBytesPerImage * limits.maxRecords,
+    });
+    expect(getImageAssetSnapshot(sharedSrc).status).toBe('loaded');
+    expect(getImageAssetSnapshot(distinctSrcs[0]).status).toBe('idle');
+
+    const retainedSrc = distinctSrcs[distinctSrcs.length - 1];
+    const constructorCountBeforeReturn = imageConstructorCallCount;
+    await ensureImageAsset(retainedSrc);
+    expect(imageConstructorCallCount).toBe(constructorCountBeforeReturn);
+  });
+
   test('plateaus while cycling 50 maps and a large token list without redownloading the active map', async () => {
     __configureImageAssetRegistryForTests({
       maxConcurrentRequests: 4,
@@ -497,5 +605,208 @@ describe('imageAssetRegistry', () => {
     expect(getImageAssetSnapshot(activeMap).status).toBe('loaded');
 
     releaseActiveMap();
+  });
+
+  describe('bounded token portrait drawables', () => {
+    const MAX_EDGE = 512;
+    let removedSources;
+    let drawableFactory;
+
+    const installSizedImage = (sizeForSrc) => {
+      class SizedImage {
+        constructor() {
+          imageConstructorCallCount += 1;
+          this.complete = false;
+          this.naturalWidth = 0;
+          this.naturalHeight = 0;
+        }
+
+        set src(value) {
+          this._src = value;
+          Promise.resolve().then(() => {
+            const [width, height] = sizeForSrc(value);
+            this.complete = true;
+            this.naturalWidth = width;
+            this.naturalHeight = height;
+            this.onload?.();
+          });
+        }
+
+        get src() {
+          return this._src;
+        }
+
+        removeAttribute(name) {
+          if (name !== 'src') return;
+          removedSources.push(this._src);
+          this._src = '';
+        }
+      }
+      global.Image = SizedImage;
+    };
+
+    beforeEach(() => {
+      removedSources = [];
+      drawableFactory = jest.fn((image, { maxEdge }) => {
+        const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+        return {
+          kind: 'bounded-canvas',
+          width: Math.round(image.naturalWidth * scale),
+          height: Math.round(image.naturalHeight * scale),
+          dataset: {},
+        };
+      });
+    });
+
+    test('caps 100 visible 1024px legacy portraits at one shared bounded drawable each', async () => {
+      installSizedImage(() => [1024, 1024]);
+      __configureImageAssetRegistryForTests({ createBoundedDrawable: drawableFactory });
+      const sources = Array.from(
+        { length: 100 },
+        (_, index) => `https://example.com/legacy-portrait-${index}.png`
+      );
+      // Two visible tokens per source share one record.
+      const unsubscribes = [...sources, ...sources].map((src) => (
+        subscribeToImageAsset(src, () => {}, { maxEdge: MAX_EDGE })
+      ));
+      await Promise.all(sources.map((src) => ensureImageAsset(src, { maxEdge: MAX_EDGE })));
+      await flushPromiseJobs();
+
+      const stats = __getImageAssetRegistryStats();
+      expect(imageConstructorCallCount).toBe(100);
+      expect(drawableFactory).toHaveBeenCalledTimes(100);
+      expect(removedSources.sort()).toEqual([...sources].sort());
+      expect(stats).toMatchObject({
+        recordCount: 100,
+        boundedRecordCount: 100,
+        referencedRecordCount: 100,
+        decodedBytes: 100 * MAX_EDGE * MAX_EDGE * 4,
+      });
+      // Previously 100 x 1024^2 x 4 = 400 MiB of referenced, never-evicted decodes.
+      expect(stats.decodedBytes).toBeLessThanOrEqual(stats.limits.maxTotalDecodedBytes);
+      sources.forEach((src) => {
+        const snapshot = getImageAssetSnapshot(src, { maxEdge: MAX_EDGE });
+        expect(snapshot.status).toBe('loaded');
+        expect(snapshot.image).toMatchObject({
+          kind: 'bounded-canvas',
+          width: MAX_EDGE,
+          height: MAX_EDGE,
+          dataset: {
+            fndSourceSrc: src,
+            fndSourceWidth: '1024',
+            fndSourceHeight: '1024',
+            fndDrawable: 'bounded-canvas',
+          },
+        });
+      });
+      // A full-resolution consumer of the same URL never receives the canvas.
+      expect(getImageAssetSnapshot(sources[0]).status).toBe('idle');
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    });
+
+    test.each([
+      ['unavailable context', () => null],
+      ['drawing failure', () => { throw new Error('canvas allocation failed'); }],
+    ])('keeps thumbnails and releases oversized images after a %s', async (_reason, createBoundedDrawable) => {
+      installSizedImage((src) => (src.includes('thumb') ? [96, 96] : [2048, 1024]));
+      __configureImageAssetRegistryForTests({ createBoundedDrawable });
+      const thumb = 'blob:private-thumb';
+      const original = 'blob:private-original';
+      const thumbImage = await ensureImageAsset(thumb, { maxEdge: MAX_EDGE });
+      await expect(ensureImageAsset(original, { maxEdge: MAX_EDGE })).rejects.toThrow('bounded portrait');
+      expect(thumbImage).toMatchObject({ naturalWidth: 96, src: thumb });
+      expect(removedSources).toEqual([original]);
+      expect(__getImageAssetRegistryStats().decodedBytes).toBe(96 * 96 * 4);
+    });
+
+    test('downscales wide private originals preserving aspect ratio', async () => {
+      installSizedImage(() => [2048, 1024]);
+      __configureImageAssetRegistryForTests({ createBoundedDrawable: drawableFactory });
+      const drawable = await ensureImageAsset('blob:private-wide', { maxEdge: MAX_EDGE });
+
+      expect(drawable).toMatchObject({ width: 512, height: 256 });
+      expect(__getImageAssetRegistryStats().decodedBytes).toBe(512 * 256 * 4);
+      expect(removedSources).toEqual(['blob:private-wide']);
+    });
+  });
+
+  test('starts visible art on screen now before work released by a pan, without cancelling it', async () => {
+    const started = [];
+    const startedSources = [];
+    class ManualImage {
+      constructor() {
+        this.complete = false;
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+      }
+
+      set src(value) {
+        this._src = value;
+        // Eviction clears src; only a real URL starts a request.
+        if (value) {
+          started.push(this);
+          startedSources.push(value);
+        }
+      }
+
+      get src() {
+        return this._src;
+      }
+
+      succeed() {
+        this.complete = true;
+        this.naturalWidth = 64;
+        this.naturalHeight = 64;
+        this.onload?.();
+      }
+    }
+    global.Image = ManualImage;
+    __configureImageAssetRegistryForTests({ maxConcurrentRequests: 1 });
+    const subscribe = (src) => {
+      const unsubscribe = subscribeToImageAsset(src, () => {});
+      ensureImageAsset(src).catch(() => null);
+      return unsubscribe;
+    };
+
+    const oldSources = Array.from({ length: 200 }, (_, index) => `https://example.com/old-${index}.png`);
+    const oldUnsubscribes = oldSources.map(subscribe);
+    const explicitPreload = ensureImageAsset('https://example.com/preload.png', { priority: 'low' });
+    const pinnedSrc = 'https://example.com/pinned-map.png';
+    const releasePin = pinImageAsset(pinnedSrc, IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD);
+    ensureImageAsset(pinnedSrc).catch(() => null);
+    // Pan: 199 queued old tokens leave the screen; one old token stays.
+    oldUnsubscribes.slice(1, 199).forEach((unsubscribe) => unsubscribe());
+    oldUnsubscribes[199]();
+    const newSrc = 'https://example.com/new-visible.png';
+    const unsubscribeNew = subscribe(newSrc);
+
+    expect(startedSources).toEqual([oldSources[0]]);
+    // The pinned map and the newly visible portrait run before released work.
+    for (let index = 0; index < 2; index += 1) {
+      started[index].succeed();
+      // eslint-disable-next-line no-await-in-loop
+      await flushPromiseJobs();
+    }
+    expect(startedSources).toEqual([oldSources[0], pinnedSrc, newSrc]);
+    started[2].succeed();
+    await flushPromiseJobs();
+
+    // Released work is deferred, not cancelled: it still completes in order,
+    // and the explicit low-priority preload still runs last.
+    expect(startedSources[3]).toBe(oldSources[1]);
+    expect(__getImageAssetRegistryStats().queuedRequestCount).toBe(199);
+    for (let index = 3; index < started.length || index < 202; index += 1) {
+      started[index].succeed();
+      // eslint-disable-next-line no-await-in-loop
+      await flushPromiseJobs();
+    }
+    expect(startedSources).toHaveLength(203);
+    expect(startedSources.slice(-1)).toEqual(['https://example.com/preload.png']);
+    await expect(explicitPreload).resolves.toBeTruthy();
+    expect(getImageAssetSnapshot(newSrc).status).toBe('loaded');
+
+    unsubscribeNew();
+    oldUnsubscribes[0]();
+    releasePin();
   });
 });

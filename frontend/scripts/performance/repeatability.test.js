@@ -513,7 +513,7 @@ test('scheduled auxiliary scenarios use their explicit metric contract and remai
     scheduledOnly: true,
     requiredMetrics: [
       'task07.registryRequestConcurrencyLimit',
-      'task07.unpinnedRegistryRecords',
+      'task07.idleRegistryRecords',
     ],
   };
   for (const current of [left, right]) {
@@ -530,7 +530,7 @@ test('scheduled auxiliary scenarios use their explicit metric contract and remai
       },
       metrics: {
         'task07.registryRequestConcurrencyLimit': 4,
-        'task07.unpinnedRegistryRecords': 72,
+        'task07.idleRegistryRecords': 72,
       },
     });
   }
@@ -543,16 +543,16 @@ test('scheduled auxiliary scenarios use their explicit metric contract and remai
     'pass'
   );
 
-  right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'] = 71;
+  right.browser.scenarios.at(-1).metrics['task07.idleRegistryRecords'] = 71;
   const drift = compare(left, right, 15);
   assert.equal(drift.status, 'fail');
   assert.equal(
     drift.deterministic
-      .find(({ key }) => key === 'task07-registry-desktop:task07.unpinnedRegistryRecords').status,
+      .find(({ key }) => key === 'task07-registry-desktop:task07.idleRegistryRecords').status,
     'fail'
   );
 
-  delete right.browser.scenarios.at(-1).metrics['task07.unpinnedRegistryRecords'];
+  delete right.browser.scenarios.at(-1).metrics['task07.idleRegistryRecords'];
   const missing = compare(left, right, 15);
   assert.equal(
     missing.compatibility

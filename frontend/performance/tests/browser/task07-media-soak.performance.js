@@ -1,5 +1,6 @@
 const { performance } = require('node:perf_hooks');
 const { test, expect } = require('./measured-test');
+const {assertSettledBoardPortraits} = require('./grigliata-portraits');
 const {
   TASK07_SOAK_BACKGROUND_COUNT,
   TASK07_SOAK_TOKEN_COUNT,
@@ -104,15 +105,6 @@ const waitForRouteCleanup = async (page, route, { cycle } = {}) => {
       { cause: error }
     );
   }
-};
-
-const countKonvaTokenNodes = () => {
-  const stages = Array.isArray(window.Konva?.stages) ? window.Konva.stages : [];
-  return stages.reduce((count, stage) => (
-    count + Array.from(stage.find((node) => (
-      String(node.getAttr?.('data-testid') || '').startsWith('token-node-')
-    ))).length
-  ), 0);
 };
 
 const readImageRegistry = (page) => page.evaluate(() => (
@@ -431,6 +423,7 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
       let crossfadeLeaseObservations = 0;
       const crossfadeLayerObservations = [];
       let tokenNodeCount = 0;
+      let loadedPortraitCount = 0;
       for (const folder of galleryFolders) {
         await selectGalleryFolder(page, folder.name);
         const traversal = await traverseVisibleGallery(page);
@@ -457,20 +450,12 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
           }
 
           if (background.id === 'perf-map') {
-            await page.waitForFunction(
-              (minimum) => {
-                const stages = Array.isArray(window.Konva?.stages) ? window.Konva.stages : [];
-                const count = stages.reduce((total, stage) => (
-                  total + Array.from(stage.find((node) => (
-                    String(node.getAttr?.('data-testid') || '').startsWith('token-node-')
-                  ))).length
-                ), 0);
-                return count >= minimum;
-              },
-              TASK07_SOAK_TOKEN_COUNT,
-              { polling: 100, timeout: 20_000 }
-            );
-            tokenNodeCount = await page.evaluate(countKonvaTokenNodes);
+            const {portraits} = await assertSettledBoardPortraits(page, {
+              role: 'dm',
+              expectedOnStage: TASK07_SOAK_TOKEN_COUNT,
+            });
+            tokenNodeCount = portraits.length;
+            loadedPortraitCount = portraits.filter(({onStage, loaded}) => onStage && loaded).length;
           }
         }
       }
@@ -503,6 +488,7 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
         backgroundsVisited: activatedBackgrounds.size,
         galleryBackgroundsVisited: visitedBackgrounds.size,
         tokenNodeCount,
+        loadedPortraitCount,
         attachedGalleryImageCount: attachedGalleryImages.size,
         crossfadeLayerObservations: crossfadeLayerObservations.slice(
           0,

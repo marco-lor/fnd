@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Konva from 'konva/lib/index';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { installKonvaInstrumentation } from '../../performance/runtime';
@@ -66,10 +66,12 @@ import {
 } from './tokenStatuses';
 import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
-  getImageAssetRegistryRuntimeLimits,
+  getCurrentImageAssetRuntimeLimits,
+  subscribeImageAssetRuntimeLimits,
   IMAGE_ASSET_PIN_NAMES,
   pinImageAsset,
 } from '../common/imageAssets/imageAssetRegistry';
+import { getPrivateMediaAssetCacheSnapshot } from '../common/privateMediaAssets';
 import {
   PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
   resolveMediaSourceAsset,
@@ -93,6 +95,12 @@ import {
   GridLayer,
   TokenNode,
 } from './grigliataBoardTokenUi';
+import {
+  countDistinctTokenPortraitSources,
+  getDecodedImageBytes,
+  getTokenMediaSourceKey,
+  resolveTokenPortraitMaxEdge,
+} from './grigliataTokenPortraitBudget';
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
@@ -176,7 +184,6 @@ const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
 const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
-const TOKEN_MEDIA_MIN_SCREEN_SIZE_PX = 16;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -208,6 +215,13 @@ const isTokenWithinStageViewport = (token, viewport, stageSize) => {
     && top <= stageSize.height;
 };
 
+// Visible tokens are the on-screen working set and always lease their portrait,
+// at every zoom, however many share or differ in art: fog/privacy filtering
+// happens before this (callers pass only viewer-renderable tokens), request
+// concurrency is bounded by the image registry, and released portraits fall
+// back to the registry's idle-retention budget. `limit` bounds only offscreen
+// priority media (active turn, selected, viewer-owned), counted in distinct
+// sources so repeated art does not consume extra slots.
 export const buildBoundedTokenMediaIdSet = ({
   tokens,
   viewport,
@@ -216,36 +230,49 @@ export const buildBoundedTokenMediaIdSet = ({
   allowVisibleMedia = true,
 }) => {
   const boundedLimit = Math.max(0, Math.floor(Number(limit) || 0));
-  if (!boundedLimit) return new Set();
 
   const candidates = (Array.isArray(tokens) ? tokens : [])
     .map((token, index) => {
-      const tokenScreenSize = Number(token?.renderPosition?.size) * Number(viewport?.scale);
-      const isUsefulVisibleMedia = (
-        allowVisibleMedia
-        && Number.isFinite(tokenScreenSize)
-        && tokenScreenSize >= TOKEN_MEDIA_MIN_SCREEN_SIZE_PX
-        && isTokenWithinStageViewport(token, viewport, stageSize)
-      );
+      const isVisible = allowVisibleMedia && isTokenWithinStageViewport(token, viewport, stageSize);
       const priority = token?.isActiveTurn
         ? 0
         : (token?.isSelected
           ? 1
           : (token?.isOwnedByViewer
             ? 2
-            : (isUsefulVisibleMedia ? 3 : 4)));
+            : (isVisible ? 3 : 4)));
       return {
         token,
         index,
+        isVisible,
         priority,
-        eligible: priority < 4,
       };
     })
-    .filter(({token, eligible}) => eligible && token?.tokenId && hasMediaAsset(token))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)
-    .slice(0, boundedLimit);
+    .filter(({token, priority}) => priority < 4 && token?.tokenId)
+    .map((candidate) => ({
+      ...candidate,
+      sourceKey: getTokenMediaSourceKey(candidate.token),
+    }))
+    .filter(({sourceKey}) => !!sourceKey)
+    .sort((left, right) => left.priority - right.priority || left.index - right.index);
 
-  return new Set(candidates.map(({token}) => token.tokenId));
+  const leasedSourceKeys = new Set(
+    candidates.filter(({isVisible}) => isVisible).map(({sourceKey}) => sourceKey)
+  );
+  let budgetedSourceCount = 0;
+  const selectedIds = new Set();
+  candidates.forEach(({token, isVisible, sourceKey}) => {
+    if (isVisible || leasedSourceKeys.has(sourceKey)) {
+      selectedIds.add(token.tokenId);
+      return;
+    }
+    if (budgetedSourceCount >= boundedLimit) return;
+    budgetedSourceCount += 1;
+    leasedSourceKeys.add(sourceKey);
+    selectedIds.add(token.tokenId);
+  });
+
+  return selectedIds;
 };
 
 const isSameGridCell = (left, right) => (
@@ -6387,22 +6414,61 @@ export default function GrigliataBoard({
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
-  const tokenMediaLoadLimit = useMemo(() => Math.max(
-    0,
-    getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
-  ), []);
+  const imageLimits = useSyncExternalStore(
+    subscribeImageAssetRuntimeLimits,
+    getCurrentImageAssetRuntimeLimits,
+    getCurrentImageAssetRuntimeLimits
+  );
+  const tokenMediaLoadLimit = Math.max(0, imageLimits.maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM);
   const hasFittedCurrentViewport = (
     isViewportFitGeometryReady
     && viewport.fittedViewportKey === viewportFitKey
   );
+  // Decoded budget shared by the active map and every portrait: the tighter of
+  // the current browser profile and the private-media runtime already in effect.
+  const portraitDecodedBudgetBytes = useMemo(() => Math.min(
+    imageLimits.maxTotalDecodedBytes,
+    getPrivateMediaAssetCacheSnapshot().maxTotalDecodedBytes
+  ), [imageLimits.maxTotalDecodedBytes]);
+  // Only the active battlemap image is required beside portraits (narration
+  // hides tokens). Prefer the size actually decoded, then the selected
+  // candidate, then map metadata. The outgoing crossfade layer is excluded on
+  // purpose: it is released within seconds, and budgeting it would re-decode
+  // every portrait twice per map switch.
+  const requiredMapDecodedBytes = activeBackgroundAssetType === 'image'
+    ? getDecodedImageBytes(
+      backgroundAssetSnapshot.image?.naturalWidth
+        || activeBackgroundMediaSource.width
+        || resolvedBackgroundWidth,
+      backgroundAssetSnapshot.image?.naturalHeight
+        || activeBackgroundMediaSource.height
+        || resolvedBackgroundHeight
+    )
+    : 0;
+  const tokenPortraitSourceCount = useMemo(
+    () => countDistinctTokenPortraitSources(visibleRenderedTokens),
+    [visibleRenderedTokens]
+  );
+  const tokenPortraitMaxEdgeRef = useRef(0);
+  const tokenPortraitMaxEdge = useMemo(() => resolveTokenPortraitMaxEdge({
+    maxTotalDecodedBytes: portraitDecodedBudgetBytes,
+    requiredMapDecodedBytes,
+    portraitSourceCount: tokenPortraitSourceCount,
+    previousEdge: tokenPortraitMaxEdgeRef.current,
+  }), [portraitDecodedBudgetBytes, requiredMapDecodedBytes, tokenPortraitSourceCount]);
+  useEffect(() => {
+    tokenPortraitMaxEdgeRef.current = tokenPortraitMaxEdge;
+  }, [tokenPortraitMaxEdge]);
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
     tokens: visibleRenderedTokens,
     viewport,
     stageSize,
-    limit: tokenMediaLoadLimit,
+    limit: activeBackgroundAssetType === 'image' && !isViewportFitGeometryReady ? 0 : tokenMediaLoadLimit,
     allowVisibleMedia: hasFittedCurrentViewport,
   }), [
+    activeBackgroundAssetType,
     hasFittedCurrentViewport,
+    isViewportFitGeometryReady,
     stageSize,
     tokenMediaLoadLimit,
     viewport,
@@ -7031,6 +7097,7 @@ export default function GrigliataBoard({
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
+                  portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
@@ -7086,6 +7153,7 @@ export default function GrigliataBoard({
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
+                  portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}

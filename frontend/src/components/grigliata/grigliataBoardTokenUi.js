@@ -40,6 +40,29 @@ const ACTIVE_TURN_UNDERLAY = 'rgba(2, 6, 23, 0.88)';
 const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.3)';
 const GRID_LINE_STROKE = 'rgba(248, 250, 252, 0.14)';
 const GRID_LINE_STROKE_WIDTH = 1;
+// Longest drawable edge kept per token portrait source: about a one-cell token
+// (70 px) at the 4x max zoom on a ~2x display, while capping each visible,
+// never-evicted portrait at 1 MiB decoded instead of its full source decode.
+// Smaller sources (e.g. 96 px canonical thumbnails) keep their own image.
+export const TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE = 512;
+const tokenPortraitImageOptionsByEdge = new Map();
+
+export const normalizeTokenPortraitMaxEdge = (value) => {
+  const edge = Math.floor(Number(value));
+  return Number.isSafeInteger(edge) && edge > 0 ? edge : TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE;
+};
+
+// One frozen options object per edge, shared by every token, so registry
+// subscriptions only change when the resolution really changes.
+export const getTokenPortraitImageOptions = (portraitMaxEdge) => {
+  const maxEdge = normalizeTokenPortraitMaxEdge(portraitMaxEdge);
+  let options = tokenPortraitImageOptionsByEdge.get(maxEdge);
+  if (!options) {
+    options = Object.freeze({ maxEdge });
+    tokenPortraitImageOptionsByEdge.set(maxEdge, options);
+  }
+  return options;
+};
 
 const scaleTokenMetric = (size, ratio, minimum = 1) => Math.max(minimum, Math.round(size * ratio));
 const scaleTokenStroke = (size, ratio, minimum = 0.75) => Math.max(minimum, size * ratio);
@@ -254,6 +277,7 @@ export const TokenNode = ({
   isSelected,
   isActiveTurn = false,
   loadMedia = true,
+  portraitMaxEdge = TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE,
   badgeImages,
   drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
@@ -263,15 +287,64 @@ export const TokenNode = ({
   onOverflowMouseLeave,
   onOverflowToggle,
 }) => {
+  const portraitImageOptions = getTokenPortraitImageOptions(portraitMaxEdge);
   const mediaSource = useResolvedMediaSource(loadMedia ? token : null, {
     fallbackSrc: loadMedia ? token?.imageUrl || '' : '',
     kind: 'image',
+    maxDrawableEdge: portraitImageOptions.maxEdge,
+    retryCapacityPressure: true,
     variant: 'thumbnail',
   });
   const advanceTokenMediaFallback = mediaSource.advanceFallback;
+  const releaseTokenMediaLease = mediaSource.releasePrivateLease;
   const tokenMediaStatus = mediaSource.status;
-  const imageSnapshot = useImageAssetSnapshot(mediaSource.url);
-  const image = loadMedia ? imageSnapshot.image : null;
+  const imageSnapshot = useImageAssetSnapshot(mediaSource.url, portraitImageOptions);
+  const hasDecodedTokenImage = imageSnapshot.status === 'loaded' && !!imageSnapshot.image;
+  // While a new portrait resolution loads, keep the last decoded picture of
+  // the same media subscribed (so it is not trimmed) and on screen.
+  const [displayedPortrait, setDisplayedPortrait] = React.useState(null);
+  const currentPortraitSrc = hasDecodedTokenImage ? mediaSource.url : '';
+  React.useEffect(() => {
+    if (!loadMedia || tokenMediaStatus === 'error') {
+      setDisplayedPortrait(null);
+      return;
+    }
+    if (!currentPortraitSrc) return;
+    setDisplayedPortrait((previous) => (
+      previous?.src === currentPortraitSrc
+      && previous.options === portraitImageOptions
+      && previous.assetKey === mediaSource.assetKey
+        ? previous
+        : { src: currentPortraitSrc, options: portraitImageOptions, assetKey: mediaSource.assetKey }
+    ));
+  }, [currentPortraitSrc, loadMedia, mediaSource.assetKey, portraitImageOptions, tokenMediaStatus]);
+  const holdsPreviousPortrait = !!displayedPortrait
+    && tokenMediaStatus !== 'error'
+    && displayedPortrait.assetKey === mediaSource.assetKey
+    && (
+      displayedPortrait.src !== mediaSource.url
+      || displayedPortrait.options !== portraitImageOptions
+    );
+  const heldPortraitSnapshot = useImageAssetSnapshot(
+    holdsPreviousPortrait ? displayedPortrait.src : '',
+    holdsPreviousPortrait ? displayedPortrait.options : portraitImageOptions
+  );
+  let image = null;
+  if (loadMedia) {
+    if (imageSnapshot.image) {
+      image = imageSnapshot.image;
+    } else if (holdsPreviousPortrait && heldPortraitSnapshot.status === 'loaded') {
+      image = heldPortraitSnapshot.image;
+    }
+  }
+  React.useEffect(() => {
+    // The bounded drawable no longer needs the authenticated blob: return its
+    // compressed bytes to the shared private budget so other visible portraits
+    // (and the active map) fit. The record stays cached until evicted.
+    if (loadMedia && tokenMediaStatus === 'ready' && hasDecodedTokenImage) {
+      releaseTokenMediaLease();
+    }
+  }, [hasDecodedTokenImage, loadMedia, releaseTokenMediaLease, tokenMediaStatus]);
   React.useEffect(() => {
     if (
       loadMedia
@@ -394,9 +467,9 @@ export const TokenNode = ({
         }}
       >
         {image ? (
-          <KonvaImage image={image} width={size} height={size} />
+          <KonvaImage name="token-portrait" image={image} width={size} height={size} />
         ) : (
-          <Rect width={size} height={size} fill="#475569" />
+          <Rect name="token-portrait-placeholder" width={size} height={size} fill="#475569" />
         )}
         {isDead && (
           <Rect width={size} height={size} fill={DEAD_TOKEN_SCRIM} />

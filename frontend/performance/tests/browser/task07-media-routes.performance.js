@@ -1,4 +1,7 @@
 const { test, expect } = require('./measured-test');
+const {deleteApp, initializeApp} = require('firebase-admin/app');
+const {getFirestore} = require('firebase-admin/firestore');
+const {configureOwnedPerformanceEnvironment, projectId} = require('../../../scripts/performance/common');
 const manifest = require('../../task07-media-scenarios.json');
 const {
   drainPageConnections,
@@ -6,17 +9,20 @@ const {
   installDeterministicFontRoutes,
   isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
-  waitForImageRegistrySettlement,
   waitForReadiness,
   writeScenarioResult,
 } = require('./helpers');
 
-const TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT = 200;
+const {
+  assertBoardPortraitsAndCacheBudget,
+  TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT,
+  TASK07_GRIGLIATA_PLAYER_VISIBLE_COUNT,
+} = require('./grigliata-portraits');
 
 const task07RegistryMetrics = (registry) => ({
   'task07.registryRequestConcurrencyLimit': Number(registry?.limits?.maxConcurrentRequests),
-  'task07.unpinnedRegistryRecords': Number(registry?.unpinnedRecordCount),
-  'task07.unpinnedEstimatedDecodedBytes': Number(registry?.unpinnedDecodedBytes),
+  'task07.idleRegistryRecords': Number(registry?.idleRecordCount),
+  'task07.idleEstimatedDecodedBytes': Number(registry?.idleDecodedBytes),
   'task07.totalEstimatedDecodedBytes': Number(registry?.decodedBytes),
   'task07.lowPriorityQueuedPreloads': Number(registry?.lowPriorityQueuedRequestCount),
 });
@@ -99,8 +105,6 @@ for (const scenario of manifest.scenarios) {
       if (scenario.assertOffscreenDetachment && media.farOffscreen > 0) {
         expect(media.farOffscreenAttached).toBe(0);
       }
-      expect(errors).toEqual([]);
-
       if (scenario.id === 'task07-home-media') {
         const inventoryWindow = require('./home-inventory-window');
         await inventoryWindow.assertInitialHomeInventoryWindow(page);
@@ -112,8 +116,9 @@ for (const scenario of manifest.scenarios) {
         await page.waitForFunction(() => (
           typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
         ));
-        const registry = await waitForImageRegistrySettlement(page, {
-          minimumLoadedRecords: 1,
+        const {registry} = await assertBoardPortraitsAndCacheBudget(page, {
+          role: scenario.role,
+          expectedOnStage: TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT,
         });
         expect(registry.limits).toMatchObject({
           profile: 'desktop',
@@ -123,13 +128,7 @@ for (const scenario of manifest.scenarios) {
           maxTotalDecodedBytes: 384 * 1024 * 1024,
           maxLowPriorityQueueSize: 32,
         });
-        // The fixture's full-map fit makes ordinary token art smaller than the
-        // useful-media threshold. Only bounded priority/shell records may remain.
-        expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
-        expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
         expect(registry.decodedBytes).toBeLessThanOrEqual(384 * 1024 * 1024);
-        expect(registry.activeRequestCount).toBe(0);
-        expect(registry.queuedRequestCount).toBe(0);
         expect(registry.lowPriorityQueuedRequestCount).toBeLessThanOrEqual(32);
         writeScenarioResult({
           id: 'task07-registry-desktop',
@@ -148,6 +147,7 @@ for (const scenario of manifest.scenarios) {
           },
         });
       }
+      expect(errors).toEqual([]);
     } finally {
       await drainPageConnections(page).catch(() => {});
       await context.close();
@@ -201,11 +201,9 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       expectedPathname: '/grigliata',
       timeoutMs: 30_000,
     });
-    // Readiness can precede the active board image load. Capture only after the
-    // finite registry is idle and stable, without requiring it to fill spare
-    // capacity with tiny overview token art.
-    const registry = await waitForImageRegistrySettlement(page, {
-      minimumLoadedRecords: 1,
+    const {registry} = await assertBoardPortraitsAndCacheBudget(page, {
+      role: 'dm',
+      expectedOnStage: TASK07_GRIGLIATA_FIXTURE_TOKEN_COUNT,
     });
     const snapshot = await page.evaluate(() => ({
       renderedTokenNodes: (Array.isArray(window.Konva?.stages) ? window.Konva.stages : [])
@@ -232,11 +230,6 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
     expect(registry.loadedRecordCount).toBeGreaterThanOrEqual(1);
     expect(registry.pinnedRecordCount).toBe(1);
     expect(registry.namedPins).toContain('grigliata-active-board');
-    expect(registry.unpinnedRecordCount).toBeLessThanOrEqual(2);
-    expect(registry.unpinnedDecodedBytes).toBeLessThanOrEqual(256 * 1024);
-    expect(registry.decodedBytes).toBeLessThanOrEqual(registry.limits.maxTotalDecodedBytes);
-    expect(registry.activeRequestCount).toBe(0);
-    expect(registry.queuedRequestCount).toBe(0);
     expect(registry.lowPriorityQueuedRequestCount).toBe(0);
     expect(registry.droppedLowPriorityRequestCount).toBe(0);
     expect(snapshot.visibleStarFields).toBe(1);
@@ -264,3 +257,105 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
     await context.close();
   }
 });
+
+// Restore explored fog tiles after each player profile, including tiles first
+// created during the test.
+const capturePlayerFogTiles = async () => {
+  configureOwnedPerformanceEnvironment();
+  const app = initializeApp({projectId}, 'task07-player-portrait-fog');
+  const db = getFirestore(app);
+  const query = db.collection('grigliata_fog_memory_tiles')
+    .where('ownerUid', '==', 'perf-player').where('backgroundId', '==', 'perf-map');
+  try {
+    const previous = new Map((await query.get()).docs.map((doc) => [doc.id, doc]));
+    return async () => {
+      try {
+        const current = new Map((await query.get()).docs.map((doc) => [doc.id, doc]));
+        const batch = db.batch();
+        for (const [id, doc] of previous) {
+          if (!current.get(id)?.updateTime.isEqual(doc.updateTime)) batch.set(doc.ref, doc.data());
+        }
+        for (const [id, doc] of current) {
+          if (!previous.has(id)) batch.delete(doc.ref);
+        }
+        await batch.commit();
+      } finally {
+        await deleteApp(app);
+      }
+    };
+  } catch (error) {
+    await deleteApp(app);
+    throw error;
+  }
+};
+
+for (const profile of [
+  {name: 'desktop', compact: false},
+  {name: 'compact', compact: true},
+]) {
+  test(`player ${profile.name} Grigliata renders every visible token portrait at low zoom`, async ({
+    browser,
+    baseURL,
+  }) => {
+    if (new URL(baseURL).origin !== 'http://127.0.0.1:5000') {
+      throw new Error(`Task 07 player portrait probe refuses non-owned origin: ${baseURL}.`);
+    }
+    const context = await browser.newContext({
+      baseURL,
+      storageState: storageStateForRole('player'),
+      ...(profile.compact ? {
+        viewport: {width: 390, height: 844},
+        deviceScaleFactor: 2,
+        reducedMotion: 'reduce',
+      } : {}),
+    });
+    if (profile.compact) {
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'connection', {
+          configurable: true,
+          value: Object.freeze({saveData: true}),
+        });
+      });
+    }
+    await installDeterministicFontRoutes(context);
+    await installBootstrap(context, {
+      id: `task07-player-portraits-${profile.name}`,
+      role: 'player',
+      route: '/grigliata',
+    }, 1);
+    const page = await context.newPage();
+    const errors = [];
+    page.on('console', (message) => {
+      if (message.type() !== 'error') return;
+      const text = message.text();
+      if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) return;
+      errors.push(text);
+    });
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    const restoreFog = await capturePlayerFogTiles();
+    try {
+      await page.goto('/grigliata', {waitUntil: 'domcontentloaded'});
+      await waitForReadiness(page, {
+        expectedPathname: '/grigliata',
+        timeoutMs: 30_000,
+      });
+      await page.waitForFunction(() => (
+        typeof window.__FND_PERF_BENCHMARKS__?.getImageRegistryStats === 'function'
+      ));
+      const {registry} = await assertBoardPortraitsAndCacheBudget(page, {
+        role: 'player',
+        expectedOnStage: TASK07_GRIGLIATA_PLAYER_VISIBLE_COUNT,
+      });
+      expect(registry.limits.profile).toBe(profile.name);
+      expect(errors).toEqual([]);
+    } finally {
+      await drainPageConnections(page).catch(() => {});
+      try {
+        await context.close();
+      } finally {
+        await restoreFog();
+      }
+    }
+  });
+}

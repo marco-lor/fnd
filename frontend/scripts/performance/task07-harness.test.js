@@ -175,6 +175,7 @@ const settledCycle = (cycle, registryOverrides = {}) => ({
   cycle,
   registry: registrySample(registryOverrides),
   tokenNodeCount: 200,
+  loadedPortraitCount: 200,
 });
 
 test('owned emulator runner executes Task 07 rules and callables serially', () => {
@@ -612,13 +613,13 @@ test('Task 07 blocking budgets include desktop and compact registry caps', () =>
   const byId = new Map(configuration.budgets.map((budget) => [budget.id, budget]));
   const expected = [
     ['task07-desktop-registry-request-concurrency', 'task07-registry-desktop', 'task07.registryRequestConcurrencyLimit', 4],
-    ['task07-desktop-unpinned-registry-records', 'task07-registry-desktop', 'task07.unpinnedRegistryRecords', 96],
-    ['task07-desktop-unpinned-decoded-bytes', 'task07-registry-desktop', 'task07.unpinnedEstimatedDecodedBytes', 128 * mebibyte],
+    ['task07-desktop-idle-registry-records', 'task07-registry-desktop', 'task07.idleRegistryRecords', 96],
+    ['task07-desktop-idle-decoded-bytes', 'task07-registry-desktop', 'task07.idleEstimatedDecodedBytes', 128 * mebibyte],
     ['task07-desktop-total-decoded-bytes', 'task07-registry-desktop', 'task07.totalEstimatedDecodedBytes', 384 * mebibyte],
     ['task07-desktop-low-priority-preloads', 'task07-registry-desktop', 'task07.lowPriorityQueuedPreloads', 32],
     ['task07-compact-registry-request-concurrency', 'task07-registry-compact', 'task07.registryRequestConcurrencyLimit', 2],
-    ['task07-compact-unpinned-registry-records', 'task07-registry-compact', 'task07.unpinnedRegistryRecords', 64],
-    ['task07-compact-unpinned-decoded-bytes', 'task07-registry-compact', 'task07.unpinnedEstimatedDecodedBytes', 64 * mebibyte],
+    ['task07-compact-idle-registry-records', 'task07-registry-compact', 'task07.idleRegistryRecords', 64],
+    ['task07-compact-idle-decoded-bytes', 'task07-registry-compact', 'task07.idleEstimatedDecodedBytes', 64 * mebibyte],
     ['task07-compact-total-decoded-bytes', 'task07-registry-compact', 'task07.totalEstimatedDecodedBytes', 320 * mebibyte],
     ['task07-compact-low-priority-preloads', 'task07-registry-compact', 'task07.lowPriorityQueuedPreloads', 16],
   ];
@@ -652,15 +653,15 @@ test('Task 07 one-shot benchmark records are registered but excluded from route 
     ],
     'task07-registry-compact': [
       'task07.registryRequestConcurrencyLimit',
-      'task07.unpinnedRegistryRecords',
-      'task07.unpinnedEstimatedDecodedBytes',
+      'task07.idleRegistryRecords',
+      'task07.idleEstimatedDecodedBytes',
       'task07.totalEstimatedDecodedBytes',
       'task07.lowPriorityQueuedPreloads',
     ],
     'task07-registry-desktop': [
       'task07.registryRequestConcurrencyLimit',
-      'task07.unpinnedRegistryRecords',
-      'task07.unpinnedEstimatedDecodedBytes',
+      'task07.idleRegistryRecords',
+      'task07.idleEstimatedDecodedBytes',
       'task07.totalEstimatedDecodedBytes',
       'task07.lowPriorityQueuedPreloads',
     ],
@@ -717,9 +718,11 @@ test('Task 07 soak rejects cap drift, unsettled ownership, missing scale, and up
       }),
       backgroundsVisited: 49,
       tokenNodeCount: 199,
+      loadedPortraitCount: 0,
     },
   ]);
   assert.equal(result.status, 'fail');
+  assert.match(result.failures.join('\n'), /loaded 0\/200 portraits/);
   assert.match(result.failures.join('\n'), /maxRecords is 120, expected 96/);
   assert.match(result.failures.join('\n'), /visited 49\/50 backgrounds/);
   assert.match(result.failures.join('\n'), /rendered 199\/200 token nodes/);
