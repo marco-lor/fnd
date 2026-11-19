@@ -704,20 +704,19 @@ describe('imageAssetRegistry', () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     });
 
-    test('keeps small sources as images and falls back to the decode when no canvas exists', async () => {
+    test.each([
+      ['unavailable context', () => null],
+      ['drawing failure', () => { throw new Error('canvas allocation failed'); }],
+    ])('keeps thumbnails and releases oversized images after a %s', async (_reason, createBoundedDrawable) => {
       installSizedImage((src) => (src.includes('thumb') ? [96, 96] : [2048, 1024]));
-      __configureImageAssetRegistryForTests({ createBoundedDrawable: () => null });
+      __configureImageAssetRegistryForTests({ createBoundedDrawable });
       const thumb = 'blob:private-thumb';
       const original = 'blob:private-original';
-      const [thumbImage, originalImage] = await Promise.all([
-        ensureImageAsset(thumb, { maxEdge: MAX_EDGE }),
-        ensureImageAsset(original, { maxEdge: MAX_EDGE }),
-      ]);
-
+      const thumbImage = await ensureImageAsset(thumb, { maxEdge: MAX_EDGE });
+      await expect(ensureImageAsset(original, { maxEdge: MAX_EDGE })).rejects.toThrow('bounded portrait');
       expect(thumbImage).toMatchObject({ naturalWidth: 96, src: thumb });
-      // No 2D canvas: the portrait still renders from its decoded image.
-      expect(originalImage).toMatchObject({ naturalWidth: 2048, src: original });
-      expect(removedSources).toEqual([]);
+      expect(removedSources).toEqual([original]);
+      expect(__getImageAssetRegistryStats().decodedBytes).toBe(96 * 96 * 4);
     });
 
     test('downscales wide private originals preserving aspect ratio', async () => {

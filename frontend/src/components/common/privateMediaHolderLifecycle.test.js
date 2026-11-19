@@ -275,6 +275,24 @@ describe('private media holder lifecycle', () => {
     });
     const decodedPortrait = descriptor('decoded-portrait', 4, { width: 2, height: 2 });
 
+    test('a previous session holding the same portrait still uses its decoded allowance', async () => {
+      const runtime = configure({maxDecodedBytes: 256, maxTotalDecodedBytes: 256, maxBoundedDecodeOverageBytes: 16});
+      const map = acquirePrivateMediaAsset(decodedMap);
+      await map.promise;
+      const previous = acquirePrivateMediaAsset(decodedPortrait, PORTRAIT);
+      await previous.promise;
+      runtime.authSession.generation += 1;
+      const next = acquirePrivateMediaAsset(decodedPortrait, PORTRAIT);
+      await expect(next.promise).rejects.toMatchObject({code: 'private-media-decoded-budget-exceeded'});
+      expect(runtime.getBlob).toHaveBeenCalledTimes(2);
+      next.release();
+      previous.release();
+      const retry = acquirePrivateMediaAsset(decodedPortrait, PORTRAIT);
+      await expect(retry.promise).resolves.toHaveProperty('url');
+      retry.release();
+      map.release();
+    });
+
     test.each(['portrait', 'map'])('keeps both admitted leases valid when the %s finishes first', async (first) => {
       const runtime = configure({
         deferred: true,

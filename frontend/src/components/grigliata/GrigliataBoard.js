@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Konva from 'konva/lib/index';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { installKonvaInstrumentation } from '../../performance/runtime';
@@ -66,7 +66,8 @@ import {
 } from './tokenStatuses';
 import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
-  getImageAssetRegistryRuntimeLimits,
+  getCurrentImageAssetRuntimeLimits,
+  subscribeImageAssetRuntimeLimits,
   IMAGE_ASSET_PIN_NAMES,
   pinImageAsset,
 } from '../common/imageAssets/imageAssetRegistry';
@@ -6413,22 +6414,22 @@ export default function GrigliataBoard({
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
-  const tokenMediaLoadLimit = useMemo(() => Math.max(
-    0,
-    getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
-  ), []);
+  const imageLimits = useSyncExternalStore(
+    subscribeImageAssetRuntimeLimits,
+    getCurrentImageAssetRuntimeLimits,
+    getCurrentImageAssetRuntimeLimits
+  );
+  const tokenMediaLoadLimit = Math.max(0, imageLimits.maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM);
   const hasFittedCurrentViewport = (
     isViewportFitGeometryReady
     && viewport.fittedViewportKey === viewportFitKey
   );
   // Decoded budget shared by the active map and every portrait: the tighter of
-  // the current runtime profile (recomputed on stage resize, e.g. a compact
-  // breakpoint or Save-Data) and the private-media runtime already in effect.
+  // the current browser profile and the private-media runtime already in effect.
   const portraitDecodedBudgetBytes = useMemo(() => Math.min(
-    getImageAssetRegistryRuntimeLimits().maxTotalDecodedBytes,
+    imageLimits.maxTotalDecodedBytes,
     getPrivateMediaAssetCacheSnapshot().maxTotalDecodedBytes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [stageSize.width, stageSize.height]);
+  ), [imageLimits.maxTotalDecodedBytes]);
   // Only the active battlemap image is required beside portraits (narration
   // hides tokens). Prefer the size actually decoded, then the selected
   // candidate, then map metadata. The outgoing crossfade layer is excluded on
@@ -6462,10 +6463,12 @@ export default function GrigliataBoard({
     tokens: visibleRenderedTokens,
     viewport,
     stageSize,
-    limit: tokenMediaLoadLimit,
+    limit: activeBackgroundAssetType === 'image' && !isViewportFitGeometryReady ? 0 : tokenMediaLoadLimit,
     allowVisibleMedia: hasFittedCurrentViewport,
   }), [
+    activeBackgroundAssetType,
     hasFittedCurrentViewport,
+    isViewportFitGeometryReady,
     stageSize,
     tokenMediaLoadLimit,
     viewport,
