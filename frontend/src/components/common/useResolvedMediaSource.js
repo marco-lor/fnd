@@ -9,11 +9,15 @@ import {
   getTask07MediaPurpose,
   resolveMediaAsset,
 } from './MediaImage';
+import { retainImageAssetDrawable } from './imageAssets/imageAssetRegistry';
 import {
   acquirePrivateMediaAsset,
   acquirePrivateVideoAsset,
+  getPrivateMediaDrawableIdentity,
+  isPrivateMediaCapacityPressureError,
   normalizePrivateVideoDescriptor,
   PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
+  subscribePrivateMediaCapacity,
 } from './privateMediaAssets';
 import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 
@@ -275,9 +279,32 @@ const getImmediateSource = (asset, cursorIndex) => {
   };
 };
 
-const releaseLease = (lease, delayMs = 0) => {
+const releaseLeaseHandle = (lease, delayMs = 0) => {
   lease?.release({ delayMs });
 };
+
+// Waits between capacity-pressure retries when no capacity notification wakes
+// the consumer first. Retries never download: admission is checked first.
+export const PRIVATE_MEDIA_CAPACITY_RETRY_DELAYS_MS = Object.freeze([
+  1_000, 2_000, 5_000, 15_000, 30_000,
+]);
+
+// Identity of everything a resolution attempt reads, so a new media object with
+// the same immutable candidates (e.g. a moved token) does not re-acquire.
+const getAssetResolutionIdentity = (asset) => JSON.stringify([
+  asset.assetKey,
+  asset.selectedVariant || '',
+  asset.width || null,
+  asset.height || null,
+  asset.candidates.map((candidate) => [
+    candidate.sourceKey,
+    candidate.variant || '',
+    candidate.url || '',
+    candidate.privateAsset || null,
+    candidate.width || null,
+    candidate.height || null,
+  ]),
+]);
 
 export const useResolvedMediaSource = (
   media,
@@ -285,8 +312,10 @@ export const useResolvedMediaSource = (
     compatibilityMode = 'auto',
     fallbackSrc = '',
     kind = 'image',
+    maxDrawableEdge = 0,
     purpose: purposeOverride = '',
     releaseDelayMs = 0,
+    retryCapacityPressure = false,
     variant = 'board',
   } = {}
 ) => {
@@ -315,43 +344,118 @@ export const useResolvedMediaSource = (
     override: compatibilityMode,
     purpose,
   });
-  const asset = useMemo(() => resolveMediaSourceAsset(media, {
+  const resolvedAsset = useMemo(() => resolveMediaSourceAsset(media, {
     compatibilityMode: readerMode,
     fallbackSrc,
     kind,
     variant,
   }), [fallbackSrc, kind, media, readerMode, variant]);
+  const assetIdentity = getAssetResolutionIdentity(resolvedAsset);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const asset = useMemo(() => resolvedAsset, [assetIdentity]);
   const [cursor, setCursor] = useState({ assetKey: '', index: 0 });
   const [sourceState, setSourceState] = useState(null);
   const privateLeaseRef = useRef(null);
   const cursorIndex = cursor.assetKey === asset.assetKey ? cursor.index : 0;
-  const source = (
+  const drawableEdge = kind === 'video' ? 0 : Math.max(0, Math.floor(Number(maxDrawableEdge) || 0));
+  // A source resolved for another drawable bound (e.g. a portrait resolution
+  // change) is not reused: its URL may already be revoked for the new bound.
+  // Memoized so an immediate (placeholder) source keeps one identity per
+  // asset/cursor/edge: advanceFallback and consumer effects stay stable.
+  const source = useMemo(() => (
     sourceState?.assetKey === asset.assetKey
     && sourceState.cursorIndex === cursorIndex
-  ) ? sourceState : getImmediateSource(asset, cursorIndex);
+    && (sourceState.drawableEdge || 0) === drawableEdge
+  ) ? sourceState : { ...getImmediateSource(asset, cursorIndex), drawableEdge }, [
+    asset,
+    cursorIndex,
+    drawableEdge,
+    sourceState,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     let currentLease = null;
-    let lastError = null;
+    let releaseReusedDrawable = null;
+    let stopWaitingForCapacity = null;
+    let capacityRetryCount = 0;
 
     if (!asset.candidates.length) {
-      setSourceState(getImmediateSource(asset, cursorIndex));
+      setSourceState({ ...getImmediateSource(asset, cursorIndex), drawableEdge });
       return undefined;
     }
 
+    // Bounded, non-busy wait: one pending wake-up per consumer, triggered by
+    // the first capacity notification or the backoff timer, whichever is first.
+    const waitForCapacity = (resume) => {
+      const delayMs = PRIVATE_MEDIA_CAPACITY_RETRY_DELAYS_MS[Math.min(
+        PRIVATE_MEDIA_CAPACITY_RETRY_DELAYS_MS.length - 1,
+        capacityRetryCount
+      )];
+      capacityRetryCount += 1;
+      let timer = null;
+      let unsubscribe = null;
+      const stop = () => {
+        if (stopWaitingForCapacity !== stop) return false;
+        stopWaitingForCapacity = null;
+        unsubscribe?.();
+        clearTimeout(timer);
+        return true;
+      };
+      const wake = () => {
+        if (stop() && !cancelled) resume();
+      };
+      stopWaitingForCapacity = stop;
+      unsubscribe = subscribePrivateMediaCapacity(wake);
+      timer = setTimeout(wake, delayMs);
+    };
+
     const resolveCandidate = async () => {
+      let lastError = null;
+      let pressured = false;
       for (
         let candidateIndex = cursorIndex;
         candidateIndex < asset.candidates.length;
         candidateIndex += 1
       ) {
         const candidate = asset.candidates[candidateIndex];
+        if (candidate.privateAsset && drawableEdge > 0) {
+          // A bounded drawable already decoded from these exact bytes, under
+          // the current auth scope, needs no new download or decode even if
+          // the blob it came from was evicted and its URL revoked. Anything
+          // else (other scope, metadata, a failed fetch) takes the normal
+          // authenticated path below, in candidate order.
+          const identity = getPrivateMediaDrawableIdentity(candidate.privateAsset);
+          const reused = identity
+            ? retainImageAssetDrawable(identity, { maxEdge: drawableEdge })
+            : null;
+          if (reused) {
+            releaseReusedDrawable = reused.release;
+            setSourceState({
+              assetKey: asset.assetKey,
+              cursorIndex,
+              candidateIndex,
+              drawableEdge,
+              status: 'ready',
+              error: null,
+              isPrivate: true,
+              reusedDrawable: true,
+              sourceKey: candidate.sourceKey,
+              url: reused.src,
+              variant: candidate.variant,
+              width: candidate.width || asset.width || null,
+              height: candidate.height || asset.height || null,
+            });
+            return;
+          }
+        }
         if (candidate.privateAsset) {
           try {
             currentLease = kind === 'video'
               ? acquirePrivateVideoAsset(candidate.privateAsset)
-              : acquirePrivateMediaAsset(candidate.privateAsset);
+              : acquirePrivateMediaAsset(candidate.privateAsset, {
+                maxDrawableEdge: drawableEdge,
+              });
             const result = await currentLease.promise;
             if (cancelled) {
               currentLease.release();
@@ -362,6 +466,7 @@ export const useResolvedMediaSource = (
               assetKey: asset.assetKey,
               cursorIndex,
               candidateIndex,
+              drawableEdge,
               status: 'ready',
               error: null,
               isPrivate: true,
@@ -377,6 +482,7 @@ export const useResolvedMediaSource = (
             currentLease = null;
             if (cancelled) return;
             lastError = error;
+            pressured = pressured || isPrivateMediaCapacityPressureError(error);
             continue;
           }
         }
@@ -386,6 +492,7 @@ export const useResolvedMediaSource = (
             assetKey: asset.assetKey,
             cursorIndex,
             candidateIndex,
+            drawableEdge,
             status: 'ready',
             error: null,
             isPrivate: false,
@@ -399,20 +506,38 @@ export const useResolvedMediaSource = (
         }
       }
 
-      if (!cancelled) {
+      if (cancelled) return;
+      if (retryCapacityPressure && pressured) {
+        // A valid candidate is only blocked by budget pressure from other
+        // referenced media: keep the placeholder and retry, never settle on a
+        // permanent error (there may be no legacy fallback at all).
         setSourceState({
           ...getImmediateSource(asset, cursorIndex),
-          status: 'error',
-          error: lastError || new Error('No usable media source is available.'),
+          drawableEdge,
+          status: 'loading',
+          error: null,
           url: '',
         });
+        waitForCapacity(() => {
+          void resolveCandidate();
+        });
+        return;
       }
+      setSourceState({
+        ...getImmediateSource(asset, cursorIndex),
+        drawableEdge,
+        status: 'error',
+        error: lastError || new Error('No usable media source is available.'),
+        url: '',
+      });
     };
 
     void resolveCandidate();
     return () => {
       cancelled = true;
-      releaseLease(currentLease, releaseDelayMs);
+      stopWaitingForCapacity?.();
+      releaseReusedDrawable?.();
+      releaseLeaseHandle(currentLease, releaseDelayMs);
       if (privateLeaseRef.current === currentLease) {
         privateLeaseRef.current = null;
       }
@@ -420,9 +545,21 @@ export const useResolvedMediaSource = (
   }, [
     asset,
     cursorIndex,
+    drawableEdge,
     kind,
     releaseDelayMs,
+    retryCapacityPressure,
   ]);
+
+  // Lets a consumer that has already decoded its own drawable (e.g. a bounded
+  // token portrait) return the compressed blob to the shared private budget.
+  // The resolved URL stays in state; the record stays cached until evicted.
+  const releasePrivateLease = useCallback(() => {
+    const lease = privateLeaseRef.current;
+    if (!lease) return;
+    privateLeaseRef.current = null;
+    lease.release();
+  }, []);
 
   const advanceFallback = useCallback((error) => {
     const nextIndex = source.candidateIndex + 1;
@@ -444,6 +581,7 @@ export const useResolvedMediaSource = (
   return {
     ...source,
     advanceFallback,
+    releasePrivateLease,
     assetKey: asset.assetKey,
     candidateCount: asset.candidates.length,
     hasFallback: source.candidateIndex + 1 < asset.candidates.length,

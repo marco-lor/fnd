@@ -67,7 +67,7 @@ const isDeterministicMetric = (key) => (
   || /:resource\.(javascript|css|image|font)\.(uniqueCount|uniqueGzipBytes|uniqueFingerprint)$/.test(key)
   || /:resource\.other\.(uniqueCount|uniqueFingerprint)$/.test(key)
   || /:task07\.(attachedImages|audioNodes|farOffscreenAttachedImages|managedImages|musicStreamListeners|reducedMotionMeteors|uniqueFixtureImageRequests)$/.test(key)
-  || /:task07\.(registryRequestConcurrencyLimit|unpinnedRegistryRecords|unpinnedEstimatedDecodedBytes|totalEstimatedDecodedBytes|lowPriorityQueuedPreloads)$/.test(key)
+  || /:task07\.(registryRequestConcurrencyLimit|idleRegistryRecords|idleEstimatedDecodedBytes|totalEstimatedDecodedBytes|lowPriorityQueuedPreloads)$/.test(key)
   || key.startsWith('build:')
 );
 

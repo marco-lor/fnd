@@ -128,11 +128,14 @@ const evaluateTask07RegistryPlateau = (samples, {
         + `${TASK07_SOAK_BACKGROUND_COUNT} backgrounds`
       );
     }
-    if (Number(sample?.tokenNodeCount) < TASK07_SOAK_TOKEN_COUNT) {
+    if (sample?.tokenNodeCount !== TASK07_SOAK_TOKEN_COUNT) {
       failures.push(
         `cycle ${cycle}: rendered ${sample?.tokenNodeCount ?? 'missing'}/`
         + `${TASK07_SOAK_TOKEN_COUNT} token nodes`
       );
+    }
+    if (sample?.loadedPortraitCount !== TASK07_SOAK_TOKEN_COUNT) {
+      failures.push(`cycle ${cycle}: loaded ${sample?.loadedPortraitCount ?? 'missing'}/${TASK07_SOAK_TOKEN_COUNT} portraits`);
     }
     for (const [metric, limitName] of metricContracts) {
       const value = Number(registry[metric]);

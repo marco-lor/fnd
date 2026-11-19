@@ -70,6 +70,7 @@ import {
   IMAGE_ASSET_PIN_NAMES,
   pinImageAsset,
 } from '../common/imageAssets/imageAssetRegistry';
+import { getPrivateMediaAssetCacheSnapshot } from '../common/privateMediaAssets';
 import {
   PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
   resolveMediaSourceAsset,
@@ -93,6 +94,12 @@ import {
   GridLayer,
   TokenNode,
 } from './grigliataBoardTokenUi';
+import {
+  countDistinctTokenPortraitSources,
+  getDecodedImageBytes,
+  getTokenMediaSourceKey,
+  resolveTokenPortraitMaxEdge,
+} from './grigliataTokenPortraitBudget';
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
@@ -207,6 +214,13 @@ const isTokenWithinStageViewport = (token, viewport, stageSize) => {
     && top <= stageSize.height;
 };
 
+// Visible tokens are the on-screen working set and always lease their portrait,
+// at every zoom, however many share or differ in art: fog/privacy filtering
+// happens before this (callers pass only viewer-renderable tokens), request
+// concurrency is bounded by the image registry, and released portraits fall
+// back to the registry's idle-retention budget. `limit` bounds only offscreen
+// priority media (active turn, selected, viewer-owned), counted in distinct
+// sources so repeated art does not consume extra slots.
 export const buildBoundedTokenMediaIdSet = ({
   tokens,
   viewport,
@@ -215,7 +229,6 @@ export const buildBoundedTokenMediaIdSet = ({
   allowVisibleMedia = true,
 }) => {
   const boundedLimit = Math.max(0, Math.floor(Number(limit) || 0));
-  if (!boundedLimit) return new Set();
 
   const candidates = (Array.isArray(tokens) ? tokens : [])
     .map((token, index) => {
@@ -230,15 +243,35 @@ export const buildBoundedTokenMediaIdSet = ({
       return {
         token,
         index,
+        isVisible,
         priority,
-        eligible: priority < 4,
       };
     })
-    .filter(({token, eligible}) => eligible && token?.tokenId && hasMediaAsset(token))
-    .sort((left, right) => left.priority - right.priority || left.index - right.index)
-    .slice(0, boundedLimit);
+    .filter(({token, priority}) => priority < 4 && token?.tokenId)
+    .map((candidate) => ({
+      ...candidate,
+      sourceKey: getTokenMediaSourceKey(candidate.token),
+    }))
+    .filter(({sourceKey}) => !!sourceKey)
+    .sort((left, right) => left.priority - right.priority || left.index - right.index);
 
-  return new Set(candidates.map(({token}) => token.tokenId));
+  const leasedSourceKeys = new Set(
+    candidates.filter(({isVisible}) => isVisible).map(({sourceKey}) => sourceKey)
+  );
+  let budgetedSourceCount = 0;
+  const selectedIds = new Set();
+  candidates.forEach(({token, isVisible, sourceKey}) => {
+    if (isVisible || leasedSourceKeys.has(sourceKey)) {
+      selectedIds.add(token.tokenId);
+      return;
+    }
+    if (budgetedSourceCount >= boundedLimit) return;
+    budgetedSourceCount += 1;
+    leasedSourceKeys.add(sourceKey);
+    selectedIds.add(token.tokenId);
+  });
+
+  return selectedIds;
 };
 
 const isSameGridCell = (left, right) => (
@@ -6388,6 +6421,43 @@ export default function GrigliataBoard({
     isViewportFitGeometryReady
     && viewport.fittedViewportKey === viewportFitKey
   );
+  // Decoded budget shared by the active map and every portrait: the tighter of
+  // the current runtime profile (recomputed on stage resize, e.g. a compact
+  // breakpoint or Save-Data) and the private-media runtime already in effect.
+  const portraitDecodedBudgetBytes = useMemo(() => Math.min(
+    getImageAssetRegistryRuntimeLimits().maxTotalDecodedBytes,
+    getPrivateMediaAssetCacheSnapshot().maxTotalDecodedBytes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [stageSize.width, stageSize.height]);
+  // Only the active battlemap image is required beside portraits (narration
+  // hides tokens). Prefer the size actually decoded, then the selected
+  // candidate, then map metadata. The outgoing crossfade layer is excluded on
+  // purpose: it is released within seconds, and budgeting it would re-decode
+  // every portrait twice per map switch.
+  const requiredMapDecodedBytes = activeBackgroundAssetType === 'image'
+    ? getDecodedImageBytes(
+      backgroundAssetSnapshot.image?.naturalWidth
+        || activeBackgroundMediaSource.width
+        || resolvedBackgroundWidth,
+      backgroundAssetSnapshot.image?.naturalHeight
+        || activeBackgroundMediaSource.height
+        || resolvedBackgroundHeight
+    )
+    : 0;
+  const tokenPortraitSourceCount = useMemo(
+    () => countDistinctTokenPortraitSources(visibleRenderedTokens),
+    [visibleRenderedTokens]
+  );
+  const tokenPortraitMaxEdgeRef = useRef(0);
+  const tokenPortraitMaxEdge = useMemo(() => resolveTokenPortraitMaxEdge({
+    maxTotalDecodedBytes: portraitDecodedBudgetBytes,
+    requiredMapDecodedBytes,
+    portraitSourceCount: tokenPortraitSourceCount,
+    previousEdge: tokenPortraitMaxEdgeRef.current,
+  }), [portraitDecodedBudgetBytes, requiredMapDecodedBytes, tokenPortraitSourceCount]);
+  useEffect(() => {
+    tokenPortraitMaxEdgeRef.current = tokenPortraitMaxEdge;
+  }, [tokenPortraitMaxEdge]);
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
     tokens: visibleRenderedTokens,
     viewport,
@@ -7024,6 +7094,7 @@ export default function GrigliataBoard({
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
+                  portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
@@ -7079,6 +7150,7 @@ export default function GrigliataBoard({
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
+                  portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}

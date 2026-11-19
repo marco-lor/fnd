@@ -45,8 +45,8 @@
       "scheduledOnly": true,
       "requiredMetrics": [
         "task07.registryRequestConcurrencyLimit",
-        "task07.unpinnedRegistryRecords",
-        "task07.unpinnedEstimatedDecodedBytes",
+        "task07.idleRegistryRecords",
+        "task07.idleEstimatedDecodedBytes",
         "task07.totalEstimatedDecodedBytes",
         "task07.lowPriorityQueuedPreloads"
       ]
@@ -59,8 +59,8 @@
       "scheduledOnly": true,
       "requiredMetrics": [
         "task07.registryRequestConcurrencyLimit",
-        "task07.unpinnedRegistryRecords",
-        "task07.unpinnedEstimatedDecodedBytes",
+        "task07.idleRegistryRecords",
+        "task07.idleEstimatedDecodedBytes",
         "task07.totalEstimatedDecodedBytes",
         "task07.lowPriorityQueuedPreloads"
       ]

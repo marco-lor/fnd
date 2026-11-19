@@ -23,13 +23,24 @@ import {
   useTokenStatusIconImages,
 } from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
+import * as privateMediaAssetsModule from '../common/privateMediaAssets';
 import {
   __configurePrivateMediaAssetsForTests,
   __resetPrivateMediaAssetsForTests,
+  getPrivateMediaAssetCacheSnapshot,
 } from '../common/privateMediaAssets';
+import * as grigliataBoardTokenUiModule from './grigliataBoardTokenUi';
+import { TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE } from './grigliataBoardTokenUi';
 import {
+  getDecodedImageBytes,
+  getTokenPortraitDecodedBytes,
+  TOKEN_PORTRAIT_EDGE_TIERS,
+} from './grigliataTokenPortraitBudget';
+import {
+  __configureImageAssetRegistryForTests,
   __getImageAssetRegistryStats,
   __resetImageAssetRegistry,
+  getImageAssetRegistryRuntimeLimits,
   IMAGE_ASSET_PIN_NAMES,
 } from '../common/imageAssets/imageAssetRegistry';
 import {
@@ -40,6 +51,7 @@ import {
   normalizeFogRasterMemoryTileDoc,
 } from './fogRasterMemory';
 
+const TOKEN_PORTRAIT_SNAPSHOT_OPTIONS = { maxEdge: TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE };
 const MAP_PING_ACCENT = '#fbbf24';
 const STATUS_BADGE_FILL = '#7c3aed';
 const STATUS_BADGE_STROKE = '#f8fafc';
@@ -133,21 +145,22 @@ test('loads visible token media at low zoom while keeping priority tokens first'
   expect(selectedIds).not.toContain('tiny-offscreen');
 });
 
-test('keeps token media priority and fixture order stable when candidates exceed the limit', () => {
+test('keeps offscreen priority media order stable when candidates exceed the limit', () => {
   const tokenAt = (tokenId, overrides = {}) => ({
     tokenId,
     imageUrl: `https://example.com/${tokenId}.png`,
-    renderPosition: {x: 20, y: 20, size: 50},
+    renderPosition: {x: 2000, y: 2000, size: 50},
     ...overrides,
   });
   const selectedIds = buildBoundedTokenMediaIdSet({
     tokens: [
-      tokenAt('visible-first'),
+      tokenAt('offscreen-ordinary'),
       tokenAt('owned-first', {isOwnedByViewer: true}),
       tokenAt('selected-first', {isSelected: true}),
       tokenAt('active-first', {isActiveTurn: true}),
       tokenAt('active-second', {isActiveTurn: true}),
       tokenAt('selected-second', {isSelected: true}),
+      tokenAt('owned-second', {isOwnedByViewer: true}),
     ],
     viewport: {x: 0, y: 0, scale: 1},
     stageSize: {width: 200, height: 200},
@@ -161,7 +174,119 @@ test('keeps token media priority and fixture order stable when candidates exceed
     'selected-second',
     'owned-first',
   ]);
-  expect(selectedIds).not.toContain('visible-first');
+  expect(selectedIds).not.toContain('owned-second');
+  expect(selectedIds).not.toContain('offscreen-ordinary');
+});
+
+const buildLowZoomTokenGrid = ({count, columns = 20, imageUrlForIndex}) => (
+  Array.from({length: count}, (_, index) => ({
+    tokenId: `grid-token-${index}`,
+    imageUrl: imageUrlForIndex(index),
+    renderPosition: {
+      x: (index % columns) * 50,
+      y: Math.floor(index / columns) * 50,
+      size: 50,
+    },
+  }))
+);
+
+test.each([
+  {profile: 'desktop', limit: 72},
+  {profile: 'compact', limit: 40},
+])('leases every visible token portrait at low zoom beyond the $profile record budget', ({limit}) => {
+  const lowZoomViewport = {x: 0, y: 0, scale: 0.2};
+  const stageSize = {width: 400, height: 300};
+  const sharedTokens = buildLowZoomTokenGrid({
+    count: 80,
+    imageUrlForIndex: () => 'https://example.com/shared-portrait.png',
+  });
+  const distinctTokens = buildLowZoomTokenGrid({
+    count: 200,
+    imageUrlForIndex: (index) => `https://example.com/distinct-${index}.png`,
+  });
+
+  // Guard against a vacuous fixture: each token is a few pixels wide, on screen,
+  // and the visible set is larger than the offscreen priority budget.
+  expect(50 * lowZoomViewport.scale).toBeLessThan(16);
+  expect(sharedTokens.length).toBeGreaterThan(limit);
+  expect(distinctTokens.length).toBeGreaterThan(limit);
+  expect((19 * 50 + 50) * lowZoomViewport.scale).toBeLessThanOrEqual(stageSize.width);
+  expect((9 * 50 + 50) * lowZoomViewport.scale).toBeLessThanOrEqual(stageSize.height);
+
+  [sharedTokens, distinctTokens].forEach((tokens) => {
+    const selectedIds = buildBoundedTokenMediaIdSet({
+      tokens,
+      viewport: lowZoomViewport,
+      stageSize,
+      limit,
+    });
+    expect([...selectedIds]).toEqual(tokens.map(({tokenId}) => tokenId));
+  });
+});
+
+test('keeps offscreen ordinary art unloaded and charges shared offscreen priority art once', () => {
+  const tokenAt = (tokenId, overrides = {}) => ({
+    tokenId,
+    imageUrl: `https://example.com/${tokenId}.png`,
+    renderPosition: {x: 2000, y: 2000, size: 50},
+    ...overrides,
+  });
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens: [
+      tokenAt('owned-shared-a', {isOwnedByViewer: true, imageUrl: 'https://example.com/party.png'}),
+      tokenAt('owned-shared-b', {isOwnedByViewer: true, imageUrl: 'https://example.com/party.png'}),
+      tokenAt('owned-visible-art', {
+        isOwnedByViewer: true,
+        imageUrl: 'https://example.com/visible-art.png',
+      }),
+      tokenAt('owned-distinct', {isOwnedByViewer: true}),
+      tokenAt('owned-over-budget', {isOwnedByViewer: true}),
+      tokenAt('offscreen-ordinary'),
+      tokenAt('no-art', {isOwnedByViewer: true, imageUrl: ''}),
+      tokenAt('visible-shared', {
+        imageUrl: 'https://example.com/visible-art.png',
+        renderPosition: {x: 20, y: 20, size: 50},
+      }),
+    ],
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 2,
+  });
+
+  expect([...selectedIds]).toEqual([
+    'owned-shared-a',
+    'owned-shared-b',
+    'owned-visible-art',
+    'owned-distinct',
+    'visible-shared',
+  ]);
+  expect(selectedIds).not.toContain('owned-over-budget');
+  expect(selectedIds).not.toContain('offscreen-ordinary');
+  expect(selectedIds).not.toContain('no-art');
+});
+
+test('charges distinct offscreen thumbnails separately when they share a legacy fallback', () => {
+  const token = (id, thumbnail) => ({
+    tokenId: id,
+    isOwnedByViewer: true,
+    renderPosition: {x: 2000, y: 2000, size: 50},
+    imageUrl: 'https://example.com/legacy.png',
+    media: {
+      kind: 'avatar', schemaVersion: 1, state: 'ready',
+      variants: {thumbnail: {url: thumbnail, width: 96, height: 96}},
+    },
+  });
+  const ids = buildBoundedTokenMediaIdSet({
+    tokens: [
+      token('first', 'https://example.com/first.png'),
+      token('second', 'https://example.com/second.png'),
+      token('first-copy', 'https://example.com/first.png'),
+    ],
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 1,
+  });
+  expect([...ids]).toEqual(['first', 'first-copy']);
 });
 
 test('defers ordinary visible token media until the current viewport fit is ready', () => {
@@ -1106,9 +1231,719 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(getBlob).toHaveBeenCalledWith({ path: thumbnail.path }, thumbnail.bytes);
-      expect(useImageAssetSnapshot).toHaveBeenCalledWith('blob:private-token-thumbnail');
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith(
+        'blob:private-token-thumbnail',
+        { maxEdge: TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE }
+      );
     });
     expect(screen.getByTestId('token-node-user-1')).toBeInTheDocument();
+  });
+
+  describe('token portraits under shared media budgets', () => {
+    const originalWindowImage = window.Image;
+    const originalInnerWidth = window.innerWidth;
+    const actualUseImageAsset = jest.requireActual('../common/imageAssets/useImageAsset');
+    let sizeByPath;
+    let removedImageSources;
+
+    const pathFromSrc = (src) => (
+      src.startsWith('blob:fnd-test/') ? src.split('/').slice(2).join('/') : src
+    );
+
+    class SizedFakeImage {
+      constructor() {
+        this.complete = false;
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+      }
+
+      set src(value) {
+        this._src = value;
+        if (!value) return;
+        Promise.resolve().then(() => {
+          if (this._src !== value) return;
+          const [width, height] = sizeByPath.get(pathFromSrc(value)) || [64, 64];
+          this.complete = true;
+          this.naturalWidth = width;
+          this.naturalHeight = height;
+          this.onload?.();
+        });
+      }
+
+      get src() {
+        return this._src;
+      }
+
+      removeAttribute(name) {
+        if (name !== 'src') return;
+        removedImageSources.push(this._src);
+        this._src = '';
+      }
+    }
+
+    let boundedDrawableCount = 0;
+    const createTestDrawable = (image, { maxEdge }) => {
+      boundedDrawableCount += 1;
+      const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+      return {
+        testDrawable: 'bounded-canvas',
+        width: Math.round(image.naturalWidth * scale),
+        height: Math.round(image.naturalHeight * scale),
+        dataset: {},
+      };
+    };
+
+    const configurePrivateStorage = (overrides = {}) => {
+      const blobPaths = new WeakMap();
+      const contentTypeByPath = new Map();
+      let objectUrlCount = 0;
+      const getBlob = jest.fn(async (objectRef, bytes) => {
+        const blob = new Blob(['x'.repeat(bytes)], {
+          type: contentTypeByPath.get(objectRef.path),
+        });
+        blobPaths.set(blob, objectRef.path);
+        return blob;
+      });
+      const revokeObjectURL = jest.fn();
+      __configurePrivateMediaAssetsForTests({
+        loadStorageApi: jest.fn(async () => ({
+          storage: { name: 'authenticated-storage' },
+          ref: (_storage, path) => ({ path }),
+          getBlob,
+        })),
+        createObjectURL: jest.fn((blob) => {
+          objectUrlCount += 1;
+          return `blob:fnd-test/${objectUrlCount}/${blobPaths.get(blob)}`;
+        }),
+        revokeObjectURL,
+        ...overrides,
+      });
+      const register = (descriptor) => {
+        contentTypeByPath.set(descriptor.path, descriptor.contentType);
+        sizeByPath.set(descriptor.path, [descriptor.width, descriptor.height]);
+        return descriptor;
+      };
+      return { getBlob, register, revokeObjectURL };
+    };
+
+    const privateDescriptor = (id, name, overrides = {}) => ({
+      path: `media_assets/v1/signed-in/user/m_${id.repeat(40).slice(0, 40)}/7/${name}`,
+      generation: '42',
+      bytes: 4,
+      contentType: name === 'original' ? 'image/png' : 'image/webp',
+      width: 96,
+      height: 96,
+      ...overrides,
+    });
+
+    const buildPortraitToken = (tokenId, index, overrides = {}) => ({
+      tokenId,
+      id: tokenId,
+      ownerUid: 'another-user',
+      tokenType: 'character',
+      label: `Hero ${tokenId}`,
+      imageUrl: '',
+      placed: true,
+      col: index,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      ...overrides,
+    });
+
+    const getPortraitNode = (tokenId) => (
+      screen.getByTestId(`token-node-${tokenId}`).querySelector('[data-name="token-portrait"]')
+    );
+
+    const expectEveryPortrait = async (tokens, timeout = 4000) => {
+      await waitFor(() => {
+        tokens.forEach(({tokenId}) => {
+          expect(getPortraitNode(tokenId)).not.toBeNull();
+          expect(
+            screen.getByTestId(`token-node-${tokenId}`)
+              .querySelector('[data-name="token-portrait-placeholder"]')
+          ).toBeNull();
+        });
+      }, { timeout });
+    };
+
+    const getTokenPortraitRegistryStats = () => __getImageAssetRegistryStats();
+
+    // Records the props the board hands each TokenNode (calls through).
+    const spyOnTokenNodes = () => jest.spyOn(grigliataBoardTokenUiModule, 'TokenNode');
+    const getLatestTokenNodeProps = (tokenNodeSpy) => {
+      const latest = new Map();
+      tokenNodeSpy.mock.calls.forEach(([props]) => latest.set(props.token.tokenId, props));
+      return latest;
+    };
+    const getPassedPortraitEdges = (tokenNodeSpy) => (
+      new Set(tokenNodeSpy.mock.calls.map(([props]) => props.portraitMaxEdge))
+    );
+
+    const useCompactRuntime = () => {
+      window.innerWidth = 390;
+      __resetImageAssetRegistry();
+      __configureImageAssetRegistryForTests({ createBoundedDrawable: createTestDrawable });
+      __resetPrivateMediaAssetsForTests();
+    };
+
+    const HUGE_MAP_URL = 'https://example.com/legacy-9000-map.png';
+    const HUGE_MAP_BYTES = 9000 * 9000 * 4;
+    const buildHugeMapBoard = ({ tokenCount = 100, columns = 10, mapEdge = 9000, ...overrides } = {}) => {
+      const lowZoomGrid = buildGridConfig(50);
+      sizeByPath.set(HUGE_MAP_URL, [mapEdge, mapEdge]);
+      const tokens = Array.from({ length: tokenCount }, (_, index) => {
+        const imageUrl = `https://example.com/legacy-9000-portrait-${index}.png`;
+        sizeByPath.set(imageUrl, [1024, 1024]);
+        return buildPortraitToken(`legacy-9000-${index}`, index, {
+          imageUrl,
+          col: index % columns,
+          row: Math.floor(index / columns),
+        });
+      });
+      return {
+        tokens,
+        props: buildProps({
+          grid: lowZoomGrid,
+          activeBackground: {
+            id: 'map-legacy-9000',
+            name: 'Legacy 9000',
+            imageUrl: HUGE_MAP_URL,
+            imageWidth: mapEdge,
+            imageHeight: mapEdge,
+            grid: lowZoomGrid,
+          },
+          tokens,
+          ...overrides,
+        }),
+      };
+    };
+
+    beforeEach(() => {
+      sizeByPath = new Map();
+      removedImageSources = [];
+      boundedDrawableCount = 0;
+      window.Image = SizedFakeImage;
+      useReducedMotion.mockReturnValue(true);
+      useImageAssetSnapshot.mockImplementation(actualUseImageAsset.useImageAssetSnapshot);
+      __configureImageAssetRegistryForTests({ createBoundedDrawable: createTestDrawable });
+    });
+
+    afterEach(() => {
+      window.Image = originalWindowImage;
+      window.innerWidth = originalInnerWidth;
+    });
+
+    test('displays every valid private-only portrait beside an active map that exhausts the byte budget', async () => {
+      const capacitySubscribeSpy = jest.spyOn(privateMediaAssetsModule, 'subscribePrivateMediaCapacity');
+      try {
+        // Injectable small budget: 8-byte map + 9 x 4-byte portraits = 44 > 32.
+        const { getBlob, register } = configurePrivateStorage({
+          maxCacheBytes: 32,
+          maxActiveFetches: 2,
+          // Isolate release-after-decode + capacity retry from the lane.
+          maxTransientPortraitBytes: 0,
+        });
+        const mapOriginal = register(privateDescriptor('a', 'original', {
+          bytes: 8,
+          width: 3840,
+          height: 2160,
+        }));
+        const privateMap = {
+          id: 'map-private-budget',
+          name: 'Private Budget Map',
+          imageWidth: 0,
+          imageHeight: 0,
+          media: {
+            schemaVersion: 1,
+            state: 'ready',
+            kind: 'map',
+            original: mapOriginal,
+            variants: {},
+          },
+        };
+        const ids = ['b', 'c', 'd', 'e', 'f', '1', '2', '3', '4'];
+        const tokens = ids.map((id, index) => {
+          if (index < 6) {
+            // Private legacy original (non-v1 manifest), no public fallback URL.
+            const original = register(privateDescriptor(id, 'original', {
+              width: 2048,
+              height: 2048,
+            }));
+            return buildPortraitToken(`legacy-original-${id}`, index, {
+              media: { kind: 'avatar', original },
+            });
+          }
+          // Canonical-only v1 thumbnail, no legacy fallback URL.
+          const thumbnail = register(privateDescriptor(id, 'thumbnail'));
+          return buildPortraitToken(`canonical-thumb-${id}`, index, {
+            media: {
+              kind: 'avatar',
+              schemaVersion: 1,
+              state: 'ready',
+              variants: { thumbnail },
+            },
+          });
+        });
+
+        const { rerender, unmount } = render(
+          <GrigliataBoard {...buildProps({ activeBackground: privateMap })} />
+        );
+        await screen.findByTestId('battlemap-image-active');
+        rerender(<GrigliataBoard {...buildProps({ activeBackground: privateMap, tokens })} />);
+
+        await expectEveryPortrait(tokens);
+
+        // Pressure was exercised, and each consumer waited a bounded number of
+        // times (capacity notifications, not polling or a retry storm).
+        expect(capacitySubscribeSpy.mock.calls.length).toBeGreaterThan(0);
+        expect(capacitySubscribeSpy.mock.calls.length).toBeLessThanOrEqual(tokens.length * tokens.length);
+        // Exactly one authenticated download per immutable generation.
+        expect(getBlob).toHaveBeenCalledTimes(1 + tokens.length);
+        expect(new Set(getBlob.mock.calls.map(([objectRef]) => objectRef.path)).size)
+          .toBe(1 + tokens.length);
+        getBlob.mock.calls.forEach(([objectRef, bytes]) => {
+          expect(bytes).toBe(objectRef.path === mapOriginal.path ? 8 : 4);
+        });
+
+        const settled = getPrivateMediaAssetCacheSnapshot();
+        expect(settled).toMatchObject({
+          activeFetches: 0,
+          queuedFetches: 0,
+          reservedBytes: 0,
+          capacityWaiterCount: 0,
+        });
+        expect(settled.cachedBytes).toBeLessThanOrEqual(32);
+        // Only the active map keeps a lease; portraits released theirs once decoded.
+        expect(settled.records.filter(({refCount}) => refCount > 0).map(({path}) => path))
+          .toEqual([mapOriginal.path]);
+        expect(settled.records.every(({status}) => status === 'ready')).toBe(true);
+
+        // Oversized private originals keep a bounded drawable; thumbnails keep their image.
+        expect(boundedDrawableCount).toBe(6);
+        expect(getTokenPortraitRegistryStats()).toMatchObject({
+          boundedRecordCount: tokens.length,
+          activeRequestCount: 0,
+          queuedRequestCount: 0,
+        });
+
+        // No retry loop keeps running after everything is displayed.
+        const subscribeCount = capacitySubscribeSpy.mock.calls.length;
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(getBlob).toHaveBeenCalledTimes(1 + tokens.length);
+        expect(capacitySubscribeSpy).toHaveBeenCalledTimes(subscribeCount);
+
+        unmount();
+        const released = getPrivateMediaAssetCacheSnapshot();
+        expect(released.capacityWaiterCount).toBe(0);
+        expect(
+          released.records.filter(({path, refCount}) => path !== mapOriginal.path && refCount > 0)
+        ).toEqual([]);
+      } finally {
+        capacitySubscribeSpy.mockRestore();
+      }
+    });
+
+    test.each([
+      { label: '31 of 32', backgroundBytes: 31 },
+      { label: 'exactly 32 of 32', backgroundBytes: 32 },
+    ])('displays private-only portraits while an on-screen background holds $label bytes', async ({
+      backgroundBytes,
+    }) => {
+      // Injected small numbers: 32-byte budget, a 2-byte transient lane, and
+      // 2-byte portraits (a "2 MiB portrait beside a 31 MiB map").
+      const { getBlob, register } = configurePrivateStorage({
+        maxCacheBytes: 32,
+        maxActiveFetches: 2,
+        maxTransientPortraitBytes: 2,
+      });
+      const mapOriginal = register(privateDescriptor('a', 'original', {
+        bytes: backgroundBytes,
+        width: 3840,
+        height: 2160,
+      }));
+      const privateMap = {
+        id: 'map-private-full',
+        name: 'Private Full Map',
+        imageWidth: 0,
+        imageHeight: 0,
+        media: {
+          schemaVersion: 1,
+          state: 'ready',
+          kind: 'map',
+          original: mapOriginal,
+          variants: {},
+        },
+      };
+      const tokens = ['b', 'c', 'd'].map((id, index) => {
+        const thumbnail = register(privateDescriptor(id, 'thumbnail', { bytes: 2 }));
+        return buildPortraitToken(`full-budget-${id}`, index, {
+          media: {
+            kind: 'avatar',
+            schemaVersion: 1,
+            state: 'ready',
+            variants: { thumbnail },
+          },
+        });
+      });
+
+      const { rerender } = render(
+        <GrigliataBoard {...buildProps({ activeBackground: privateMap })} />
+      );
+      await screen.findByTestId('battlemap-image-active');
+      expect(getPrivateMediaAssetCacheSnapshot().cachedBytes).toBe(backgroundBytes);
+      rerender(<GrigliataBoard {...buildProps({ activeBackground: privateMap, tokens })} />);
+
+      await expectEveryPortrait(tokens);
+      // The background stayed on screen with its lease the whole time.
+      expect(screen.getByTestId('battlemap-image-active')).toBeInTheDocument();
+      expect(getBlob).toHaveBeenCalledTimes(1 + tokens.length);
+      await waitFor(() => {
+        expect(getPrivateMediaAssetCacheSnapshot()).toMatchObject({
+          activeFetches: 0,
+          queuedFetches: 0,
+          reservedBytes: 0,
+          capacityWaiterCount: 0,
+          // Portraits released after decode, so the transient overage drained.
+          transientOverageBytes: 0,
+          cachedBytes: backgroundBytes,
+        });
+      });
+      expect(getPrivateMediaAssetCacheSnapshot().records).toEqual([
+        expect.objectContaining({ path: mapOriginal.path, refCount: 1, status: 'ready' }),
+      ]);
+    });
+
+    test('keeps 100 visible 1024px legacy portraits within the total decoded budget', async () => {
+      const tokenNodeSpy = spyOnTokenNodes();
+      const lowZoomGrid = buildGridConfig(50);
+      const mapUrl = 'https://example.com/legacy-budget-map.png';
+      sizeByPath.set(mapUrl, [5000, 5000]);
+      const tokens = Array.from({ length: 100 }, (_, index) => {
+        const imageUrl = `https://example.com/legacy-portrait-${index}.png`;
+        sizeByPath.set(imageUrl, [1024, 1024]);
+        return buildPortraitToken(`legacy-url-${index}`, index, {
+          imageUrl,
+          col: index % 10,
+          row: Math.floor(index / 10),
+        });
+      });
+
+      render(
+        <GrigliataBoard
+          {...buildProps({
+            grid: lowZoomGrid,
+            activeBackground: {
+              id: 'map-legacy-budget',
+              name: 'Legacy Budget',
+              imageUrl: mapUrl,
+              imageWidth: 5000,
+              imageHeight: 5000,
+              grid: lowZoomGrid,
+            },
+            tokens,
+          })}
+        />
+      );
+
+      await expectEveryPortrait(tokens);
+      const stats = getTokenPortraitRegistryStats();
+      const mapBytes = 5000 * 5000 * 4;
+      expect(stats.boundedRecordCount).toBe(100);
+      expect(stats.decodedBytes - mapBytes)
+        .toBe(100 * TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE * TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE * 4);
+      // 100 x 1024^2 x 4 = 400 MiB of portraits alone used to exceed this cap.
+      expect(stats.decodedBytes).toBeLessThanOrEqual(stats.limits.maxTotalDecodedBytes);
+      expect(removedImageSources.sort()).toEqual(tokens.map(({imageUrl}) => imageUrl).sort());
+      // A normal map within budget keeps the full portrait edge, unchanged.
+      expect(TOKEN_PORTRAIT_EDGE_TIERS[0]).toBe(TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE);
+      expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE]));
+      const latest = getLatestTokenNodeProps(tokenNodeSpy);
+      expect(latest.size).toBe(100);
+      tokens.forEach(({tokenId}) => {
+        expect(latest.get(tokenId)).toMatchObject({
+          loadMedia: true,
+          portraitMaxEdge: TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE,
+        });
+      });
+      tokenNodeSpy.mockRestore();
+    });
+
+    test.each([
+      { profile: 'desktop', mapEdge: 9000, expectedEdge: 384 },
+      { profile: 'compact', mapEdge: 9000, expectedEdge: 128 },
+      { profile: 'compact', mapEdge: 9150, expectedEdge: 32 },
+    ])('budgets a $mapEdge px map with 100 distinct 1024px portraits at $expectedEdge px on $profile', async ({
+      profile,
+      mapEdge,
+      expectedEdge,
+    }) => {
+      if (profile === 'compact') useCompactRuntime();
+      const limits = getImageAssetRegistryRuntimeLimits();
+      expect(limits.profile).toBe(profile);
+      expect(getPrivateMediaAssetCacheSnapshot().profile).toBe(profile);
+      const mapBytes = getDecodedImageBytes(mapEdge, mapEdge);
+      expect(mapBytes + (100 * getTokenPortraitDecodedBytes(512)))
+        .toBeGreaterThan(limits.maxTotalDecodedBytes);
+
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        const { tokens, props } = buildHugeMapBoard({mapEdge});
+        render(<GrigliataBoard {...props} />);
+
+        await expectEveryPortrait(tokens, 8000);
+        expect(screen.getByTestId('battlemap-image-active')).toBeInTheDocument();
+        const latest = getLatestTokenNodeProps(tokenNodeSpy);
+        expect(latest.size).toBe(100);
+        tokens.forEach(({tokenId}) => {
+          // Never excluded: every visible token loads, at the budgeted edge.
+          expect(latest.get(tokenId)).toMatchObject({ loadMedia: true, portraitMaxEdge: expectedEdge });
+        });
+        // Stable from the first render (map metadata is known up front):
+        // no 512 -> smaller re-key while the map decodes.
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([expectedEdge]));
+
+        const budgetedTotal = mapBytes + (100 * getTokenPortraitDecodedBytes(expectedEdge));
+        const registry = getTokenPortraitRegistryStats();
+        expect(registry.boundedRecordCount).toBe(tokens.length);
+        expect(registry.decodedBytes).toBe(budgetedTotal);
+        expect(registry.decodedBytes).toBeLessThanOrEqual(limits.maxTotalDecodedBytes);
+        // Highest tier that fits: adequate resolution, not needless pessimism.
+        const higherTier = TOKEN_PORTRAIT_EDGE_TIERS[TOKEN_PORTRAIT_EDGE_TIERS.indexOf(expectedEdge) - 1];
+        expect(mapBytes + (100 * getTokenPortraitDecodedBytes(higherTier)))
+          .toBeGreaterThan(limits.maxTotalDecodedBytes);
+        expect(registry.namedPins).toContain(IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD);
+      } finally {
+        tokenNodeSpy.mockRestore();
+      }
+    });
+
+    test('keeps the 9000px portrait edge stable across zoom, pan and resize without permanent blanks', async () => {
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        const { tokens, props } = buildHugeMapBoard();
+        render(<GrigliataBoard {...props} />);
+        await expectEveryPortrait(tokens, 8000);
+
+        const stage = document.querySelector('[data-konva-type="Stage"]');
+        const fittedScale = Number(stage.getAttribute('data-scalex'));
+        for (let step = 0; step < 12; step += 1) {
+          fireEvent.wheel(stage, { deltaY: -120 });
+        }
+        expect(Number(stage.getAttribute('data-scalex'))).toBeGreaterThan(fittedScale * 4);
+        // Zoomed in: some portraits leave the viewport (and release), none re-key.
+        await waitFor(() => {
+          const latest = getLatestTokenNodeProps(tokenNodeSpy);
+          expect(tokens.some(({tokenId}) => latest.get(tokenId).loadMedia === false)).toBe(true);
+        });
+
+        getBoundingClientRectSpy.mockImplementation(() => ({
+          width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720,
+        }));
+        act(() => {
+          resizeObserverInstance.callback([]);
+        });
+        for (let step = 0; step < 40; step += 1) {
+          fireEvent.wheel(stage, { deltaY: 120 });
+        }
+
+        // Back at an overview: every portrait is shown again.
+        await expectEveryPortrait(tokens, 8000);
+        const latest = getLatestTokenNodeProps(tokenNodeSpy);
+        tokens.forEach(({tokenId}) => {
+          expect(latest.get(tokenId)).toMatchObject({ loadMedia: true, portraitMaxEdge: 384 });
+        });
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([384]));
+      } finally {
+        tokenNodeSpy.mockRestore();
+      }
+    });
+
+    test('drops to the compact tier when a resize switches the runtime profile', async () => {
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        const { tokens, props } = buildHugeMapBoard({tokenCount: 40});
+        render(<GrigliataBoard {...props} />);
+        await expectEveryPortrait(tokens, 8000);
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([512]));
+
+        window.innerWidth = 390;
+        getBoundingClientRectSpy.mockImplementation(() => ({
+          width: 390, height: 844, top: 0, left: 0, right: 390, bottom: 844,
+        }));
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+          resizeObserverInstance.callback([]);
+        });
+
+        await waitFor(() => {
+          const latest = getLatestTokenNodeProps(tokenNodeSpy);
+          tokens.forEach(({tokenId}) => {
+            expect(latest.get(tokenId).portraitMaxEdge).toBe(256);
+          });
+        });
+        const compactLimits = getImageAssetRegistryRuntimeLimits({ compact: true });
+        await waitFor(() => {
+          const registry = getTokenPortraitRegistryStats();
+          expect(registry.limits.profile).toBe('compact');
+          expect(registry.decodedBytes).toBeGreaterThanOrEqual(HUGE_MAP_BYTES + (40 * getTokenPortraitDecodedBytes(256)));
+          expect(registry.decodedBytes).toBeLessThanOrEqual(compactLimits.maxTotalDecodedBytes);
+        }, {timeout: 7000});
+        await expectEveryPortrait(tokens, 8000);
+      } finally {
+        tokenNodeSpy.mockRestore();
+      }
+    });
+
+    test('degrades to the floor edge, never a blank, when a compact map alone exceeds the budget', async () => {
+      useCompactRuntime();
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        const lowZoomGrid = buildGridConfig(50);
+        const mapUrl = 'https://example.com/legacy-9600-map.png';
+        sizeByPath.set(mapUrl, [9600, 9600]);
+        expect(getDecodedImageBytes(9600, 9600))
+          .toBeGreaterThan(getImageAssetRegistryRuntimeLimits().maxTotalDecodedBytes);
+        const tokens = Array.from({ length: 12 }, (_, index) => {
+          const imageUrl = `https://example.com/legacy-9600-portrait-${index}.png`;
+          sizeByPath.set(imageUrl, [1024, 1024]);
+          return buildPortraitToken(`legacy-9600-${index}`, index, { imageUrl });
+        });
+        render(
+          <GrigliataBoard
+            {...buildProps({
+              grid: lowZoomGrid,
+              activeBackground: {
+                id: 'map-legacy-9600',
+                name: 'Legacy 9600',
+                imageUrl: mapUrl,
+                imageWidth: 9600,
+                imageHeight: 9600,
+                grid: lowZoomGrid,
+              },
+              tokens,
+            })}
+          />
+        );
+
+        await expectEveryPortrait(tokens, 8000);
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([64]));
+      } finally {
+        tokenNodeSpy.mockRestore();
+      }
+    });
+
+    test.each([
+      { roleLabel: 'player', isManager: false, expectedEdge: 384, expectedCount: 101 },
+      { roleLabel: 'manager', isManager: true, expectedEdge: 256, expectedCount: 141 },
+    ])('budgets only portraits the $roleLabel can see under fog', async ({
+      isManager,
+      expectedEdge,
+      expectedCount,
+    }) => {
+      const tokenNodeSpy = spyOnTokenNodes();
+      try {
+        // 140 distinct portraits: 100 in currently visible cells, 40 fogged.
+        const { tokens: boardTokens, props } = buildHugeMapBoard({ tokenCount: 140 });
+        const visibleTokens = boardTokens.slice(0, 100);
+        const foggedTokens = boardTokens.slice(100);
+        // The player's own main token stands in fog: it renders above the fog
+        // layer (the second TokenNode usage) and still gets the budgeted edge.
+        const ownUrl = 'https://example.com/legacy-9000-own.png';
+        sizeByPath.set(ownUrl, [1024, 1024]);
+        const ownToken = buildPortraitToken('player-user', 0, {
+          ownerUid: 'player-user',
+          imageUrl: ownUrl,
+          col: 3,
+          row: 15,
+        });
+        const tokens = [...boardTokens, ownToken];
+        render(
+          <GrigliataBoard
+            {...props}
+            tokens={tokens}
+            isManager={isManager}
+            currentUserId={isManager ? 'dm-user' : 'player-user'}
+            fogOfWar={{
+              exploredCells: [],
+              currentVisibleCells: visibleTokens.map(({col, row}) => `${col}:${row}`),
+            }}
+          />
+        );
+
+        const expectedTokens = isManager ? tokens : [...visibleTokens, ownToken];
+        await expectEveryPortrait(expectedTokens, 10000);
+        const latest = getLatestTokenNodeProps(tokenNodeSpy);
+        expect(latest.size).toBe(expectedCount);
+        expectedTokens.forEach(({tokenId}) => {
+          expect(latest.get(tokenId)).toMatchObject({ loadMedia: true, portraitMaxEdge: expectedEdge });
+        });
+        // Fogged portraits are neither rendered nor budgeted for the player.
+        foggedTokens.forEach(({tokenId}) => {
+          expect(screen.queryByTestId(`token-node-${tokenId}`) !== null).toBe(isManager);
+        });
+        expect(getPassedPortraitEdges(tokenNodeSpy)).toEqual(new Set([expectedEdge]));
+        expect(HUGE_MAP_BYTES + (expectedCount * getTokenPortraitDecodedBytes(expectedEdge)))
+          .toBeLessThanOrEqual(getImageAssetRegistryRuntimeLimits().maxTotalDecodedBytes);
+      } finally {
+        tokenNodeSpy.mockRestore();
+      }
+    });
+
+    test('shows a canonical-only 96px portrait beside a compact 9600px private map', async () => {
+      window.innerWidth = 390;
+      __resetImageAssetRegistry();
+      __configureImageAssetRegistryForTests({ createBoundedDrawable: createTestDrawable });
+      const { getBlob, register } = configurePrivateStorage();
+      expect(getPrivateMediaAssetCacheSnapshot().profile).toBe('compact');
+      const mapOriginal = register(privateDescriptor('5', 'original', {
+        bytes: 30,
+        width: 9600,
+        height: 9600,
+      }));
+      // The map alone exceeds the compact total decoded cap.
+      expect(9600 * 9600 * 4).toBeGreaterThan(getPrivateMediaAssetCacheSnapshot().maxTotalDecodedBytes);
+      const thumbnail = register(privateDescriptor('6', 'thumbnail'));
+      const privateMap = {
+        id: 'map-compact-huge',
+        name: 'Compact Huge Map',
+        imageWidth: 0,
+        imageHeight: 0,
+        media: {
+          schemaVersion: 1,
+          state: 'ready',
+          kind: 'map',
+          original: mapOriginal,
+          variants: {},
+        },
+      };
+      const token = buildPortraitToken('compact-thumb', 0, {
+        media: {
+          kind: 'avatar',
+          schemaVersion: 1,
+          state: 'ready',
+          variants: { thumbnail },
+        },
+      });
+
+      const { rerender } = render(
+        <GrigliataBoard {...buildProps({ activeBackground: privateMap })} />
+      );
+      await screen.findByTestId('battlemap-image-active');
+      rerender(
+        <GrigliataBoard {...buildProps({ activeBackground: privateMap, tokens: [token] })} />
+      );
+
+      await expectEveryPortrait([token]);
+      expect(getBlob).toHaveBeenCalledTimes(2);
+      expect(getPrivateMediaAssetCacheSnapshot()).toMatchObject({
+        capacityWaiterCount: 0,
+        reservedBytes: 0,
+      });
+    });
   });
 
   test('renders the DM lighting debug overlay above the map and below tokens', async () => {
@@ -3258,7 +4093,8 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/ordinary-map-2.png'
+        'https://example.com/ordinary-map-2.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
     const requestedUrls = useImageAssetSnapshot.mock.calls.map(([url]) => url);
@@ -3307,12 +4143,14 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/owned-loading-geometry.png'
+        'https://example.com/owned-loading-geometry.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
     await act(async () => {});
     expect(useImageAssetSnapshot).not.toHaveBeenCalledWith(
-      'https://example.com/ordinary-loading-geometry.png'
+      'https://example.com/ordinary-loading-geometry.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
     );
 
     useImageAssetSnapshot.mockImplementation(() => ({
@@ -3324,7 +4162,8 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/ordinary-loading-geometry.png'
+        'https://example.com/ordinary-loading-geometry.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
   });
@@ -3345,7 +4184,16 @@ describe('GrigliataBoard', () => {
     label,
     snapshot,
   }) => {
-    useImageAssetSnapshot.mockImplementation(() => snapshot);
+    const portraitUrl = `https://example.com/ordinary-${label}.png`;
+    let failedPortraitReads = 0;
+    useImageAssetSnapshot.mockImplementation((src) => {
+      // A cached decode failure can be reported on the very first render.
+      // Fail promptly if fallback starts reading the failed URL in a loop.
+      if (src === portraitUrl && snapshot.status === 'error' && ++failedPortraitReads > 16) {
+        throw new Error('The terminal portrait failure did not settle');
+      }
+      return snapshot;
+    });
     render(
       <GrigliataBoard
         {...buildProps({
@@ -3362,7 +4210,7 @@ describe('GrigliataBoard', () => {
             ownerUid: 'another-user',
             tokenType: 'character',
             label,
-            imageUrl: `https://example.com/ordinary-${label}.png`,
+            imageUrl: portraitUrl,
             placed: true,
             col: 2,
             row: 2,
@@ -3376,8 +4224,155 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        `https://example.com/ordinary-${label}.png`
+        portraitUrl,
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
+    });
+  });
+
+  describe.each([
+    {viewer: 'DM', isManager: true},
+    {viewer: 'player', isManager: false},
+  ])('$viewer low-zoom token portraits', ({isManager}) => {
+    const originalInnerWidth = window.innerWidth;
+    const mapUrl = 'https://example.com/low-zoom-map.png';
+    const lowZoomMapImage = {
+      width: 5000,
+      height: 5000,
+      naturalWidth: 5000,
+      naturalHeight: 5000,
+    };
+    const tokenPortraitImage = {
+      width: 64,
+      height: 64,
+      naturalWidth: 64,
+      naturalHeight: 64,
+    };
+    const lowZoomGrid = buildGridConfig(50);
+
+    afterEach(() => {
+      window.innerWidth = originalInnerWidth;
+    });
+
+    test.each([
+      {profile: 'desktop', innerWidth: 1280, art: 'shared'},
+      {profile: 'desktop', innerWidth: 1280, art: 'distinct'},
+      {profile: 'compact', innerWidth: 390, art: 'shared'},
+      {profile: 'compact', innerWidth: 390, art: 'distinct'},
+    ])('renders every visible $art portrait on the $profile profile', async ({
+      profile,
+      innerWidth,
+      art,
+    }) => {
+      window.innerWidth = innerWidth;
+      if (profile === 'compact') {
+        getBoundingClientRectSpy.mockReturnValue({
+          width: innerWidth, height: 844, top: 0, left: 0, right: innerWidth, bottom: 844,
+        });
+      }
+      const limits = getImageAssetRegistryRuntimeLimits();
+      expect(limits.profile).toBe(profile);
+
+      const visibleCount = art === 'shared' ? 80 : 200;
+      const artFor = (index) => (
+        art === 'shared'
+          ? 'https://example.com/shared-portrait.png'
+          : `https://example.com/distinct-portrait-${index}.png`
+      );
+      const buildLowZoomToken = (tokenId, overrides = {}) => ({
+        tokenId,
+        id: tokenId,
+        ownerUid: 'another-user',
+        tokenType: 'character',
+        label: tokenId,
+        placed: true,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        ...overrides,
+      });
+      const visibleTokens = Array.from({length: visibleCount}, (_, index) => buildLowZoomToken(
+        `low-zoom-${index}`,
+        {imageUrl: artFor(index), col: index % 20, row: Math.floor(index / 20)}
+      ));
+      const foggedUrl = 'https://example.com/fogged-out.png';
+      const tokens = [
+        ...visibleTokens,
+        buildLowZoomToken('fogged-out', {imageUrl: foggedUrl, col: 1, row: 12}),
+      ];
+      const requestedUrls = new Set();
+      const imagesBySource = new Map(tokens.map(({imageUrl}) => [
+        imageUrl, {...tokenPortraitImage, src: imageUrl},
+      ]));
+      useImageAssetSnapshot.mockImplementation((src) => {
+        if (src) requestedUrls.add(src);
+        if (src === mapUrl) return {status: 'loaded', image: lowZoomMapImage, error: null};
+        if (imagesBySource.has(src)) return {status: 'loaded', image: imagesBySource.get(src), error: null};
+        return {status: 'idle', image: null, error: null};
+      });
+
+      render(
+        <GrigliataBoard
+          {...buildProps({
+            grid: lowZoomGrid,
+            activeBackground: {
+              id: 'map-low-zoom',
+              name: 'Low Zoom',
+              imageUrl: mapUrl,
+              imageWidth: 5000,
+              imageHeight: 5000,
+              grid: lowZoomGrid,
+            },
+            currentUserId: isManager ? 'dm-user' : 'player-user',
+            isManager,
+            tokens,
+            fogOfWar: {
+              exploredCells: [],
+              currentVisibleCells: visibleTokens.map(({col, row}) => `${col}:${row}`),
+            },
+          })}
+        />
+      );
+
+      const expectedPortraitIds = [
+        ...visibleTokens.map(({tokenId}) => tokenId),
+        ...(isManager ? ['fogged-out'] : []),
+      ];
+      await waitFor(() => {
+        expectedPortraitIds.forEach((tokenId) => {
+          expect(
+            screen.getByTestId(`token-node-${tokenId}`)
+              .querySelector('[data-name="token-portrait"]')
+          ).not.toBeNull();
+        });
+      });
+
+      // The scenario must exercise a crowded, tiny-token overview that exceeds
+      // the old token-ID budget instead of passing on a handful of large tokens.
+      const stageScale = Number(
+        document.querySelector('[data-konva-type="Stage"]')?.getAttribute('data-scalex')
+      );
+      expect(stageScale).toBeGreaterThan(0);
+      expect(50 * stageScale).toBeLessThan(16);
+      expect(visibleCount).toBeGreaterThan(limits.maxRecords - 24);
+
+      expectedPortraitIds.forEach((tokenId) => {
+        const tokenNode = screen.getByTestId(`token-node-${tokenId}`);
+        const portraits = tokenNode.querySelectorAll('[data-name="token-portrait"]');
+        expect(portraits).toHaveLength(1);
+        expect(portraits[0]).toHaveAttribute('data-konva-type', 'Image');
+        const expectedUrl = tokenId === 'fogged-out' ? foggedUrl : artFor(Number(tokenId.slice('low-zoom-'.length)));
+        expect(JSON.parse(portraits[0].getAttribute('data-image')).src).toBe(expectedUrl);
+        expect(tokenNode.querySelector('[data-name="token-portrait-placeholder"]')).toBeNull();
+      });
+      const tokenArtRequests = [...requestedUrls].filter((url) => url !== mapUrl);
+      expect(tokenArtRequests).toEqual(expect.arrayContaining(visibleTokens.map(({imageUrl}) => imageUrl)));
+      expect(new Set(visibleTokens.map(({imageUrl}) => imageUrl)).size)
+        .toBe(art === 'shared' ? 1 : visibleCount);
+      // Player fog privacy: a fogged-out token is neither rendered nor fetched;
+      // the DM sees and loads it.
+      expect(screen.queryByTestId('token-node-fogged-out') !== null).toBe(isManager);
+      expect(requestedUrls.has(foggedUrl)).toBe(isManager);
     });
   });
 
@@ -3412,7 +4407,8 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/ordinary-wheel-fit.png'
+        'https://example.com/ordinary-wheel-fit.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
     useImageAssetSnapshot.mockClear();
@@ -3421,7 +4417,8 @@ describe('GrigliataBoard', () => {
 
     await waitFor(() => {
       expect(useImageAssetSnapshot).toHaveBeenCalledWith(
-        'https://example.com/ordinary-wheel-fit.png'
+        'https://example.com/ordinary-wheel-fit.png',
+        TOKEN_PORTRAIT_SNAPSHOT_OPTIONS
       );
     });
   });

@@ -250,9 +250,9 @@
       "ownerTask": "07"
     },
     {
-      "id": "task07-desktop-unpinned-registry-records",
+      "id": "task07-desktop-idle-registry-records",
       "scenario": "task07-registry-desktop",
-      "metric": "task07.unpinnedRegistryRecords",
+      "metric": "task07.idleRegistryRecords",
       "severity": "blocking",
       "comparison": "absolute",
       "maximum": 96,
@@ -260,9 +260,9 @@
       "ownerTask": "07"
     },
     {
-      "id": "task07-desktop-unpinned-decoded-bytes",
+      "id": "task07-desktop-idle-decoded-bytes",
       "scenario": "task07-registry-desktop",
-      "metric": "task07.unpinnedEstimatedDecodedBytes",
+      "metric": "task07.idleEstimatedDecodedBytes",
       "severity": "blocking",
       "comparison": "absolute",
       "maximum": 134217728,
@@ -300,9 +300,9 @@
       "ownerTask": "07"
     },
     {
-      "id": "task07-compact-unpinned-registry-records",
+      "id": "task07-compact-idle-registry-records",
       "scenario": "task07-registry-compact",
-      "metric": "task07.unpinnedRegistryRecords",
+      "metric": "task07.idleRegistryRecords",
       "severity": "blocking",
       "comparison": "absolute",
       "maximum": 64,
@@ -310,9 +310,9 @@
       "ownerTask": "07"
     },
     {
-      "id": "task07-compact-unpinned-decoded-bytes",
+      "id": "task07-compact-idle-decoded-bytes",
       "scenario": "task07-registry-compact",
-      "metric": "task07.unpinnedEstimatedDecodedBytes",
+      "metric": "task07.idleEstimatedDecodedBytes",
       "severity": "blocking",
       "comparison": "absolute",
       "maximum": 67108864,
