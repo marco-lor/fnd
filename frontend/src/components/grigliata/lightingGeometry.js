@@ -298,11 +298,7 @@ export const computeVisibilityPolygon = ({
   }));
 };
 
-export const buildLightVisibilityPolygons = ({
-  light,
-  segments = [],
-  rayCount = DEFAULT_LIGHTING_RAY_COUNT,
-}) => {
+export const normalizeRenderableLight = (light) => {
   if (!isFinitePoint(light)) {
     return null;
   }
@@ -313,6 +309,9 @@ export const buildLightVisibilityPolygons = ({
   };
   const brightRadiusPx = normalizeRadius(light?.brightRadiusPx);
   const dimRadiusPx = normalizeRadius(light?.dimRadiusPx);
+  if (!brightRadiusPx && !dimRadiusPx) {
+    return null;
+  }
 
   return {
     id: light?.id || `light-${origin.x}-${origin.y}`,
@@ -320,22 +319,6 @@ export const buildLightVisibilityPolygons = ({
     origin,
     brightRadiusPx,
     dimRadiusPx,
-    brightPolygon: brightRadiusPx > 0
-      ? computeVisibilityPolygon({
-        origin,
-        radius: brightRadiusPx,
-        segments,
-        rayCount,
-      })
-      : [],
-    dimPolygon: dimRadiusPx > 0
-      ? computeVisibilityPolygon({
-        origin,
-        radius: dimRadiusPx,
-        segments,
-        rayCount,
-      })
-      : [],
   };
 };
 

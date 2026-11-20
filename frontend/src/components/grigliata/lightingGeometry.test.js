@@ -1,10 +1,10 @@
 import {
-  buildLightVisibilityPolygons,
   buildTokenVisionPolygons,
   castRayToNearestSegment,
   computeVisibilityPolygon,
   intersectRayWithSegment,
   normalizeLightingWallSegments,
+  normalizeRenderableLight,
 } from './lightingGeometry';
 
 const maxDistanceFrom = (origin, polygon) => (
@@ -140,22 +140,21 @@ describe('lightingGeometry', () => {
     expect(polygon.some((point) => point.blocked)).toBe(false);
   });
 
-  test('builds bright and dim light polygons using normalized pixel radii', () => {
-    const light = {
+  test('normalizes gradient inputs and ignores lights without a drawable radius', () => {
+    expect(normalizeRenderableLight({
       id: 'light-1',
-      x: 100,
+      x: '100',
       y: 120,
+      brightRadiusPx: '30',
+      dimRadiusPx: 60,
+    })).toEqual({
+      id: 'light-1',
+      origin: { x: 100, y: 120 },
       brightRadiusPx: 30,
       dimRadiusPx: 60,
-    };
-    const polygons = buildLightVisibilityPolygons({
-      light,
-      rayCount: 24,
-      segments: [],
+      color: '#ffffff',
     });
-
-    expect(maxDistanceFrom(polygons.origin, polygons.brightPolygon)).toBeCloseTo(30, 3);
-    expect(maxDistanceFrom(polygons.origin, polygons.dimPolygon)).toBeCloseTo(60, 3);
+    expect(normalizeRenderableLight({ x: 0, y: 0, dimRadiusPx: -1 })).toBeNull();
   });
 
   test('builds token vision polygons from token pixel centers', () => {

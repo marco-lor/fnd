@@ -1643,12 +1643,7 @@ export default function GrigliataPage() {
     viewAsPlayerBoardTokens,
     viewAsPlayerUid,
   ]);
-  const {
-    currentVisibleCells: fogCurrentVisibleCells,
-    currentVisiblePolygons: fogCurrentVisiblePolygons,
-    currentTokenVisionPolygons: fogCurrentTokenVisionPolygons,
-    pendingMemoryTiles: fogPendingMemoryTiles,
-  } = useGrigliataFogOfWarPersistence({
+  const playerFog = useGrigliataFogOfWarPersistence({
     backgroundId: activeBackgroundId,
     currentUserId,
     isManager,
@@ -1684,67 +1679,41 @@ export default function GrigliataPage() {
     viewAsPlayerMemoryTiles,
     viewAsPlayerUid,
   ]);
-  const boardFogOfWar = useMemo(() => {
-    if (
-      isNarrationOverlayActive
-      || !isFogOfWarEnabled
-      || !fogLightingRenderInput
-    ) {
-      return null;
-    }
-
-    if (isViewAsPlayerPreviewActive) {
-      return {
-        exploredCells: [],
-        exploredPolygons: [],
-        memoryTiles: mergeFogRasterMemoryTiles(
-          Array.isArray(viewAsPlayerMemoryTiles) ? viewAsPlayerMemoryTiles : []
-        ).filter((tile) => (
-          tile.cellSizePx === normalizedFogGrid.cellSizePx
-          && tile.offsetXPx === normalizedFogGrid.offsetXPx
-          && tile.offsetYPx === normalizedFogGrid.offsetYPx
-        )),
-        currentVisibleCells: viewAsPlayerCurrentVisibility.currentVisibleCells,
-        currentVisiblePolygons: viewAsPlayerCurrentVisibility.currentVisiblePolygons,
-        currentTokenVisionPolygons: viewAsPlayerCurrentVisibility.currentTokenVisionPolygons,
-      };
-    }
-
-    if (isManager) {
-      return null;
-    }
-
-    return {
-      exploredCells: [],
-      exploredPolygons: [],
-      memoryTiles: mergeFogRasterMemoryTiles([
-        ...(Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : []),
-        ...(Array.isArray(fogPendingMemoryTiles) ? fogPendingMemoryTiles : []),
-      ]).filter((tile) => (
-        tile.cellSizePx === normalizedFogGrid.cellSizePx
-        && tile.offsetXPx === normalizedFogGrid.offsetXPx
-        && tile.offsetYPx === normalizedFogGrid.offsetYPx
-      )),
-      currentVisibleCells: fogCurrentVisibleCells,
-      currentVisiblePolygons: fogCurrentVisiblePolygons,
-      currentTokenVisionPolygons: fogCurrentTokenVisionPolygons,
-    };
+  const showBoardFog = !isNarrationOverlayActive && !!fogLightingRenderInput
+    && (!isManager || isViewAsPlayerPreviewActive);
+  const storedBoardTiles = isViewAsPlayerPreviewActive ? viewAsPlayerMemoryTiles : fogOfWar?.memoryTiles;
+  const pendingBoardTiles = isViewAsPlayerPreviewActive ? null : playerFog.pendingMemoryTiles;
+  const boardMemoryTiles = useMemo(() => {
+    if (!showBoardFog) return [];
+    const tiles = [...(storedBoardTiles || []), ...(pendingBoardTiles || [])];
+    return mergeFogRasterMemoryTiles(tiles.filter((tile) => (
+      tile.cellSizePx === normalizedFogGrid.cellSizePx
+      && tile.offsetXPx === normalizedFogGrid.offsetXPx
+      && tile.offsetYPx === normalizedFogGrid.offsetYPx
+    )));
   }, [
-    fogCurrentVisibleCells,
-    fogCurrentVisiblePolygons,
-    fogCurrentTokenVisionPolygons,
-    fogPendingMemoryTiles,
-    fogLightingRenderInput,
-    fogOfWar,
-    isFogOfWarEnabled,
-    isManager,
-    isNarrationOverlayActive,
-    isViewAsPlayerPreviewActive,
     normalizedFogGrid.cellSizePx,
     normalizedFogGrid.offsetXPx,
     normalizedFogGrid.offsetYPx,
-    viewAsPlayerCurrentVisibility,
-    viewAsPlayerMemoryTiles,
+    pendingBoardTiles,
+    showBoardFog,
+    storedBoardTiles,
+  ]);
+  const { currentVisibleCells, currentVisiblePolygons, currentTokenVisionPolygons } =
+    isViewAsPlayerPreviewActive ? viewAsPlayerCurrentVisibility : playerFog;
+  const boardFogOfWar = useMemo(() => showBoardFog ? {
+    exploredCells: [],
+    exploredPolygons: [],
+    memoryTiles: boardMemoryTiles,
+    currentVisibleCells,
+    currentVisiblePolygons,
+    currentTokenVisionPolygons,
+  } : null, [
+    boardMemoryTiles,
+    currentTokenVisionPolygons,
+    currentVisibleCells,
+    currentVisiblePolygons,
+    showBoardFog,
   ]);
   const boardFogViewerUserId = isViewAsPlayerPreviewActive ? viewAsPlayerUid : currentUserId;
   const boardFogViewerIsManager = isViewAsPlayerPreviewActive ? false : isManager;
