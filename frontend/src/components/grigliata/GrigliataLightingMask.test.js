@@ -212,6 +212,7 @@ describe('GrigliataLightingMask', () => {
 
 
   test('uses default brightness when global light is disabled while showing clipped light contribution', () => {
+    const buildVision = jest.spyOn(lightingGeometry, 'buildTokenVisionPolygons');
     render(
       <GrigliataLightingMask
         bounds={bounds}
@@ -230,6 +231,8 @@ describe('GrigliataLightingMask', () => {
     expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.queryByTestId('lighting-darkness-overlay')).not.toBeInTheDocument();
     expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
+    expect(buildVision).not.toHaveBeenCalled();
+    buildVision.mockRestore();
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-darkness-source-overlay')).toBeInTheDocument();
   });
@@ -301,5 +304,37 @@ describe('GrigliataLightingMask', () => {
     expect(screen.queryByTestId('lighting-light-clip-group')).not.toBeInTheDocument();
     expect(screen.queryByTestId('lighting-light-bright-polygon')).not.toBeInTheDocument();
     expect(screen.queryByTestId('lighting-darkness-source-overlay')).not.toBeInTheDocument();
+  });
+
+  test('casts only the wall clips used to draw lights in the active view', () => {
+    const cast = jest.spyOn(lightingGeometry, 'computeVisibilityPolygon');
+    const props = {
+      bounds,
+      grid,
+      metadata: {
+        ...metadata,
+        lights: [
+          metadata.lights[0],
+          { ...metadata.lights[0], id: 'bright-only', dimRadiusPx: 0 },
+        ],
+      },
+      precomputedTokenVisionPolygons: [],
+    };
+    try {
+      const { rerender } = render(<GrigliataLightingMask {...props} lightClipPolygons={[]} />);
+      expect(cast).not.toHaveBeenCalled();
+
+      rerender(<GrigliataLightingMask {...props} />);
+      expect(cast.mock.calls.map(([input]) => input.radius)).toEqual([160, 80]);
+      expect(screen.getAllByTestId('lighting-light-gradient')).toHaveLength(2);
+
+      const viewerClip = [[[{ x: 0, y: 0 }, { x: 220, y: 0 }, { x: 0, y: 220 }]]];
+      rerender(<GrigliataLightingMask {...props} lightClipPolygons={viewerClip} />);
+      expect(cast).toHaveBeenCalledTimes(2);
+      expect(within(screen.getByTestId('lighting-light-clip-group'))
+        .getAllByTestId('lighting-light-gradient')).toHaveLength(2);
+    } finally {
+      cast.mockRestore();
+    }
   });
 });

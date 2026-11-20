@@ -189,13 +189,24 @@ const pointIsOnSegment = (point, start, end) => {
   return dot <= squaredLength + GEOMETRY_EPSILON;
 };
 
-const pointIsInRing = (point, ring = []) => {
+const buildRingEdges = (ring) => ring.map((end, index) => {
+  const start = ring[(index + ring.length - 1) % ring.length];
+  const longestAxis = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+  // Both the cross and dot tests allow epsilon in squared world units.
+  // This bounds their combined Y slack, including short and zero-length edges.
+  const padding = (2 * GEOMETRY_EPSILON) / longestAxis;
+  return {
+    start,
+    end,
+    minY: Math.min(start.y, end.y) - padding,
+    maxY: Math.max(start.y, end.y) + padding,
+  };
+});
+
+const pointIsInRing = (point, edges) => {
   let isInside = false;
 
-  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index, index += 1) {
-    const start = ring[previousIndex];
-    const end = ring[index];
-
+  for (const { start, end } of edges) {
     if (pointIsOnSegment(point, start, end)) {
       return true;
     }
@@ -212,19 +223,17 @@ const pointIsInRing = (point, ring = []) => {
   return isInside;
 };
 
-const pointIsInFogPolygon = (point, polygon = []) => {
-  if (!Array.isArray(polygon?.[0]) || polygon[0].length < 3) {
-    return false;
-  }
-  if (!pointIsInRing(point, polygon[0])) {
-    return false;
-  }
-  return !polygon.slice(1).some((holeRing) => pointIsInRing(point, holeRing));
+const getPolygonEdgesForRow = (polygons, y) => {
+  const onRow = (edges) => edges.filter((edge) => y >= edge.minY && y <= edge.maxY);
+  return polygons.map(({ outer, holes }) => ({
+    outer: onRow(outer),
+    holes: holes.map(onRow),
+  }));
 };
 
-const pointIsInFogPolygons = (point, polygons = []) => (
-  polygons.some((polygon) => pointIsInFogPolygon(point, polygon))
-);
+const pointIsInFogPolygons = (point, polygons) => polygons.some(({ outer, holes }) => (
+  pointIsInRing(point, outer) && !holes.some((hole) => pointIsInRing(point, hole))
+));
 
 const getPolygonsBounds = (polygons = []) => {
   const points = polygons.flatMap((polygon) => (
@@ -307,9 +316,13 @@ export const rasterizeFogPolygonsToTiles = ({
   const maxTileCol = Math.floor(((bounds.maxX - GEOMETRY_EPSILON) - normalizedGrid.offsetXPx) / tileWorldSizePx);
   const minTileRow = Math.floor((bounds.minY - normalizedGrid.offsetYPx) / tileWorldSizePx);
   const maxTileRow = Math.floor(((bounds.maxY - GEOMETRY_EPSILON) - normalizedGrid.offsetYPx) / tileWorldSizePx);
+  const polygonEdges = polygons
+    .filter((polygon) => Array.isArray(polygon?.[0]) && polygon[0].length >= 3)
+    .map(([outer, ...holes]) => ({ outer: buildRingEdges(outer), holes: holes.map(buildRingEdges) }));
   const tiles = [];
 
   for (let tileRow = minTileRow; tileRow <= maxTileRow; tileRow += 1) {
+    const edgesBySampleRow = [];
     for (let tileCol = minTileCol; tileCol <= maxTileCol; tileCol += 1) {
       const maskBytes = createEmptyFogRasterMaskBytes();
       const tileMinX = normalizedGrid.offsetXPx + (tileCol * tileWorldSizePx);
@@ -327,9 +340,13 @@ export const rasterizeFogPolygonsToTiles = ({
       let bitCount = 0;
       for (let sampleY = sampleRange.minSampleY; sampleY <= sampleRange.maxSampleY; sampleY += 1) {
         const y = tileMinY + ((sampleY + 0.5) * sampleSizePx);
+        if (!edgesBySampleRow[sampleY]) {
+          edgesBySampleRow[sampleY] = getPolygonEdgesForRow(polygonEdges, y);
+        }
+        const rowEdges = edgesBySampleRow[sampleY];
         for (let sampleX = sampleRange.minSampleX; sampleX <= sampleRange.maxSampleX; sampleX += 1) {
           const x = tileMinX + ((sampleX + 0.5) * sampleSizePx);
-          if (pointIsInFogPolygons({ x, y }, polygons)) {
+          if (pointIsInFogPolygons({ x, y }, rowEdges)) {
             setRasterBit(maskBytes, sampleX, sampleY);
             bitCount += 1;
           }
@@ -550,10 +567,25 @@ const createFogRasterAtlasImage = ({ id, width, height, tiles, minTileCol, minTi
   return canvas;
 };
 
+const sameAtlasTile = (tile, previous) => {
+  // Tile IDs include the map, viewer, raster profile and world tile coordinates.
+  if (tile.id !== previous.id
+    || tile.cellSizePx !== previous.cellSizePx
+    || tile.offsetXPx !== previous.offsetXPx
+    || tile.offsetYPx !== previous.offsetYPx) {
+    return false;
+  }
+  for (let index = 0; index < tile.maskBytes.length; index += 1) {
+    if (tile.maskBytes[index] !== previous.maskBytes[index]) return false;
+  }
+  return true;
+};
+
 export const buildFogRasterMemoryAtlases = ({
   memoryTiles = [],
   grid,
   maxTileSide = FOG_RASTER_ATLAS_TILE_SIDE,
+  previousAtlases = [],
 } = {}) => {
   const normalizedGrid = normalizeGridConfig(grid);
   const tileWorldSizePx = getTileWorldSizePx(normalizedGrid);
@@ -563,40 +595,40 @@ export const buildFogRasterMemoryAtlases = ({
       tile.cellSizePx === normalizedGrid.cellSizePx
       && tile.offsetXPx === normalizedGrid.offsetXPx
       && tile.offsetYPx === normalizedGrid.offsetYPx
-      && countFogRasterMaskBits(tile.maskBytes) > 0
+      && tile.maskBytes.some((byte) => byte !== 0)
     ));
 
-  if (matchingTiles.length < 1) {
-    return [];
-  }
-
-  const minMemoryTileCol = Math.min(...matchingTiles.map((tile) => tile.tileCol));
-  const minMemoryTileRow = Math.min(...matchingTiles.map((tile) => tile.tileRow));
   const normalizedMaxTileSide = Math.max(1, Math.floor(asFiniteNumber(maxTileSide, FOG_RASTER_ATLAS_TILE_SIDE)));
 
   matchingTiles.forEach((tile) => {
-    const groupCol = Math.floor((tile.tileCol - minMemoryTileCol) / normalizedMaxTileSide);
-    const groupRow = Math.floor((tile.tileRow - minMemoryTileRow) / normalizedMaxTileSide);
+    const groupCol = Math.floor(tile.tileCol / normalizedMaxTileSide);
+    const groupRow = Math.floor(tile.tileRow / normalizedMaxTileSide);
     const groupKey = `${groupCol}:${groupRow}`;
     const tiles = groupedTiles.get(groupKey) || [];
     tiles.push(tile);
     groupedTiles.set(groupKey, tiles);
   });
 
+  const previousById = new Map(previousAtlases.map((atlas) => [atlas.id, atlas]));
   return [...groupedTiles.entries()].map(([groupKey, tiles]) => {
-    const sortedTiles = [...tiles].sort(sortTiles);
-    const minTileCol = Math.min(...sortedTiles.map((tile) => tile.tileCol));
-    const maxTileCol = Math.max(...sortedTiles.map((tile) => tile.tileCol));
-    const minTileRow = Math.min(...sortedTiles.map((tile) => tile.tileRow));
-    const maxTileRow = Math.max(...sortedTiles.map((tile) => tile.tileRow));
+    const id = `fog-raster-atlas-${groupKey}`;
+    const previous = previousById.get(id);
+    if (previous?.tiles.length === tiles.length
+      && tiles.every((tile, index) => sameAtlasTile(tile, previous.tiles[index]))) {
+      return previous;
+    }
+    const minTileCol = Math.min(...tiles.map((tile) => tile.tileCol));
+    const maxTileCol = Math.max(...tiles.map((tile) => tile.tileCol));
+    const minTileRow = Math.min(...tiles.map((tile) => tile.tileRow));
+    const maxTileRow = Math.max(...tiles.map((tile) => tile.tileRow));
     const tileColSpan = maxTileCol - minTileCol + 1;
     const tileRowSpan = maxTileRow - minTileRow + 1;
     const width = tileColSpan * FOG_RASTER_TILE_SAMPLE_SIZE;
     const height = tileRowSpan * FOG_RASTER_TILE_SAMPLE_SIZE;
-    const id = `fog-raster-atlas-${groupKey}`;
 
     return {
       id,
+      tiles,
       x: normalizedGrid.offsetXPx + (minTileCol * tileWorldSizePx),
       y: normalizedGrid.offsetYPx + (minTileRow * tileWorldSizePx),
       width: tileColSpan * tileWorldSizePx,
@@ -605,12 +637,12 @@ export const buildFogRasterMemoryAtlases = ({
         id,
         width,
         height,
-        tiles: sortedTiles,
+        tiles,
         minTileCol,
         minTileRow,
       }),
-      tileCount: sortedTiles.length,
-      bitCount: sortedTiles.reduce(
+      tileCount: tiles.length,
+      bitCount: tiles.reduce(
         (total, tile) => total + countFogRasterMaskBits(tile.maskBytes),
         0
       ),

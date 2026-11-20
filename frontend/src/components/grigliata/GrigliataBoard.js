@@ -881,6 +881,43 @@ const getBackgroundMediaAssetKey = (background, { fullQuality = false } = {}) =>
     }).assetKey,
   ]);
 };
+const BackgroundCanvasImage = ({ assetType, image, ...props }) => {
+  const imageRef = useRef(null);
+
+  useEffect(() => {
+    if (assetType !== 'video') return undefined;
+
+    const layer = imageRef.current.getLayer();
+    const draw = () => layer.batchDraw();
+    const hasVideoFrameCallback = typeof image.requestVideoFrameCallback === 'function';
+    let frame = null;
+
+    const schedule = () => {
+      if (frame !== null || image.paused || image.ended) return;
+      frame = hasVideoFrameCallback
+        ? image.requestVideoFrameCallback(onFrame)
+        : requestAnimationFrameSafe(onFrame);
+    };
+    function onFrame() {
+      frame = null;
+      draw();
+      schedule();
+    }
+
+    image.addEventListener('playing', schedule);
+    image.addEventListener('seeked', draw);
+    schedule();
+    return () => {
+      image.removeEventListener('playing', schedule);
+      image.removeEventListener('seeked', draw);
+      if (frame === null) return;
+      if (hasVideoFrameCallback) image.cancelVideoFrameCallback(frame);
+      else cancelAnimationFrameSafe(frame);
+    };
+  }, [assetType, image]);
+
+  return <KonvaImage {...props} ref={imageRef} data-asset-type={assetType} image={image} />;
+};
 const NarrationPlacementImage = ({
   placement,
   background,
@@ -949,9 +986,9 @@ const NarrationPlacementImage = ({
   }
 
   return (
-    <KonvaImage
+    <BackgroundCanvasImage
       data-testid={isPrimary ? 'battlemap-image-active' : `narration-image-placement-${placement.id}`}
-      data-asset-type={assetType}
+      assetType={assetType}
       data-transition-role={transitionRole}
       image={assetSnapshot.image}
       x={placement.x}
@@ -2491,7 +2528,6 @@ export default function GrigliataBoard({
   const narrationImageAnimationHandleRef = useRef(null);
   const battlemapImageAnimationHandleRef = useRef(null);
   const battlemapImageAnimationLayersRef = useRef(null);
-  const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   useEffect(() => {
     if (
@@ -2559,10 +2595,6 @@ export default function GrigliataBoard({
     battlemapImageAnimationHandleRef.current = null;
     battlemapImageAnimationLayersRef.current = null;
   }, []);
-  const cancelBattlemapVideoFrameAnimation = useCallback(() => {
-    cancelAnimationFrameSafe(battlemapVideoFrameAnimationHandleRef.current);
-    battlemapVideoFrameAnimationHandleRef.current = null;
-  }, []);
   const cancelNarrationImageAnimation = useCallback(() => {
     cancelAnimationFrameSafe(narrationImageAnimationHandleRef.current);
     narrationImageAnimationHandleRef.current = null;
@@ -2581,12 +2613,6 @@ export default function GrigliataBoard({
       cancelBattlemapImageAnimation();
     }
   ), [cancelBattlemapImageAnimation]);
-
-  useEffect(() => (
-    () => {
-      cancelBattlemapVideoFrameAnimation();
-    }
-  ), [cancelBattlemapVideoFrameAnimation]);
 
   useEffect(() => (
     () => {
@@ -2980,51 +3006,6 @@ export default function GrigliataBoard({
     runBattlemapImageTransition,
     targetBattlemapImageLayer,
   ]);
-
-  const battlemapVideoFrameKey = useMemo(() => ([
-    battlemapImageTransition.visibleLayer,
-    battlemapImageTransition.fadingOutLayer,
-  ]
-    .filter((layer) => layer?.assetType === 'video' && layer?.src)
-    .map((layer) => layer.src)
-    .join('|')), [
-    battlemapImageTransition.fadingOutLayer,
-    battlemapImageTransition.visibleLayer,
-  ]);
-
-  useEffect(() => {
-    cancelBattlemapVideoFrameAnimation();
-
-    if (!battlemapVideoFrameKey) {
-      return undefined;
-    }
-
-    let isActive = true;
-    const drawFrame = () => {
-      if (!isActive) return;
-
-      const stage = stageRef.current;
-      if (typeof stage?.batchDraw === 'function') {
-        stage.batchDraw();
-      }
-      if (typeof stage?.getLayers === 'function') {
-        stage.getLayers().forEach((layer) => {
-          if (typeof layer?.batchDraw === 'function') {
-            layer.batchDraw();
-          }
-        });
-      }
-
-      battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
-    };
-
-    battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
-
-    return () => {
-      isActive = false;
-      cancelBattlemapVideoFrameAnimation();
-    };
-  }, [battlemapVideoFrameKey, cancelBattlemapVideoFrameAnimation]);
 
   const placedTokens = useMemo(
     () => (tokens || []).filter((token) => token?.placed),
@@ -6938,9 +6919,9 @@ export default function GrigliataBoard({
               })}
 
               {!isNarrationVisualActive && battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
-                <KonvaImage
+                <BackgroundCanvasImage
                   data-testid="battlemap-image-outgoing"
-                  data-asset-type={battlemapImageTransition.fadingOutLayer.assetType}
+                  assetType={battlemapImageTransition.fadingOutLayer.assetType}
                   image={battlemapImageTransition.fadingOutLayer.image}
                   x={0}
                   y={0}
@@ -6952,9 +6933,9 @@ export default function GrigliataBoard({
               )}
 
               {!isNarrationVisualActive && battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
-                <KonvaImage
+                <BackgroundCanvasImage
                   data-testid="battlemap-image-active"
-                  data-asset-type={battlemapImageTransition.visibleLayer.assetType}
+                  assetType={battlemapImageTransition.visibleLayer.assetType}
                   image={battlemapImageTransition.visibleLayer.image}
                   x={0}
                   y={0}

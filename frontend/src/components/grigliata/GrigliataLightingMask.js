@@ -8,9 +8,10 @@ import {
 import { normalizeGridConfig } from './boardUtils';
 import { normalizeRenderableFogPolygons } from './fogPolygonGeometry';
 import {
-  buildLightVisibilityPolygons,
   buildTokenVisionPolygons,
+  computeVisibilityPolygon,
   normalizeLightingWallSegments,
+  normalizeRenderableLight,
 } from './lightingGeometry';
 import { DEFAULT_TOKEN_VISION_RADIUS_SQUARES } from './lightingVisibility';
 
@@ -183,20 +184,24 @@ export default function GrigliataLightingMask({
 }) {
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
   const resolvedVisionSources = Array.isArray(visionSources) ? visionSources : tokens;
+  const isGlobalLightEnabled = metadata?.scene?.globalLight === true;
   const wallSegments = useMemo(
     () => normalizeLightingWallSegments(metadata?.walls),
     [metadata?.walls]
   );
   const tokenVisionPolygons = useMemo(
-    () => (Array.isArray(precomputedTokenVisionPolygons)
-      ? precomputedTokenVisionPolygons
-      : buildTokenVisionPolygons({
+    () => {
+      if (!isGlobalLightEnabled) return [];
+      if (Array.isArray(precomputedTokenVisionPolygons)) return precomputedTokenVisionPolygons;
+      return buildTokenVisionPolygons({
         tokens: resolvedVisionSources,
         visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
         segments: wallSegments,
         rayCount,
-      })),
+      });
+    },
     [
+      isGlobalLightEnabled,
       normalizedGrid.cellSizePx,
       precomputedTokenVisionPolygons,
       rayCount,
@@ -204,16 +209,24 @@ export default function GrigliataLightingMask({
       wallSegments,
     ]
   );
-  const lightPolygons = useMemo(
-    () => (Array.isArray(metadata?.lights) ? metadata.lights : [])
-      .map((light) => buildLightVisibilityPolygons({
-        light,
+  const shouldClipLightContributions = Array.isArray(lightClipPolygons);
+  const lights = useMemo(
+    () => (Array.isArray(metadata?.lights) ? metadata.lights : []).map(normalizeRenderableLight).filter(Boolean),
+    [metadata?.lights]
+  );
+  const lightsWithClips = useMemo(() => {
+    if (shouldClipLightContributions) return lights;
+
+    return lights.map((light) => {
+      const polygon = computeVisibilityPolygon({
+        origin: light.origin,
+        radius: light.dimRadiusPx || light.brightRadiusPx,
         segments: wallSegments,
         rayCount,
-      }))
-      .filter(Boolean),
-    [metadata?.lights, rayCount, wallSegments]
-  );
+      });
+      return { ...light, clipFunc: buildPolygonClipFunc([[polygon]]) };
+    });
+  }, [lights, rayCount, shouldClipLightContributions, wallSegments]);
   const darknessSources = useMemo(
     () => (Array.isArray(metadata?.darknessSources) ? metadata.darknessSources : [])
       .map((darkness) => {
@@ -236,7 +249,6 @@ export default function GrigliataLightingMask({
       .filter(Boolean),
     [metadata?.darknessSources]
   );
-  const shouldClipLightContributions = Array.isArray(lightClipPolygons);
   const normalizedLightClipPolygons = useMemo(
     () => (shouldClipLightContributions
       ? normalizeRenderableFogPolygons(lightClipPolygons) || []
@@ -257,27 +269,16 @@ export default function GrigliataLightingMask({
   }
 
   const scene = metadata.scene || {};
-  const isGlobalLightEnabled = scene.globalLight === true;
   const isDefaultBrightness = !isGlobalLightEnabled;
   const darknessOpacity = clamp(asFiniteNumber(scene.darkness, 0), 0, 1);
   const hasDarkness = isGlobalLightEnabled && darknessOpacity > 0;
-  const hasLightContribution = lightPolygons.some((light) => (
-    hasRenderablePolygon(light.dimPolygon) || hasRenderablePolygon(light.brightPolygon)
-  ));
   const hasDarknessSourceContribution = darknessSources.length > 0;
   const canRenderLightContributions = !shouldClipLightContributions || normalizedLightClipPolygons.length > 0;
   const shouldUseFogLightGlows = shouldClipLightContributions;
   const lightContributionNodes = canRenderLightContributions ? (
     <>
-      {lightPolygons.map((light) => {
-        const clipPolygon = hasRenderablePolygon(light.dimPolygon)
-          ? light.dimPolygon
-          : light.brightPolygon;
+      {lightsWithClips.map((light) => {
         const radius = getGradientRadius(light);
-
-        if (!hasRenderablePolygon(clipPolygon) || radius <= 0) {
-          return null;
-        }
 
         if (shouldUseFogLightGlows) {
           return (
@@ -326,7 +327,7 @@ export default function GrigliataLightingMask({
           <Group
             key={`light-gradient-${light.id}`}
             data-testid="lighting-light-gradient"
-            clipFunc={buildPolygonClipFunc([[clipPolygon]])}
+            clipFunc={light.clipFunc}
             listening={false}
           >
             {isGlobalLightEnabled && (
@@ -419,7 +420,7 @@ export default function GrigliataLightingMask({
     </>
   ) : null;
 
-  if (!hasDarkness && !hasLightContribution && !hasDarknessSourceContribution) {
+  if (!hasDarkness && !lights.length && !hasDarknessSourceContribution) {
     return null;
   }
 

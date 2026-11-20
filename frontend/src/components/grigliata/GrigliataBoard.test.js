@@ -369,6 +369,12 @@ jest.mock('react-konva', () => {
   const createComponent = (displayName, element = 'div', renderTextProp = false) => {
     const Component = React.forwardRef(({ children, text, ...props }, ref) => {
       const domProps = {};
+      const attachNode = React.useCallback((node) => {
+        if (node && displayName === 'Layer') node.batchDraw = jest.fn();
+        if (node && displayName === 'Image') node.getLayer = () => node.closest('[data-konva-type="Layer"]');
+        if (typeof ref === 'function') ref(node);
+        else if (ref) ref.current = node;
+      }, [ref]);
 
       Object.entries(props).forEach(([key, value]) => {
         if (value == null) {
@@ -396,7 +402,7 @@ jest.mock('react-konva', () => {
         element,
         {
           ...domProps,
-          ref,
+          ref: attachNode,
           'data-konva-type': displayName,
         },
         renderTextProp ? text : children
@@ -967,7 +973,7 @@ describe('GrigliataBoard', () => {
     ]);
   });
 
-  test('renders canonical video battlemap backgrounds through the existing Konva image layer', async () => {
+  test('draws decoded frames and paused seeks on only the video background layer', async () => {
     useReducedMotion.mockReturnValue(true);
     const storage = { name: 'authenticated-storage' };
     const ref = jest.fn((_storage, path) => ({ path }));
@@ -982,6 +988,9 @@ describe('GrigliataBoard', () => {
     const mockVideo = {
       videoWidth: 2040,
       videoHeight: 1620,
+      paused: false,
+      requestVideoFrameCallback: jest.fn(() => 12),
+      cancelVideoFrameCallback: jest.fn(),
       muted: false,
       defaultMuted: false,
       loop: false,
@@ -1016,7 +1025,7 @@ describe('GrigliataBoard', () => {
         width: 2040,
         height: 1620,
       };
-      render(
+      const { unmount } = render(
         <GrigliataBoard
           {...buildProps({
             activeBackground: {
@@ -1056,12 +1065,35 @@ describe('GrigliataBoard', () => {
       expect(activeVideoLayer).toHaveAttribute('data-asset-type', 'video');
       expect(activeVideoLayer).toHaveAttribute('data-width', '2040');
       expect(activeVideoLayer).toHaveAttribute('data-height', '1620');
+
+      const backgroundLayer = activeVideoLayer.getLayer();
+      const stage = activeVideoLayer.closest('[data-konva-type="Stage"]');
+      stage.batchDraw = jest.fn();
+      const otherLayers = Array.from(stage.children).filter((layer) => layer !== backgroundLayer);
+      expect(mockVideo.requestVideoFrameCallback).toHaveBeenCalledTimes(1);
+      mockVideo.requestVideoFrameCallback.mock.calls[0][0]();
+      expect(mockVideo.requestVideoFrameCallback).toHaveBeenCalledTimes(2);
+      mockVideo.paused = true;
+      mockVideo.requestVideoFrameCallback.mock.calls[1][0]();
+      listeners.seeked();
+      expect(backgroundLayer.batchDraw).toHaveBeenCalledTimes(3);
+      expect(mockVideo.requestVideoFrameCallback).toHaveBeenCalledTimes(2);
+      expect(stage.batchDraw).not.toHaveBeenCalled();
+      otherLayers.forEach((layer) => expect(layer.batchDraw).not.toHaveBeenCalled());
+
+      mockVideo.paused = false;
+      listeners.playing();
+      expect(mockVideo.requestVideoFrameCallback).toHaveBeenCalledTimes(3);
+      unmount();
+      expect(mockVideo.cancelVideoFrameCallback).toHaveBeenCalledWith(12);
+      expect(mockVideo.removeEventListener).toHaveBeenCalledWith('seeked', listeners.seeked);
     } finally {
       createElementSpy.mockRestore();
     }
   });
 
   test('resolves a canonical MP4 narration placement without changing narration layout', async () => {
+    jest.useFakeTimers();
     useReducedMotion.mockReturnValue(true);
     const storage = { name: 'authenticated-storage' };
     const ref = jest.fn((_storage, path) => ({ path }));
@@ -1076,6 +1108,7 @@ describe('GrigliataBoard', () => {
     const mockVideo = {
       videoWidth: 1920,
       videoHeight: 1080,
+      paused: true,
       muted: false,
       defaultMuted: false,
       loop: false,
@@ -1179,6 +1212,17 @@ describe('GrigliataBoard', () => {
       expect(narrationVideo).toHaveAttribute('data-x', '1280');
       expect(narrationVideo).toHaveAttribute('data-width', '1920');
       expect(getBlob).toHaveBeenCalledWith({ path: original.path }, original.bytes);
+
+      const backgroundLayer = narrationVideo.getLayer();
+      mockVideo.paused = false;
+      listeners.playing();
+      act(() => jest.advanceTimersByTime(32));
+      expect(backgroundLayer.batchDraw).toHaveBeenCalledTimes(2);
+      mockVideo.paused = true;
+      act(() => jest.advanceTimersByTime(100));
+      expect(backgroundLayer.batchDraw).toHaveBeenCalledTimes(3);
+      listeners.seeked();
+      expect(backgroundLayer.batchDraw).toHaveBeenCalledTimes(4);
     } finally {
       createElementSpy.mockRestore();
     }
