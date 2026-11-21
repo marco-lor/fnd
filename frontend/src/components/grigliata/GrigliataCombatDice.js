@@ -170,35 +170,39 @@ export default function GrigliataCombatDiceTray({ tray, nextDamage, resultStatus
 
   return (
     <section className="gc-dice-tray" aria-labelledby={headingId} ref={section} data-kind={kind}>
-      <header className="gc-dice-head">
-        <h3 id={headingId}>{title}</h3>
-        <code>{notation}</code>
+      <div className="gc-dice-bar">
         <button type="button" className="gc-dice-close" aria-label="Chiudi il vassoio" ref={closeButton}
           aria-disabled={sending} onClick={close}><FaTimes aria-hidden="true" /></button>
-      </header>
-      {result ? (
-        <>
-          <div role="status">
-            {rolls.length ? <CombatDiceFaces rolls={rolls} /> : 'Azione registrata.'}
-            {Number.isFinite(tray.damage) && <p>{tray.damage} danni proposti</p>}
-            {RESULT_STATUS[resultStatus] && <p>{RESULT_STATUS[resultStatus]}</p>}
-            {resultOutcomes.length > 0 && <ul className="gc-dice-outcomes" aria-label="Esiti dei bersagli">
-              {resultOutcomes.map(({ id, name, label }) => <li key={id}>{name} · {label}</li>)}
-            </ul>}
+        <div className="gc-dice-main" data-multiple-outcomes={result && resultOutcomes.length > 1 ? '' : undefined}>
+          <header className="gc-dice-head">
+            <h3 id={headingId}>{title}</h3>
+            <code>{notation}</code>
+          </header>
+          {!canCloseOnly && (
+            <div className="gc-dice-controls">
+              <CombatDiceDrag disabled={sending} kind={kind} notation={notation} onThrow={throwDice} />
+              <button type="button" className="gc-primary" ref={trigger} aria-disabled={sending}
+                onClick={() => throwDice()}>{phase === 'error' ? 'Riprova il tiro' : 'Tira i dadi'}</button>
+            </div>
+          )}
+          <div className="gc-dice-result" role="status">
+            {result && (
+              <>
+                {rolls.length ? <CombatDiceFaces rolls={rolls} /> : <p>Azione registrata.</p>}
+                {Number.isFinite(tray.damage) && <p className="gc-dice-total">{tray.damage} danni proposti</p>}
+                {RESULT_STATUS[resultStatus] && <p>{RESULT_STATUS[resultStatus]}</p>}
+                {resultOutcomes.length > 0 && <ul className="gc-dice-outcomes" role="list" aria-label="Esiti dei bersagli"
+                  tabIndex={resultOutcomes.length > 4 ? 0 : undefined}>
+                  {resultOutcomes.map(({ id, name, label }) => <li key={id}>{name} · {label}</li>)}
+                </ul>}
+              </>
+            )}
+            {sending && <p>Attendi l’esito del tiro…</p>}
           </div>
-          {nextDamage && <CombatMapDamage nextDamage={nextDamage} />}
-        </>
-      ) : phase !== 'rejected' && (
-        <>
-          <div className="gc-dice-controls">
-            <CombatDiceDrag disabled={sending} kind={kind} notation={notation} onThrow={throwDice} />
-            <button type="button" className="gc-primary" ref={trigger} aria-disabled={sending}
-              onClick={() => throwDice()}>{phase === 'error' ? 'Riprova il tiro' : 'Tira i dadi'}</button>
-          </div>
-          {sending && <p role="status">Attendi l’esito del tiro…</p>}
-        </>
-      )}
-      {error && <p role="alert" className="gc-error">{error}</p>}
+          {result && nextDamage && <CombatMapDamage nextDamage={nextDamage} />}
+          {error && <p role="alert" className="gc-error">{error}</p>}
+        </div>
+      </div>
     </section>
   );
 }
