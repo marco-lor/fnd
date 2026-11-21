@@ -94,6 +94,34 @@ test('uses the selected map cell for area actions and the actor for personal act
   expect(onLaunch).toHaveBeenLastCalledWith(personal, expect.objectContaining({ targetPlacementIds: [actor.placementId] }));
 });
 
+test('the chosen check leads to the map only when it uses an attack die', () => {
+  const onPrepareLaunch = jest.fn();
+  const onLaunch = jest.fn();
+  render(<GrigliataCombatPanel
+    actor={{ ...actor, mana: 4 }} actions={[{ ...spell, die: 12, extraResource: null }]}
+    selection={{ actionId: spell.id, targetIds: placementIds }}
+    targets={[target, secondTarget]} onLaunch={onLaunch} onPrepareLaunch={onPrepareLaunch}
+  />);
+  fireEvent.click(screen.getByRole('button', { name: 'Lancia spell' }));
+  expect(onLaunch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ channel: 'Consenso' }));
+  expect(onPrepareLaunch).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Prova'), { target: { value: 'TPC' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Vai al tiro sulla mappa' }));
+  expect(onPrepareLaunch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ channel: 'TPC' }));
+  expect(onLaunch).toHaveBeenCalledTimes(1);
+});
+
+test('a hit offers the attacker its damage throw while another target awaits defense', () => {
+  const onRollDamage = jest.fn();
+  const hit = { ...target, status: 'done', outcome: 'hit', round: 2, pendingDamage: { round: 2, expr: '2d4' } };
+  const event = { id: 'mixed', actor, action: sword, kind: 'weapon', status: 'waiting',
+    targets: [hit, { ...secondTarget, name: 'Nebbia', status: 'waiting', round: 1 }] };
+  render(<GrigliataCombatPanel actor={actor} pending={[event]} onRollDamage={onRollDamage} />);
+  expect(screen.getByText('Tocca al proprietario')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Danno contro bro · vai al tiro sulla mappa' }));
+  expect(onRollDamage).toHaveBeenCalledWith(event, hit);
+});
+
 test('shows per-target rolls and offers a retry from the pending list, never from the journal alone', () => {
   const onRetry = jest.fn();
   const attack = { label: 'Mira', total: 12, bonus: 3, sides: 12, rolls: [9] };
@@ -383,7 +411,7 @@ test('the defender receipt states the outcome from the defender’s side with bo
     defense: { label: 'Disciplina', total: 1, bonus: 0, sides: 20, rolls: [1] },
   });
   render(<GrigliataDefensePopup currentUserId={target.ownerUid} requests={[spellRequest]} onRespond={onRespond} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Disciplina' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Disciplina' }));
   expect(await screen.findByText('Non hai resistito')).toBeVisible();
   const card = within(screen.getByRole('dialog')).getByRole('status');
   expect(within(card).getByText('bro · Fulmine')).toBeInTheDocument();

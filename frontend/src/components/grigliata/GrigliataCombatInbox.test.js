@@ -100,7 +100,7 @@ test('after a hit, Home follows that one private request and applies its damage 
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockResolvedValueOnce({ data: { combatId: 'combat-1', round: 1, outcome: 'hit', damage: 9, effects: [] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   expect(mutate).toHaveBeenCalledWith(expect.objectContaining({ command: 'defend', combatId: 'combat-1', targetPlacementId: 'map__bro', round: 1 }));
   act(() => pending.next(docs([])));
   await screen.findByText('Colpito');
@@ -134,7 +134,7 @@ test('a missing document reads as nothing to confirm, and the inbox going away e
   const { unmount } = render(<GrigliataCombatInbox uid={uid} />);
   act(() => listener(PENDING)[0].next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockResolvedValueOnce({ data: { outcome: 'hit', damage: 9, effects: [] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => listener(PENDING)[0].next(docs([])));
   await screen.findByText('Colpito');
   const [receipt] = listener(RECEIPT);
@@ -166,7 +166,7 @@ test('a defense reply lost after the server recorded it keeps the prompt and its
   fireEvent.change(defenseField(), { target: { value: '5' } });
   const lost = deferred();
   mutate.mockReturnValueOnce(lost.promise);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   const sent = { defense: 5, command: 'defend', combatId: 'combat-1', targetPlacementId: 'map__bro', round: 1 };
   expect(mutate).toHaveBeenLastCalledWith(sent);
 
@@ -178,7 +178,7 @@ test('a defense reply lost after the server recorded it keeps the prompt and its
   expect(within(dialog).getByRole('alert')).toHaveTextContent(DEFENSE_RETRY_SAFE);
   expect(defenseField()).toHaveValue(5);
   expect(defenseField()).toHaveAttribute('readonly');
-  expect(within(dialog).queryByRole('button', { name: 'Tira Difesa' })).not.toBeInTheDocument();
+  expect(within(dialog).queryByRole('button', { name: 'Invia Difesa' })).not.toBeInTheDocument();
 
   // The retry resends the same command for the same round; the server answers with the trial it already holds.
   mutate.mockResolvedValueOnce(HIT_REPLY);
@@ -199,7 +199,7 @@ test('a postponed defense keeps its retry after answering another pawn’s defen
   fireEvent.change(defenseField(), { target: { value: '5' } });
   const lost = deferred();
   mutate.mockReturnValueOnce(lost.promise);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   const sent = { defense: 5, command: 'defend', combatId: 'combat-1', targetPlacementId: 'map__bro', round: 1 };
   act(() => pending.next(docs([lia])));
   await act(async () => lost.reject(lostReply()));
@@ -207,7 +207,7 @@ test('a postponed defense keeps its retry after answering another pawn’s defen
   fireEvent.click(screen.getByRole('button', { name: 'Più tardi' }));
 
   mutate.mockResolvedValueOnce({ data: { ...HIT_REPLY.data, outcome: 'miss', damage: null } });
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   expect(mutate).toHaveBeenLastCalledWith({ ...sent, defense: 2, targetPlacementId: 'map__lia' });
   act(() => pending.next(docs([])));
   await screen.findByText('Lia · Spada');
@@ -230,7 +230,7 @@ test('a held answer is let go by a refusal, with its reason kept in view, and by
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockRejectedValueOnce(lostReply());
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(docs([])));
   // A deferred hold still counts in the launcher and comes back as it was.
   await screen.findByRole('button', { name: 'Riprova' });
@@ -251,7 +251,7 @@ test('a held answer is let go by a refusal, with its reason kept in view, and by
   // A lost reply again, then another account signs in: nothing of the first one's answer stays.
   act(() => pending.next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockRejectedValueOnce(lostReply());
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(docs([])));
   expect(await screen.findByRole('button', { name: 'Riprova' })).toBeInTheDocument();
   rerender(<GrigliataCombatInbox uid="lia-user" />);
@@ -265,10 +265,10 @@ test('a definitive refusal while the request is still waiting stays on its promp
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockRejectedValueOnce(Object.assign(new Error('Il valore di difesa non è valido.'), { code: 'functions/invalid-argument' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Il valore di difesa non è valido.');
   expect(defenseField()).not.toHaveAttribute('readonly');
-  expect(screen.getByRole('button', { name: 'Tira Difesa' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Invia Difesa' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Riprova' })).not.toBeInTheDocument();
 });
 
@@ -277,7 +277,7 @@ test('an unsent amount and the critical it was typed against follow the receipt 
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }, lia])));
   mutate.mockResolvedValueOnce(HIT_REPLY);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(docs([lia])));
   await screen.findByText('Colpito');
   const [receipt] = listener(RECEIPT);
@@ -329,7 +329,7 @@ test('a sent amount and its error survive the move too, and nothing is sent twic
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }, lia])));
   mutate.mockResolvedValueOnce(HIT_REPLY);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(docs([lia])));
   await screen.findByText('Colpito');
   act(() => listener(RECEIPT)[0].next(copyOf(ownerCopy())));
@@ -349,7 +349,7 @@ test('after a lost copy, a reload started from the receipt hands focus back to i
   const [pending] = listener(PENDING);
   act(() => pending.next(docs([{ ...request, id: 'req-1' }])));
   mutate.mockResolvedValueOnce(HIT_REPLY);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(docs([])));
   await screen.findByText('Colpito');
   act(() => listener(RECEIPT)[0].next(copyOf(ownerCopy())));
@@ -384,6 +384,32 @@ test('one owner listener reads waiting defenses and damage to confirm together, 
     ownership: 'shell',
   }));
   expect(pending.options).toEqual({ includeMetadataChanges: true });
+});
+
+test.each([0, 6])('a dismissed guided proposal of %s retires after another device removes it from the fresh owner inbox', async amount => {
+  render(<GrigliataCombatInbox uid={uid} />);
+  const [pending] = listener(PENDING);
+  act(() => pending.next(server([{ ...request, id: 'req-1' }])));
+  mutate.mockResolvedValueOnce({ data: { combatId: 'combat-1', round: 1, outcome: 'hit', damagePending: true } });
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  act(() => pending.next(server([])));
+  await screen.findByText('In attesa che l’attaccante tiri il danno.');
+  const [receipt] = openReceiptListeners();
+  fireEvent.click(screen.getByRole('button', { name: 'Chiudi esito difesa' }));
+
+  const proposal = { ...request, ...ownerCopy({ damage: amount }), id: 'req-1', status: 'damagePending', damagePending: false };
+  act(() => receipt.next(copyFor(proposal)));
+  expect(openReceiptListeners()).toHaveLength(0);
+  act(() => pending.next(server([])));
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+
+  act(() => pending.next(server([proposal])));
+  act(() => pending.next(cached([])));
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+  act(() => pending.next(server([])));
+  expect(screen.queryByRole('button', { name: MORE_DAMAGE })).not.toBeInTheDocument();
+  expect(listener(PENDING)).toHaveLength(1);
+  expect(listener(RECEIPT)).toHaveLength(1);
 });
 
 test('immediate damage opens a corner receipt on Home without a prompt or focus, and its confirmation outlives the query', async () => {
@@ -592,7 +618,7 @@ test('damage arriving in the background keeps the focused defense receipt and an
   const [pending] = listener(PENDING);
   act(() => pending.next(server([{ ...request, id: 'req-1' }])));
   mutate.mockResolvedValueOnce(HIT_REPLY);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   act(() => pending.next(server([])));
   await screen.findByText('Colpito');
   act(() => listener(RECEIPT)[0].next(copyOf(ownerCopy())));
@@ -671,7 +697,7 @@ test('damage arriving during a defense waits for the prompt to close and then op
 
   // Once the defense closes, both outcomes are available together in the corner.
   mutate.mockResolvedValueOnce({ data: { ...HIT_REPLY.data, outcome: 'resisted', damage: null } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Invia Difesa' }));
   expect(mutate).toHaveBeenLastCalledWith({ defense: 2, command: 'defend', combatId: 'combat-1', targetPlacementId: 'map__bro', round: 1 });
   act(() => pending.next(server([bolt])));
   expect(await screen.findByText('Colpo evitato')).toBeInTheDocument();

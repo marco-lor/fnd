@@ -1,10 +1,11 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FaClock, FaHeartBroken, FaShieldAlt, FaTimes } from 'react-icons/fa';
 import {
   combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatDefenderOutcomeLabel, combatProposalLabel,
   formatCombatRoll,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
+import { CombatDiceCanvas, CombatDiceDrag, combatDiceFaces } from './GrigliataCombatDice';
 import './grigliataCombat.css';
 
 const requestKey = request => JSON.stringify([request.id || request.combatId, request.target?.placementId, request.round]);
@@ -42,6 +43,7 @@ const focusPrompt = dialog => dialog?.querySelector(
   'form[data-defense-prompt] input:enabled, form[data-defense-prompt] button:enabled'
 )?.focus();
 const NO_EFFECTS = { effects: [] };
+const settledWithoutDamage = feed => feed?.settlement === 'none';
 const NO_PROPOSAL = { amount: null, formula: '' };
 const DAMAGE_FAILED = 'Danno non applicato. Riprova.';
 const DEFENSE_FAILED = 'Risposta non inviata. Riprova.';
@@ -80,7 +82,7 @@ const damageScope = ({ id, combatId, backgroundId }, placementId, ownerUid) => (
 function receiptDamageScope(request, answer, ownerUid) {
   const placementId = request.target?.placementId;
   const landed = { status: 'done', outcome: answer.outcome, damage: answer.damage, placementId };
-  if (!combatDamageProposal({ effects: answer.effects || [] }, landed)) return null;
+  if (!answer.damagePending && !combatDamageProposal({ effects: answer.effects || [] }, landed)) return null;
   return damageScope(request, placementId, ownerUid);
 }
 
@@ -97,6 +99,8 @@ function immediateDamageReceipt(entry, ownerUid) {
     immediate: true,
     target: { placementId: owner.placementId, name: owner.name || 'Bersaglio' },
     actionName: entry.ownerDamage.action?.name,
+    source: entry.defense?.consent ? 'Consenso dato'
+      : entry.defense ? entry.defense.label || 'Difesa' : 'Nessuna difesa richiesta',
     outcome: 'Danno subito',
     proposal: combatProposalLabel(proposal.amount),
     effects: [],
@@ -104,14 +108,17 @@ function immediateDamageReceipt(entry, ownerUid) {
   };
 }
 
-// The owner's private copy of this one outcome, `{ id, data, fromCache }` from the host's listener: read only when every
-// identity matches the receipt it fills, and only the fields the form needs.
-export function receiptOwnerDamage(snapshot, scope) {
+function scopedDamageData(snapshot, scope) {
   const data = snapshot?.data;
-  const target = data?.ownerDamage?.target;
   if (!scope || snapshot?.id !== scope.requestId || !data || data.ownerUid !== scope.ownerUid
-    || data.combatId !== scope.combatId || (scope.backgroundId && data.backgroundId !== scope.backgroundId)
-    || !target || target.placementId !== scope.placementId || target.ownerUid !== scope.ownerUid) return null;
+    || data.combatId !== scope.combatId || (scope.backgroundId && data.backgroundId !== scope.backgroundId)) return null;
+  return data;
+}
+
+// The owner's private copy of this one outcome, with only the fields the form needs.
+export function receiptOwnerDamage(snapshot, scope) {
+  const target = scopedDamageData(snapshot, scope)?.ownerDamage?.target;
+  if (!target || target.placementId !== scope.placementId || target.ownerUid !== scope.ownerUid) return null;
   const { placementId, name, ownerUid, status, round, outcome, damage, critical } = target;
   return {
     placementId, name, ownerUid, status, round, outcome, damage,
@@ -124,7 +131,12 @@ export function receiptOwnerDamage(snapshot, scope) {
 // itself has answered.
 function nextDamageFeed(before = {}, snapshot, scope) {
   if (snapshot?.fromCache) return before;
-  return { synced: true, owner: receiptOwnerDamage(snapshot, scope) };
+  const data = scopedDamageData(snapshot, scope);
+  const owner = receiptOwnerDamage(snapshot, scope);
+  let settlement = before.settlement;
+  if (owner?.damageApplied || combatDamageProposal(NO_EFFECTS, owner)) settlement = 'proposal';
+  else if (data?.target?.placementId === scope.placementId && data.damagePending === false) settlement = 'none';
+  return { synced: true, owner, settlement };
 }
 
 // What a receipt shows below its outcome: the confirmation form, a recorded application, a lost copy, the wait for the
@@ -141,8 +153,7 @@ function receiptDamageView(feed = {}, state = {}) {
   return null;
 }
 
-// Follows one receipt's private copy while the receipt is shown, wherever it is shown: rendered once per receipt outside
-// the stacks, so moving between the dialog and the corner never reopens it. Gone with the receipt, the user or the popup.
+// A single private watch follows the receipt across the dialog, corner and unresolved queue.
 function DamageWatch({ scope, attempt, watch, setFeeds }) {
   const { requestId, combatId, placementId, backgroundId, ownerUid } = scope;
   useEffect(() => {
@@ -161,8 +172,11 @@ function DamageWatch({ scope, attempt, watch, setFeeds }) {
     return () => {
       active = false;
       if (typeof stop === 'function') stop();
-      // A retry starts from the server's copy again; a receipt gone leaves nothing behind.
-      setFeeds(all => without(all, requestId));
+      // Reopening reloads the confirmation form. Keep only the proof the throw already settled.
+      setFeeds(all => {
+        const settlement = all[requestId]?.settlement;
+        return settlement ? { ...all, [requestId]: { settlement } } : without(all, requestId);
+      });
     };
   }, [watch, requestId, combatId, placementId, backgroundId, ownerUid, attempt, setFeeds]);
   return null;
@@ -179,7 +193,8 @@ function DefenseReceipts({ receipts, targets, onDismiss, renderDamage, feeds }) 
           : pawnName;
         const title = [name, receipt.actionName].filter(Boolean).join(' · ');
         const damage = renderDamage?.(receipt, name);
-        const owner = feeds[receipt.damage?.requestId]?.owner;
+        const feed = feeds[receipt.damage?.requestId];
+        const owner = feed?.owner;
         const current = combatDamageProposal(NO_EFFECTS, owner);
         const proposal = current
           ? combatProposalLabel(current.amount, receipt.effects.filter(effect => effect.kind !== 'damage'))
@@ -189,13 +204,17 @@ function DefenseReceipts({ receipts, targets, onDismiss, renderDamage, feeds }) 
             <div>
               <small>{title}</small>
               <strong>{receipt.outcome}</strong>
-              {receipt.immediate && <p>Nessuna difesa richiesta</p>}
+              {receipt.source && <p>{receipt.source}</p>}
               {receipt.rolls && (
                 <p className="gc-defense-roll">
-                  {receipt.rolls.attack} <code>{receipt.rolls.attackRoll}</code> contro la tua {receipt.rolls.defense}{' '}
+                  {receipt.rolls.attack && <>{receipt.rolls.attack} <code>{receipt.rolls.attackRoll}</code> contro la tua </>}
+                  {receipt.rolls.defense}{' '}
                   <code>{receipt.rolls.roll}</code>
                 </p>
               )}
+              {receipt.dice?.length > 0 && <CombatDiceCanvas rolls={receipt.dice} kind="defense" gesture={receipt.gesture} />}
+              {receipt.waitingForDamage && !current && feed?.settlement !== 'proposal' && <p>{settledWithoutDamage(feed)
+                ? 'Nessun danno da applicare' : 'In attesa che l’attaccante tiri il danno.'}</p>}
               {proposal && <p>{proposal}</p>}
               {receipt.problem && <p className="gc-error">{receipt.problem}</p>}
               {receipt.cardText && <p className="gc-source">{receipt.cardText}</p>}
@@ -239,19 +258,20 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
     if (unconfirmed && lostFocus()) retryRef.current?.focus();
   }, [unconfirmed]);
 
-  function submit(event) {
-    event.preventDefault();
+  function send(gesture) {
     if (busy) return;
     if (unconfirmed) {
       onRespond(request, sent);
       return;
     }
     if (!canRoll) return;
-    onRespond(request, {
+    const values = {
       defense: Number(defense),
       ...(rules.showDie ? { die: Number(die) } : {}),
       ...(rules.showReduction ? { reduction: Number(reduction) } : {}),
-    });
+    };
+    if (gesture) onRespond(request, values, gesture);
+    else onRespond(request, values);
   }
 
   return (
@@ -261,7 +281,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
         <h2 id={titleId}>Difesa</h2>
         {queueLength > 1 && <small>{queueLength} richieste</small>}
       </header>
-      <form className="gc-panel-body gc-stack" data-defense-prompt="" onSubmit={submit}>
+      <form className="gc-panel-body gc-stack" data-defense-prompt="" onSubmit={event => { event.preventDefault(); send(); }}>
         <div id={descriptionId} className="gc-defense-request">
           <strong>{request.actor?.name || 'Attaccante'} → {request.target?.name || 'Bersaglio'}</strong>
           <p>{action?.name || 'Azione'}{request.round > 1 && ' · Rilancio ' + (request.round - 1)}</p>
@@ -297,6 +317,12 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
         )}
         {unconfirmed && rules.consent && <p className="gc-hint">Risposta inviata: {sent.consent ? 'Accetta' : 'Rifiuta'}.</p>}
         {error && <p className="gc-error" role="alert">{error.message || error}</p>}
+        {!rules.consent && rules.showDie && !unconfirmed && (
+          <div className="gc-defense-dice">
+            <CombatDiceDrag disabled={busy || !canRoll} kind="defense" notation={integerIn(die, 2, 100) ? 'd' + die : ''} onThrow={send} />
+            {integerIn(die, 2, 100) && <code>d{die}</code>}
+          </div>
+        )}
         <div className="gc-dialog-buttons">
           <button type="button" className="gc-secondary" onClick={onDefer}><FaClock aria-hidden="true" />Più tardi</button>
           {unconfirmed ? (
@@ -307,7 +333,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
               <button type="button" className="gc-primary" disabled={busy} onClick={() => onRespond(request, { consent: true })}>Accetta</button>
             </>
           ) : (
-            <button type="submit" className="gc-primary" disabled={busy || !canRoll}>Tira {label}</button>
+            <button type="submit" className="gc-primary" disabled={busy || !canRoll}>{rules.showDie ? 'Tira ' : 'Invia '}{label}</button>
           )}
         </div>
         {busy && <p className="gc-hint" role="status">Invio della risposta…</p>}
@@ -336,6 +362,7 @@ function DefenseInbox({
   const answering = useRef(false);
   // Damage to confirm already offered once: a later write of its request never offers or announces it again.
   const offeredDamage = useRef(new Set());
+  const seenInOwnerInbox = useRef(new Set());
   const liveKeys = useRef(new Set());
   const locks = useRef(new Set());
   const dialogRef = useRef(null);
@@ -354,12 +381,13 @@ function DefenseInbox({
   const key = request ? requestKey(request) : '';
   const own = answers[key];
   const confirmsDamage = Boolean(onWatchDamage && onApplyDamage);
-  // One listener per request shown, at most one per receipt kept.
+  // Closed guided receipts need their terminal write even when no proposal will enter the inbox.
+  const hiddenThrows = [...queuedReceipts, ...parkedReceipts].filter(receipt =>
+    receipt.waitingForDamage && receipt.damage && !feeds[receipt.damage.requestId]?.settlement);
   const watched = new Map(confirmsDamage
-    ? receipts.filter(receipt => receipt.damage).map(receipt => [receipt.damage.requestId, receipt.damage])
+    ? [...receipts, ...hiddenThrows].filter(receipt => receipt.damage).map(receipt => [receipt.damage.requestId, receipt.damage])
     : []);
-  // Damage of actions that asked no defense, oldest first, as the server last listed it; those not shown wait behind
-  // the corner's count, so neither a closed receipt nor one pushed out of the four is lost.
+  // Damage ready to confirm, including earlier defenses when the owner returns on another device.
   const pendingDamage = useMemo(() => (confirmsDamage
     ? damageRequests
       .filter(entry => entry?.backgroundId === activeDamageBackgroundId)
@@ -368,7 +396,20 @@ function DefenseInbox({
   const visibleReceipts = receipts.filter(receipt => onReceiptMap(receipt, activeDamageBackgroundId));
   const activeDamageIds = new Set(pendingDamage.map(receipt => receipt.damage.requestId));
   const listedDamageIds = useMemo(() => new Set(damageRequests.map(entry => entry?.id)), [damageRequests]);
-  const hiddenDamage = queuedReceipts.filter(receipt => !receipt.immediate || activeDamageIds.has(receipt.damage.requestId));
+  useLayoutEffect(() => {
+    // The host preserves the last server-confirmed list across cached snapshots.
+    for (const id of listedDamageIds) seenInOwnerInbox.current.add(id);
+  }, [listedDamageIds]);
+  const stillPending = useCallback(receipt => {
+    const id = receipt.damage?.requestId;
+    if (!confirmsDamage || !id) return false;
+    const requiresListing = receipt.immediate || (receipt.waitingForDamage && seenInOwnerInbox.current.has(id));
+    if (requiresListing && !listedDamageIds.has(id)) return false;
+    const feed = feeds[id];
+    return !feed?.owner?.damageApplied && !damage[id]?.applied && !settledWithoutDamage(feed);
+  }, [confirmsDamage, damage, feeds, listedDamageIds]);
+  const hiddenDamage = queuedReceipts.filter(receipt => stillPending(receipt)
+    && (!receipt.immediate || activeDamageIds.has(receipt.damage.requestId)));
 
   // Park other maps outside the visible slots. While someone edits a receipt, new arrivals join the queue.
   useLayoutEffect(() => {
@@ -376,20 +417,18 @@ function DefenseInbox({
     const editedId = feedRef.current?.contains(focused)
       ? focused.closest('[data-damage-for]')?.getAttribute('data-damage-for')
       : null;
-    const added = key ? NONE : pendingDamage.filter(receipt => !offeredDamage.current.has(receipt.damage.requestId));
-    added.forEach(receipt => offeredDamage.current.add(receipt.damage.requestId));
+    const offered = key ? NONE : pendingDamage.filter(receipt => !offeredDamage.current.has(receipt.damage.requestId));
+    const retainedIds = new Set([...receipts, ...queuedReceipts, ...parkedReceipts].map(receipt => receipt.damage?.requestId));
+    const added = offered.filter(receipt => !retainedIds.has(receipt.damage.requestId));
+    offered.forEach(receipt => offeredDamage.current.add(receipt.damage.requestId));
     const onMap = receipt => onReceiptMap(receipt, activeDamageBackgroundId);
-    const pending = receipt => {
-      const id = receipt.damage.requestId;
-      return !damage[id]?.applied && (!receipt.immediate || listedDamageIds.has(id));
-    };
     setReceiptQueue(queue => {
       const shown = queue.shown.filter(onMap);
       const movedAside = queue.shown.filter(receipt => !onMap(receipt));
-      const parked = [...queue.parked, ...movedAside].filter(pending);
+      const parked = [...queue.parked, ...movedAside].filter(stillPending);
       const restored = key ? NONE : parked.filter(onMap);
       const stayingParked = key ? parked : parked.filter(receipt => !onMap(receipt));
-      const waiting = queue.waiting.filter(pending);
+      const waiting = queue.waiting.filter(stillPending);
       const candidates = [...restored, ...added];
       if (!candidates.length && !movedAside.length && waiting.length === queue.waiting.length
         && stayingParked.length === queue.parked.length) return queue;
@@ -404,12 +443,13 @@ function DefenseInbox({
         targets: rememberReceiptTargets(queue.targets, added),
       };
     });
-  }, [activeDamageBackgroundId, damage, key, listedDamageIds, pendingDamage]);
+  }, [activeDamageBackgroundId, key, pendingDamage, receipts, queuedReceipts, parkedReceipts, stillPending]);
 
   // A queued receipt keeps its draft and submission. Only discard them once the receipt leaves the queue entirely.
   useEffect(() => {
     const retained = new Set([...receipts, ...queuedReceipts, ...parkedReceipts].map(receipt => receipt.damage?.requestId));
     const prune = all => Object.keys(all).reduce((kept, id) => retained.has(id) ? kept : without(kept, id), all);
+    setFeeds(prune);
     setDamage(prune);
     setDrafts(prune);
     setAttempts(prune);
@@ -479,12 +519,6 @@ function DefenseInbox({
     }
   });
 
-  function stillPending(receipt) {
-    const id = receipt.damage?.requestId;
-    return confirmsDamage && id && (!receipt.immediate || listedDamageIds.has(id))
-      && !feeds[id]?.owner?.damageApplied && !damage[id]?.applied;
-  }
-
   function dismiss(receiptKey) {
     setReceiptQueue(queue => {
       const receipt = queue.shown.find(item => item.key === receiptKey);
@@ -520,7 +554,7 @@ function DefenseInbox({
     setReceiptQueue(queue => showReceipts(queue, [receipt], stillPending));
   }
 
-  async function respond(answeredRequest, values) {
+  async function respond(answeredRequest, values, gesture) {
     if (answering.current) return;
     answering.current = true;
     const answeredKey = requestKey(answeredRequest);
@@ -554,12 +588,17 @@ function DefenseInbox({
       key: answeredKey,
       ...receiptDetails(answeredRequest),
       outcome: combatDefenderOutcomeLabel(reply.outcome, action?.kind, action?.hands),
-      rolls: attack?.total != null && defense?.total != null && {
-        attack: attack.label || 'Attacco',
+      rolls: defense?.total != null && (attack?.total != null || answeredRequest.defense?.showDie) && {
+        attack: attack?.total != null ? attack.label || 'Attacco' : null,
         attackRoll: formatCombatRoll(attack),
         defense: defense.label || 'Difesa',
         roll: formatCombatRoll(defense),
       },
+      dice: answeredRequest.defense?.showDie && !answeredRequest.defense?.consent
+        ? combatDiceFaces(defense?.rolls?.map(value => ({ sides: defense.sides, value })))
+        : NONE,
+      gesture,
+      waitingForDamage: reply.damagePending === true,
       proposal: combatProposalLabel(reply.damage, reply.effects),
       effects: reply.effects || [],
       // A landed spell or technique can do more than damage (e.g. no movement next turn): the defender sees it here.
@@ -622,7 +661,9 @@ function DefenseInbox({
         </div>
       );
     }
-    if (view?.kind === 'loading') return <p className="gc-hint">Recupero il danno da confermare…</p>;
+    if (view?.kind === 'loading' && (!receipt.waitingForDamage || feeds[id]?.settlement === 'proposal')) {
+      return <p className="gc-hint">Recupero il danno da confermare…</p>;
+    }
     return null;
   }
 

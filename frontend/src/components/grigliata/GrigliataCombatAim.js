@@ -4,23 +4,33 @@ import { getGridCellPositionPx, snapBoardPointToGrid } from './boardUtils';
 import { combatArea, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
 import { COMBAT_CONE_HINT, combatRoleStep, combatStepRange, combatStepRangeFt } from './combatPresentation';
 
+const CELL_STEPS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
 export default function GrigliataCombatAim({ aim, tokens, viewport, grid, stageSize, setViewport, applyScale }) {
-  const { pawn, action, selection, candidates, pickToken, pickPoint, finish } = aim;
+  const { pawn, action, selection, candidates, pickToken, pickPoint, finish, confirm = finish } = aim;
   const { picking, targetIds, point } = selection;
   const layer = useRef(null);
   const drag = useRef(null);
   const centered = useRef('');
+  const cellButton = useRef(null);
   const [notice, setNotice] = useState('');
+  const [keyboardCell, setKeyboardCell] = useState(null);
   const actorPosition = tokens.find(t => t.tokenId === pawn.tokenId)?.renderPosition;
   const ground = picksGround(action);
   const multi = picksMultiple(action);
   const key = picking ? pawn.placementId + '/' + action.id : '';
+  const aimedCell = picking && ground ? keyboardCell || point || pawn : point;
+  useEffect(() => {
+    setKeyboardCell(null);
+    if (key && ground) cellButton.current?.focus({preventScroll: true});
+  }, [key, ground]);
   useEffect(() => {
     if (!key) { centered.current = ''; return; }
     if (centered.current === key || !actorPosition || !stageSize.width || !stageSize.height) return;
     centered.current = key;
     setNotice('');
     layer.current?.scrollIntoView?.({block:'nearest'});
+    layer.current?.querySelector('summary')?.focus({preventScroll:true});
     const x = (actorPosition.x + actorPosition.size / 2) * viewport.scale;
     const y = (actorPosition.y + actorPosition.size / 2) * viewport.scale;
     if (x + viewport.x < 40 || x + viewport.x > stageSize.width - 40 ||
@@ -34,19 +44,38 @@ export default function GrigliataCombatAim({ aim, tokens, viewport, grid, stageS
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [picking, finish]);
+  const confirmCell = cell => {
+    if (withinCombatRange(pawn, cell, action)) pickPoint({col: cell.col, row: cell.row});
+    else setNotice('Casella fuori gittata');
+  };
   const selectGround = (event) => {
     if (!picking || !ground) return;
     const rect = layer.current.getBoundingClientRect();
     const cell = snapBoardPointToGrid({x:(event.clientX - rect.left - viewport.x)/viewport.scale,y:(event.clientY - rect.top - viewport.y)/viewport.scale},grid,'center');
-    if (withinCombatRange(pawn,cell,action)) pickPoint({col:cell.col,row:cell.row});
-    else setNotice('Casella fuori gittata');
+    confirmCell(cell);
+  };
+  const moveCell = event => {
+    const step = CELL_STEPS[event.key];
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = {col: aimedCell.col + step[0], row: aimedCell.row + step[1]};
+    setKeyboardCell(next);
+    setNotice('');
+    const center = getGridCellPositionPx(next, grid, 'center');
+    const x = center.x * viewport.scale;
+    const y = center.y * viewport.scale;
+    if (x + viewport.x < 24 || x + viewport.x > stageSize.width - 24 ||
+        y + viewport.y < 24 || y + viewport.y > stageSize.height - 72) {
+      setViewport(v => ({...v, x: stageSize.width / 2 - x, y: stageSize.height / 2 - y}));
+    }
   };
   const ringStyle = (pos, diameter) => ({
     left:viewport.x + (pos.x + pos.size/2)*viewport.scale, top:viewport.y + (pos.y + pos.size/2)*viewport.scale,
     width:diameter, height:diameter, transform:'translate(-50%, -50%)'
   });
-  const box = combatArea(action,point);
-  const marker = point && getGridCellPositionPx(box || point,grid,box ? 'top-left' : 'center');
+  const box = combatArea(action,aimedCell);
+  const marker = aimedCell && getGridCellPositionPx(box || aimedCell,grid,box ? 'top-left' : 'center');
   const markerSize = box && box.sizeSquares*grid.cellSizePx*viewport.scale;
   const chosen = targetIds.length;
   const caption = combatRoleStep(action, chosen) || (ground ? 'Scegli una casella' : multi ? 'Scegli i bersagli' : 'Scegli un bersaglio');
@@ -102,8 +131,15 @@ export default function GrigliataCombatAim({ aim, tokens, viewport, grid, stageS
     {picking && <div className="absolute bottom-3 left-1/2 z-[2] w-max max-w-[96%] -translate-x-1/2 cursor-auto rounded-xl border border-teal-400/60 bg-slate-950/95 px-2.5 py-2 text-sm text-slate-100 shadow-lg">
       <div className="flex items-center justify-center gap-2"><FiCrosshair className="text-teal-200" />
         <span>{caption}{rangeLabel && ' · ' + rangeLabel}</span>
-        <button type="button" onClick={finish} aria-label={multi ? 'Conferma bersagli' : 'Chiudi mirino'} className="rounded p-1 hover:bg-slate-700">{multi ? <FiCheck/> : <FiX/>}</button>
+        <button type="button" onClick={multi ? confirm : finish} aria-label={multi ? 'Conferma bersagli' : 'Chiudi mirino'} className="rounded p-1 hover:bg-slate-700">{multi ? <FiCheck/> : <FiX/>}</button>
       </div>
+      {ground && <div className="mt-1 flex flex-wrap items-center justify-center gap-2 text-xs">
+        <button type="button" ref={cellButton} onKeyDown={moveCell} onClick={() => confirmCell(aimedCell)}
+          className="rounded border border-teal-400 px-2 py-1 focus-visible:outline focus-visible:outline-white">
+          Scegli casella <span aria-live="polite">({aimedCell.col}, {aimedCell.row})</span>
+        </button>
+        <span>Frecce per spostarti</span>
+      </div>}
       {ground && notice && <p role="status" className="text-xs text-amber-300">{notice}</p>}
       {action.area?.shape === 'cone' && <p className="mt-1 max-w-xs text-xs text-slate-300">{COMBAT_CONE_HINT}</p>}
       {fallenMissing && <p className="mt-1 max-w-xs text-xs text-amber-300">Nessuna pedina caduta da scegliere: il master deve prima segnarla come caduta sulla mappa.</p>}

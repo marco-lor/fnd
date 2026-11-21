@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { FaArrowRight, FaClock, FaDiceD20, FaHistory } from 'react-icons/fa';
 import {
   combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatOutcomeLabel,
@@ -22,6 +22,7 @@ function eventDestinations(event) {
 function eventResult(event) {
   if (event.status === 'waiting') return 'In attesa di risposta';
   if (event.status === 'retry') return 'Parità · rilancio';
+  if (event.status === 'awaitingDamage') return 'In attesa del tiro di danno';
   const targets = event.targets || [];
   const critical = targets.find(target => target.critical)?.critical;
   // `tableRoll` is the part of the critical the app could not roll: the total is then only a partial sum.
@@ -60,15 +61,23 @@ function LoggedRoll({ roll }) {
   return roll && <DetailRow label={roll.label || 'Tiro'}>{formatCombatRoll(roll)}</DetailRow>;
 }
 
-function CriticalInput({ critical, onCritical, busy }) {
+function CriticalInput({ critical, onCritical, hasDice, busy }) {
   const [score, setScore] = useState(null);
+  const cancelPrepared = useRef(null);
   const value = score ?? critical?.score ?? '';
   const row = Number(value);
   const canSubmit = Number.isInteger(row) && row >= 1 && row <= 41 && row !== critical?.score;
+  useLayoutEffect(() => () => {
+    cancelPrepared.current?.();
+    cancelPrepared.current = null;
+  }, [value, critical?.score]);
 
   function submit(event) {
     event.preventDefault();
-    if (canSubmit && !busy) onCritical(row);
+    if (canSubmit && !busy) {
+      const cancel = onCritical(row);
+      if (typeof cancel === 'function') cancelPrepared.current = cancel;
+    }
   }
 
   return (
@@ -80,7 +89,7 @@ function CriticalInput({ critical, onCritical, busy }) {
           <input type="number" min="1" max="41" step="1" required value={value} onChange={event => setScore(event.target.value)} />
         </label>
         <button type="submit" className="gc-secondary" disabled={!canSubmit || busy}>
-          {critical ? 'Aggiorna il critico' : 'Calcola il critico'}
+          {critical ? 'Aggiorna il critico' : hasDice ? 'Critico · vai al tiro sulla mappa' : 'Calcola il critico'}
         </button>
       </form>
     </details>
@@ -102,7 +111,7 @@ function CriticalResult({ critical }) {
   );
 }
 
-function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal, damage = IDLE, onApplyDamage, isManager }) {
+function TargetRolls({ target, targets, kind, hands, busy, onCritical, criticalHasDice, proposal, damage = IDLE, onApplyDamage, onRollDamage, isManager }) {
   const name = combatTargetName(target, targets);
   // What the server recorded wins; the reply to this viewer's own request covers the moments before its snapshot arrives.
   const applied = combatAppliedDamage(target) || damage.applied || null;
@@ -126,10 +135,14 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal,
         </dl>
       ))}
       {showCurrent && <dl><LoggedRoll roll={target.attack} /><LoggedRoll roll={target.defense} /></dl>}
+      {target.pendingDamage && <p className="gc-hint">In attesa del tiro di danno · {target.pendingDamage.expr}</p>}
+      {target.pendingDamage && onRollDamage && <button className="gc-secondary" type="button" disabled={busy} onClick={onRollDamage}>
+        Danno contro {name} · vai al tiro sulla mappa
+      </button>}
       {target.critical && <CriticalResult critical={target.critical} />}
       {/* Once damage is applied the critical behind it is final; while it is being applied it holds still. */}
-      {onCritical && !applied && target.status === 'done' && target.outcome === 'hit' && (
-        <CriticalInput critical={target.critical} onCritical={onCritical} busy={busy || Boolean(damage.busy)} />
+      {onCritical && !applied && !target.pendingDamage && target.status === 'done' && target.outcome === 'hit' && (
+        <CriticalInput critical={target.critical} hasDice={criticalHasDice} onCritical={onCritical} busy={busy || Boolean(damage.busy)} />
       )}
       {onApplyDamage && (applied || (proposal && (!damage.unavailable || damage.busy)))
         ? <TargetDamage name={name} proposal={proposal} floor={combatDamageFloor(proposal, isManager)}
@@ -161,13 +174,13 @@ function EffectValue({ effect, recipient }) {
   return summary || effect.description || 'Da applicare al tavolo';
 }
 
-function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager }) {
+function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isManager }) {
   const { actor, action, targets = [], affected = [], cost, effects = [] } = event;
   const destination = eventDestinations(event);
   // The DM spots typed defense values without opening every entry.
   const overridden = isManager && targets.some(target => (target.trials || []).some(trial => trial.defenseAdjusted === true));
   // Per target: the DM answers for every pawn, a player only for their own.
-  const damageCommand = target => (onApplyDamage && event.id && (!canApplyDamage || canApplyDamage(event, target))
+  const damageCommand = target => (onApplyDamage && event.id && !target.pendingDamage && (!canApplyDamage || canApplyDamage(event, target))
     ? amount => onApplyDamage(event, target, amount)
     : undefined);
   // The card's own text replaces the generic table line (the manual effect bound to no pawn), so a condition stays in
@@ -193,10 +206,12 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
             {...{ target, targets, busy, isManager }}
             kind={event.kind}
             hands={action?.hands}
+            criticalHasDice={action?.criticalHasDice}
             onCritical={onCritical && action?.hands > 0 ? score => onCritical(event, target, score) : undefined}
             proposal={combatDamageProposal(event, target)}
             damage={damageState?.(event, target)}
             onApplyDamage={damageCommand(target)}
+            onRollDamage={onRollDamage && (() => onRollDamage(event, target))}
           />
         ))}
         <dl>
@@ -217,6 +232,8 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
             );
           })}
         </dl>
+        {event.pendingDamage && onRollDamage && <button className="gc-secondary" type="button" disabled={busy}
+          onClick={() => onRollDamage(event, null)}>Danno {event.pendingDamage.expr} · vai al tiro sulla mappa</button>}
         {instruction && <p className="gc-source">{instruction}</p>}
       </div>
     </details>
@@ -225,7 +242,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
 
 // `isManager` is the signed-in DM: free damage amounts and the defense audit. Anyone else is held to each proposal.
 export function GrigliataCombatHistory({
-  events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager = false,
+  events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isManager = false,
 }) {
   const isOwner = event => currentUserId
     ? (event.actorUid || event.actor?.ownerUid) === currentUserId
@@ -241,6 +258,7 @@ export function GrigliataCombatHistory({
               event={event}
               {...{ busy, onApplyDamage, canApplyDamage, damageState, isManager }}
               onCritical={isOwner(event) ? onCritical : undefined}
+              onRollDamage={isManager && !isOwner(event) ? onRollDamage : undefined}
             />
           ))}
         </div>
@@ -254,7 +272,7 @@ const resolvedTime = event => combatTime(event.resolvedAt || event.createdAt);
 // `pending` is every unresolved action of the signed-in player on this map, whichever pawn launched it:
 // it stays until answered. The journal only adds the selected pawn's latest result: the action answered
 // last, so an old attack answered late shows its outcome even after newer ones.
-export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry }) {
+export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, onRollDamage }) {
   const selected = actor?.placementId;
   const latest = selected && events.filter(event => event.actor?.placementId === selected && event.status === 'done')
     .reduce((last, event) => (!last || resolvedTime(event) > resolvedTime(last) ? event : last), null);
@@ -270,6 +288,11 @@ export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry })
           <p role="status">{eventResult(event)}</p>
         </div>
       </div>
+      {event.pendingDamage && onRollDamage && (
+        <button type="button" className="gc-secondary" disabled={busy} onClick={() => onRollDamage(event, null)}>
+          Danno {event.pendingDamage.expr} · vai al tiro sulla mappa
+        </button>
+      )}
       {event.status !== 'done' && (
         <ul>
           {(event.targets || []).map(target => (
@@ -278,7 +301,11 @@ export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry })
                 <strong>{combatTargetName(target, event.targets)}</strong>
                 {target.attack && <small>{target.attack.label} · {formatCombatRoll(target.attack)}</small>}
               </div>
-              {target.status === 'retry' && onRetry ? (
+              {target.pendingDamage && onRollDamage ? (
+                <button type="button" className="gc-secondary" disabled={busy} onClick={() => onRollDamage(event, target)}>
+                  Danno contro {combatTargetName(target, event.targets)} · vai al tiro sulla mappa
+                </button>
+              ) : target.status === 'retry' && onRetry ? (
                 <button
                   type="button"
                   className="gc-secondary"

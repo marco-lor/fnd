@@ -56,7 +56,7 @@ function setup(requests, { answers = [HIT], onApplyDamage = jest.fn() } = {}) {
   const show = (list, extra) => view.rerender(<GrigliataDefensePopup {...props} {...extra} requests={list} />);
   // Answers the prompt shown, lets the host drop the answered request as the pending listener does, and waits for its receipt.
   const answer = async (answered, rest) => {
-    fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
     show(rest);
     await screen.findByText(answered.target.name + ' · ' + answered.action.name);
   };
@@ -85,10 +85,110 @@ test('only a landed answer with concrete damage follows its own private request,
   expect(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' })).toBeInTheDocument();
 });
 
+test('a guided defense watches for the attacker’s damage and does not open a second receipt when the request is listed', async () => {
+  const request = defenseRequest('req-guided');
+  const { answer, show } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
+  await answer(request, []);
+  expect(screen.getByText('In attesa che l’attaccante tiri il danno.')).toBeVisible();
+  expect(damageForm('Bro')).not.toBeInTheDocument();
+  const pending = ownerCopy(request, {}, { status: 'damagePending', id: request.id, defense: request.defense });
+  show([], { activeDamageBackgroundId: 'map', damageRequests: [pending] });
+  emit(request, pending);
+  expect(screen.getAllByText('Bro · Spada')).toHaveLength(1);
+  expect(screen.queryByText('In attesa che l’attaccante tiri il danno.')).not.toBeInTheDocument();
+  expect(amountOf('Bro')).toHaveValue('9');
+});
+
+test('reopening guided damage on another device preserves the private defense label', () => {
+  const request = defenseRequest('req-guided', 'Bro', { defense: { label: 'Disciplina' } });
+  const pending = ownerCopy(request, {}, { status: 'damagePending', id: request.id, defense: request.defense });
+  render(<GrigliataDefensePopup currentUserId={uid} onRespond={jest.fn()} onWatchDamage={onWatchDamage}
+    onApplyDamage={jest.fn()} activeDamageBackgroundId="map" damageRequests={[pending]} />);
+  expect(screen.getByText('Disciplina')).toBeVisible();
+  expect(screen.queryByText('Nessuna difesa richiesta')).not.toBeInTheDocument();
+  emit(request, pending);
+  expect(amountOf('Bro')).toHaveValue('9');
+});
+
+test('a settled guided defense without a damage proposal closes without leaving a launcher', async () => {
+  const request = defenseRequest('req-no-damage', 'Bro', { action: { name: 'Singolarità', kind: 'spell', damageExpr: '1d4-3' } });
+  const { answer, show } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
+  await answer(request, []);
+  emit(request, { ...request, status: 'done' });
+  expect(screen.getByText('In attesa che l’attaccante tiri il danno.')).toBeVisible();
+  emit(request, { ...request, status: 'done', damagePending: false });
+  expect(screen.getByText('Nessun danno da applicare')).toBeVisible();
+  expect(damageForm('Bro')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Chiudi esito difesa' }));
+  expect(screen.queryByText('Nessun danno da applicare')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Danni da confermare/ })).not.toBeInTheDocument();
+  show([]);
+  expect(screen.queryByRole('button', { name: /Danni da confermare/ })).not.toBeInTheDocument();
+});
+
+test('a guided defense closed before a negative roll loses its launcher as soon as the private request settles', async () => {
+  const request = defenseRequest('req-late-negative', 'Bro', { action: { name: 'Singolarità', kind: 'spell', damageExpr: '1d4-3' } });
+  const { answer } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
+  await answer(request, []);
+  emit(request, { ...request, status: 'done', damagePending: true });
+  const [watch] = live(request.id);
+  fireEvent.click(screen.getByRole('button', { name: 'Chiudi esito difesa' }));
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+  expect(live(request.id)).toEqual([watch]);
+
+  const settled = { ...request, status: 'done', damagePending: false };
+  emit(request, settled, true);
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+  emit(request, settled);
+  expect(screen.queryByRole('button', { name: /Danni da confermare/ })).not.toBeInTheDocument();
+  expect(watch.stop).toHaveBeenCalledTimes(1);
+  expect(live(request.id)).toHaveLength(0);
+});
+
+test.each([0, 6])('a late guided proposal of %s stays accessible after its hidden watch ends', async amount => {
+  const request = defenseRequest('req-late-proposal');
+  const { answer, show } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
+  await answer(request, []);
+  const [watch] = live(request.id);
+  fireEvent.click(screen.getByRole('button', { name: 'Chiudi esito difesa' }));
+  expect(live(request.id)).toEqual([watch]);
+
+  const settled = ownerCopy(request, { damage: amount }, {
+    status: 'damagePending', target: request.target, damagePending: false, id: request.id, defense: request.defense,
+  });
+  emit(request, settled);
+  expect(watch.stop).toHaveBeenCalledTimes(1);
+  expect(live(request.id)).toHaveLength(0);
+  show([], { damageRequests: [settled], activeDamageBackgroundId: 'map' });
+  fireEvent.click(screen.getByRole('button', { name: 'Danni da confermare · 1' }));
+  expect(live(request.id)).toHaveLength(1);
+  expect(damageForm('Bro')).not.toBeInTheDocument();
+  expect(screen.getByText('Recupero il danno da confermare…')).toBeVisible();
+  emit(request, settled);
+  expect(amountOf('Bro')).toHaveValue(String(amount));
+  expect(screen.getAllByText('Bro · Spada')).toHaveLength(1);
+});
+
+test.each([null, 0, 9])('a guided receipt can be reopened while pending or with a concrete damage proposal of %s', async amount => {
+  const request = defenseRequest('req-reopen-guided');
+  const { answer } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
+  await answer(request, []);
+  const copy = amount === null ? { ...request, status: 'done', damagePending: true }
+    : ownerCopy(request, { damage: amount }, { status: 'damagePending', target: request.target, damagePending: false });
+  emit(request, copy);
+  fireEvent.click(screen.getByRole('button', { name: 'Chiudi esito difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Danni da confermare · 1' }));
+  emit(request, copy);
+  expect({
+    waiting: Boolean(screen.queryByText('In attesa che l’attaccante tiri il danno.')),
+    amount: screen.queryByLabelText('Danno finale')?.value ?? null,
+  }).toEqual({ waiting: amount === null, amount: amount === null ? null : String(amount) });
+});
+
 const CONSENT = { action: { name: 'Rito', kind: 'spell' }, defense: { consent: true, label: 'Consenso' } };
 test.each([
-  ['a resisted hit', { outcome: 'resisted', damage: null, effects: [] }, 'Colpo evitato', {}, 'Tira Difesa'],
-  ['a hit without a damage roll', { outcome: 'hit', damage: null, effects: [] }, 'Colpito', {}, 'Tira Difesa'],
+  ['a resisted hit', { outcome: 'resisted', damage: null, effects: [] }, 'Colpo evitato', {}, 'Invia Difesa'],
+  ['a hit without a damage roll', { outcome: 'hit', damage: null, effects: [] }, 'Colpito', {}, 'Invia Difesa'],
   ['a consent with healing only', { outcome: 'accepted', damage: null, effects: [{ kind: 'heal', amount: 3, targetPlacementId: 'map__bro' }] }, 'Effetto accettato', CONSENT, 'Accetta'],
   ['a consent refused', { outcome: 'declined', damage: null, effects: [] }, 'Effetto rifiutato', CONSENT, 'Rifiuta'],
 ])('%s opens no listener and no form', async (_label, reply, outcomeText, extra, button) => {
@@ -209,7 +309,7 @@ test('same-name pawns have distinct Home receipt and confirmation labels', async
   const { answer, show } = setup([first, second], { answers: [HIT, HIT], onApplyDamage });
   await answer(first, [second]);
   emit(first, ownerCopy(first));
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   show([]);
 
   expect(await screen.findByText('Guardia · Pedina 2 · Spada')).toBeVisible();
@@ -383,12 +483,12 @@ test('a host that reports failures through its own error prop gets no hold', asy
   const onRespond = jest.fn(() => reply.promise);
   const props = { currentUserId: uid, onRespond };
   const { rerender } = render(<GrigliataDefensePopup {...props} requests={[request]} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   await act(async () => reply.resolve(undefined));
   expect(onRespond).toHaveBeenCalledTimes(1);
   rerender(<GrigliataDefensePopup {...props} requests={[request]} error="Risposta non inviata." />);
   expect(screen.getByRole('alert')).toHaveTextContent('Risposta non inviata.');
-  expect(screen.getByRole('button', { name: 'Tira Difesa' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Invia Difesa' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Riprova' })).not.toBeInTheDocument();
   rerender(<GrigliataDefensePopup {...props} requests={[]} error="Risposta non inviata." />);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -399,7 +499,7 @@ test('without the damage host the receipts read as before', async () => {
   const request = defenseRequest('req-a');
   const onRespond = jest.fn().mockResolvedValue(HIT);
   const { rerender } = render(<GrigliataDefensePopup currentUserId={uid} onRespond={onRespond} requests={[request]} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Tira Difesa' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
   rerender(<GrigliataDefensePopup currentUserId={uid} onRespond={onRespond} requests={[]} />);
   expect(await screen.findByText('9 danni proposti')).toBeInTheDocument();
   expect(screen.queryByRole('form', { name: /Applica danno/ })).not.toBeInTheDocument();

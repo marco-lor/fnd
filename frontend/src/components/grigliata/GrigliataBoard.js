@@ -124,6 +124,7 @@ import {
 } from './fogBrushEditing';
 import { sortTokensByLayerOrder } from './tokenLayering';
 import GrigliataCombatAim from './GrigliataCombatAim';
+import GrigliataCombatDiceTray, { CombatMapDamage, CombatMapDice } from './GrigliataCombatDice';
 import {
   buildBackgroundMap,
   buildInitialNarrationPlacement,
@@ -2325,6 +2326,10 @@ const TurnOrderPanel = ({
 
 export default function GrigliataBoard({
   combatAim,
+  combatTray,
+  combatNextDamage,
+  combatResultStatus,
+  combatResultOutcomes,
   activeBackground,
   combatBackgroundName = '',
   grid,
@@ -6514,6 +6519,9 @@ export default function GrigliataBoard({
         </div>
       </div>
 
+      {combatTray
+        ? <GrigliataCombatDiceTray tray={combatTray} nextDamage={combatNextDamage} resultStatus={combatResultStatus} resultOutcomes={combatResultOutcomes} />
+        : combatNextDamage && <div className="gc-dice-tray" data-kind="damage"><CombatMapDamage nextDamage={combatNextDamage} /></div>}
       <div
         ref={containerRef}
         className={`relative w-full flex-1 min-h-[480px] transition-colors ${
@@ -6526,6 +6534,7 @@ export default function GrigliataBoard({
       >
         {combatAim && <GrigliataCombatAim aim={combatAim} tokens={visibleRenderedTokens} viewport={viewport} grid={normalizedGrid}
           stageSize={stageSize} setViewport={setViewport} applyScale={applyScale} />}
+        {combatTray && <CombatMapDice tray={combatTray} visibleTokens={visibleRenderedTokens} grid={normalizedGrid} viewport={viewport} stageSize={stageSize} />}
         {isTokenDragActive && (
           <div
             data-testid="grigliata-board-drop-overlay"

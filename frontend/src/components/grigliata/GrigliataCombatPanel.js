@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { FaArrowRight, FaBookOpen, FaBullseye, FaCheck, FaDiceD20, FaTint, FaUser, FaTimes } from 'react-icons/fa';
 import { GiCrossedSwords, GiShield, GiSpellBook } from 'react-icons/gi';
 import MediaImage from '../common/MediaImage';
@@ -271,7 +271,7 @@ function ActionRules({ action, check }) {
 }
 
 function CombatDraft({
-  actor, action, selection, targets, turn, busy, arsenalSync, onBeginTargeting, onRemoveTarget, onLaunch,
+  actor, action, selection, targets, turn, busy, arsenalSync, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch,
 }) {
   const unconfirmed = arsenalSync !== 'ready';
   const checks = action.checks || [];
@@ -287,35 +287,63 @@ function CombatDraft({
   const hpCost = Math.max(0, due - Math.max(0, actor.mana ?? 0));
   const targetKey = JSON.stringify([targetIds, point]);
   const approvalKey = JSON.stringify([targetKey, check.channel]);
-  useEffect(() => {
+  const [lastApprovalKey, setLastApprovalKey] = useState(approvalKey);
+  const [lastHpCost, setLastHpCost] = useState(hpCost);
+  if (approvalKey !== lastApprovalKey) {
+    setLastApprovalKey(approvalKey);
     setApprovedHpCost(null);
     setConfirmExtra(false);
-  }, [approvalKey]);
-  useEffect(() => {
+  }
+  if (hpCost !== lastHpCost) {
+    setLastHpCost(hpCost);
     setApprovedHpCost(null);
-  }, [hpCost]);
+  }
 
   const confirmHp = hpCost > 0 && approvedHpCost === hpCost;
+  const needsThrow = Boolean(onPrepareLaunch && check.attackDie);
   const block = getCombatLaunchBlock({
     actor, action, point, targetCount: targetIds.length, picking: selection.picking,
     turn, variableCost, hpCost, confirmHp, confirmExtra,
-  });
+  }) || (needsThrow && !action.die ? 'Il Dado Anima della pedina non è configurato.' : '');
   const blockId = useId();
   const Icon = KIND_GLYPH[action.kind];
   const checkLabel = choice => choice.consent ? 'Consenso del bersaglio' : choice.channel;
+  const cancelPrepared = useRef(null);
+  const lastAim = useRef(null);
+  // A prepared launch belongs to the exact declaration and approvals the player saw.
+  const declaration = JSON.stringify([approvalKey, variableCost, confirmHp, hpCost, confirmExtra, block]);
+  useLayoutEffect(() => () => {
+    cancelPrepared.current?.();
+    cancelPrepared.current = null;
+  }, [declaration]);
+  useLayoutEffect(() => {
+    if (unconfirmed) cancelPrepared.current?.({ includeError: false });
+  }, [unconfirmed]);
+
+  const disabled = Boolean(block || busy || unconfirmed || !onLaunch);
+  const launchOptions = () => ({
+    targetPlacementIds: action.mode === 'self' ? [actor.placementId] : targetIds,
+    point: point || undefined,
+    channel: check.channel,
+    confirmHp,
+    maxHpCost: confirmHp ? hpCost : 0,
+    variableCost: action.variableCost ? Number(variableCost) : undefined,
+    confirmExtra,
+  });
+  // A completed pick gives the map the next interaction only if this form could already submit.
+  useLayoutEffect(() => {
+    const completed = selection.aimCompletion;
+    if (!completed || completed === lastAim.current) return;
+    lastAim.current = completed;
+    if (needsThrow && !disabled) cancelPrepared.current = onPrepareLaunch(action, launchOptions(), completed.trigger);
+    else completed.restoreFocus();
+  });
 
   function launch(event) {
     event.preventDefault();
-    if (block || busy || unconfirmed || !onLaunch) return;
-    onLaunch(action, {
-      targetPlacementIds: action.mode === 'self' ? [actor.placementId] : targetIds,
-      point: point || undefined,
-      channel: check.channel,
-      confirmHp,
-      maxHpCost: confirmHp ? hpCost : 0,
-      variableCost: action.variableCost ? Number(variableCost) : undefined,
-      confirmExtra,
-    });
+    if (disabled) return;
+    if (needsThrow) cancelPrepared.current = onPrepareLaunch(action, launchOptions());
+    else onLaunch(action, launchOptions());
   }
 
   return (
@@ -361,17 +389,18 @@ function CombatDraft({
       <button
         className="gc-primary"
         type="submit"
-        disabled={Boolean(block || busy || unconfirmed || !onLaunch)}
+        disabled={disabled}
         aria-describedby={block ? blockId : undefined}
       >
-        <Icon aria-hidden="true" />{busy ? 'Invio in corso…' : arsenalSync === 'reloading' ? 'Aggiornamento…' : LAUNCH_LABEL[action.kind]}
+        <Icon aria-hidden="true" />{busy ? 'Invio in corso…' : arsenalSync === 'reloading' ? 'Aggiornamento…'
+          : needsThrow ? 'Vai al tiro sulla mappa' : LAUNCH_LABEL[action.kind]}
       </button>
     </form>
   );
 }
 
 function Arsenal({
-  actor, actions, equipped, targets, turn, selection, busy, arsenalSync, onSelectAction, onBeginTargeting, onRemoveTarget, onLaunch,
+  actor, actions, equipped, targets, turn, selection, busy, arsenalSync, onSelectAction, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch,
 }) {
   // The selection is the only source: the tab shown is the selected action's kind (or an empty kind chosen).
   const action = actions.find(item => item.id === selection.actionId && (!selection.actionKind || item.kind === selection.actionKind));
@@ -403,7 +432,7 @@ function Arsenal({
       {action && (
         <CombatDraft
           key={draftKey}
-          {...{ actor, action, selection, targets, turn, busy, arsenalSync, onBeginTargeting, onRemoveTarget, onLaunch }}
+          {...{ actor, action, selection, targets, turn, busy, arsenalSync, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch }}
         />
       )}
     </div>
@@ -412,7 +441,7 @@ function Arsenal({
 
 export function GrigliataCombatPanel({
   actor, actions = [], equipped, targets = [], events = [], pending = [], turn, selection = {}, currentUserId,
-  onSelectAction = () => {}, onBeginTargeting, onRemoveTarget, onLaunch, onRetry, onCritical, onApplyDamage, canApplyDamage, damageState,
+  onSelectAction = () => {}, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch, onRetry, onRollDamage, onCritical, onApplyDamage, canApplyDamage, damageState,
   busy = false, arsenalSync = 'ready', error, loading = false, isManager = false,
 }) {
   const headingId = useId();
@@ -430,15 +459,15 @@ export function GrigliataCombatPanel({
           {actor && (
             <Arsenal
               key={actor.placementId}
-              {...{ actor, actions, equipped, targets, turn, selection, arsenalSync, onSelectAction, onBeginTargeting, onRemoveTarget, onLaunch }}
+              {...{ actor, actions, equipped, targets, turn, selection, arsenalSync, onSelectAction, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch }}
               busy={busy || loading}
             />
           )}
-          <GrigliataCombatStatus actor={actor} pending={pending} events={events} busy={busy} onRetry={onRetry} />
+          <GrigliataCombatStatus {...{ actor, pending, events, busy, onRetry, onRollDamage }} />
         </div>
       </section>
       <GrigliataCombatHistory
-        {...{ events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager }}
+        {...{ events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isManager }}
       />
     </div>
   );

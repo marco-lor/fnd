@@ -7,20 +7,30 @@ const {
   combatAllies,
   combatCost,
   combatCritical,
+  combatCriticalThrow,
   combatDamageBalances,
   combatDamageBase,
   combatDamageEligible,
   combatDamageProposal,
   combatDamageSplit,
   combatDefenseAdjusted,
+  combatHasDice,
+  combatLaunchRolls,
   combatOwnerDamageFloor,
+  combatPendingDamage,
   compareCombatRolls,
   combatDistance,
+  combatEffectsWithDamage,
   combatRelationAllows,
   combatRoleRange,
+  combatRollFaces,
+  combatRoundAttack,
   combatStatus,
+  combatWeaponDamage,
   equippedItemSpells,
+  resolveCombatDamage,
   rollCombatDamage,
+  rollCombatDice,
 } = require('../lib/grigliataCombatCore');
 
 const profile = {level: 6, die: 12, parametri: {
@@ -530,4 +540,115 @@ test('the common Ostruzione card can be used during the opponent turn', () => {
   const obstruction = scope => buildContentAction({id: 'card', scope, kind: 'tecnica', name: 'Ostruzione', entry, profile});
   assert.deepEqual([obstruction('common').canActOffTurn, obstruction('common').actionEconomy], [true, 'Movimento']);
   assert.equal(obstruction('personal').canActOffTurn, false);
+});
+
+// Faces taken in order from a list; a roll beyond it fails.
+const sequence = (...values) => sides => {
+  assert.ok(values.length, `unexpected d${sides}`);
+  return values.shift();
+};
+
+test('a dice throw lists every die in formula order, signs subtracted ones and folds constants into the sum', () => {
+  assert.deepEqual(rollCombatDice('2d6 + 1d4 - 2', sequence(5, 3, 4)), {
+    rolls: [{sides: 6, value: 5}, {sides: 6, value: 3}, {sides: 4, value: 4}], total: 10,
+  });
+  assert.deepEqual(rollCombatDice('1d8 - 1d4 + 2', sequence(7, 3)), {
+    rolls: [{sides: 8, value: 7}, {sides: 4, value: 3, sign: -1}], total: 6,
+  });
+  assert.deepEqual(rollCombatDice('3', sequence()), {rolls: [], total: 3});
+  assert.equal(rollCombatDice('2d6 + veleno', sequence()), null);
+  // The sum is the one the immediate roll proposes for the same faces.
+  assert.equal(rollCombatDamage('1d8 - 1d4 + 2', sequence(7, 3)), 6);
+
+  for (const formula of ['2d6', 'd6', '1d4 - 1', '3 + 1d10']) assert.equal(combatHasDice(formula), true, formula);
+  for (const formula of ['', '1', '3 - 1', '2d6 + veleno', '2d6 + Forza', '21d6']) {
+    assert.equal(combatHasDice(formula), false, formula);
+  }
+});
+
+test('guided mode waits only for a damage proposal with dice, and resolves it as the immediate path would', () => {
+  const proposal = (expr, kind = 'damage', label = 'Danno proposto') => ({kind, label, expr});
+  assert.deepEqual(combatPendingDamage(proposal('2d6 + 1'), 2), {round: 2, kind: 'effect', label: 'Danno proposto', expr: '2d6 + 1'});
+  assert.deepEqual(combatPendingDamage(proposal('2d4', 'damage', 'Danno base'), 1, 0), {
+    round: 1, kind: 'weapon', label: 'Danno base', expr: '2d4', reduction: 0,
+  });
+  for (const nothing of [null, proposal('1'), proposal(''), proposal('2d6 + veleno'), proposal('', 'manual'),
+    proposal('1d8', 'heal')]) {
+    assert.equal(combatPendingDamage(nothing, 1), null, JSON.stringify(nothing));
+  }
+
+  const weapon = {attackStat: 6, damageBonus: 1, hands: 2};
+  const thrown = resolveCombatDamage({round: 3, kind: 'weapon', label: 'Danno base', expr: '2d4', reduction: 2}, weapon,
+    sequence(4, 3));
+  assert.deepEqual(thrown, {
+    damageRoll: {round: 3, kind: 'weapon', label: 'Danno base', expr: '2d4',
+      rolls: [{sides: 4, value: 4}, {sides: 4, value: 3}], raw: 7, total: 18},
+    damageDetails: {raw: 7, subtotal: 14, reduction: 2, hands: 2},
+  });
+  assert.equal(thrown.damageRoll.total, combatWeaponDamage(6 + 7 + 1, 2, 2));
+  const effect = resolveCombatDamage({round: 1, kind: 'effect', label: 'Danno proposto', expr: '3d10 - 1d4'}, weapon,
+    sequence(10, 1, 5, 2));
+  assert.deepEqual(effect, {
+    damageRoll: {round: 1, kind: 'effect', label: 'Danno proposto', expr: '3d10 - 1d4',
+      rolls: [{sides: 10, value: 10}, {sides: 10, value: 1}, {sides: 10, value: 5}, {sides: 4, value: 2, sign: -1}],
+      raw: 14, total: 14},
+    damageDetails: null,
+  });
+});
+
+test('an event waits for a re-roll, then a defense, then a damage throw, and is done after that', () => {
+  const pending = {round: 1, kind: 'effect', label: 'Danno proposto', expr: '2d6'};
+  assert.equal(combatStatus([{status: 'retry'}, {status: 'done', pendingDamage: pending}]), 'retry');
+  assert.equal(combatStatus([{status: 'waiting'}, {status: 'done', pendingDamage: pending}]), 'waiting');
+  assert.equal(combatStatus([{status: 'done'}, {status: 'done', pendingDamage: pending}]), 'awaitingDamage');
+  assert.equal(combatStatus([], pending), 'awaitingDamage');
+  assert.equal(combatStatus([], null), 'done');
+  assert.equal(combatStatus([{status: 'done'}]), 'done');
+});
+
+test('launch and retry faces come from the attacks the journal keeps, round by round', () => {
+  const roll = (value, extra = []) => ({label: 'Mira', bonus: 4, sides: 12, rolls: [value, ...extra], total: 4 + value});
+  assert.deepEqual(combatRollFaces(roll(3, [9])), [{sides: 12, value: 3}, {sides: 12, value: 9}]);
+  for (const none of [null, undefined, {label: 'Mira', bonus: 4, sides: 0, rolls: [], total: 4}]) {
+    assert.deepEqual(combatRollFaces(none), []);
+  }
+  const tied = {round: 3, attack: roll(8), trials: [{round: 1, attack: roll(1)}, {round: 2, attack: roll(6)}]};
+  assert.deepEqual([1, 2, 3, 4].map(round => combatRoundAttack(tied, round)?.rolls[0] ?? null), [1, 6, 8, null]);
+  const fresh = {round: 1, attack: roll(2, [11]), trials: []};
+  const recipient = {round: 1, attack: null, trials: []};
+  assert.deepEqual(combatLaunchRolls([tied, fresh, recipient], null), [
+    {sides: 12, value: 1}, {sides: 12, value: 2}, {sides: 12, value: 11},
+  ]);
+  assert.deepEqual(combatLaunchRolls([], roll(5)), [{sides: 12, value: 5}]);
+  assert.deepEqual(combatLaunchRolls([], null), []);
+});
+
+test('a critical throw returns the faces of its one roll beside the critical, and a correction keeps them', () => {
+  const base = {raw: 5, subtotal: 18, reduction: 7, hands: 2};
+  const action = {criticalExpr: '2d4 - 1d4', criticalBonus: 1};
+  const first = combatCriticalThrow(13, base, action, null, sequence(4, 3, 2));
+  const faces = [{sides: 4, value: 4}, {sides: 4, value: 3}, {sides: 4, value: 2, sign: -1}];
+  assert.deepEqual([first.critical.roll, first.rolls], [5, faces]);
+  // The critical itself keeps its shape: the faces are the handler's to store.
+  assert.deepEqual(first.critical, combatCritical(13, base, action, null, sequence(4, 3, 2)));
+  assert.equal('rolls' in first.critical, false);
+  const reroll = () => assert.fail('a correction never rolls again');
+  const corrected = combatCriticalThrow(41, base, action, {...first.critical, rolls: first.rolls}, reroll);
+  assert.deepEqual([corrected.critical.roll, corrected.rolls, corrected.critical.total],
+    [5, faces, combatCritical(41, base, action, first.critical, reroll).total]);
+  // A stored critical without faces (written before them) never gains invented ones.
+  assert.deepEqual(combatCriticalThrow(41, base, action, first.critical, reroll).rolls, []);
+  const table = combatCriticalThrow(13, base, {criticalExpr: '2d6 + Forza', criticalBonus: 0}, null, reroll);
+  assert.deepEqual([table.critical.roll, table.rolls, Boolean(table.critical.tableRoll)], [null, [], true]);
+});
+
+test('a thrown damage takes the place of an immediate roll: before the cure of the same target, else last', () => {
+  const effect = (kind, targetPlacementId, amount = 1) => ({kind, label: kind, expr: '1d4', amount, targetPlacementId});
+  const damage = target => effect('damage', target, 9);
+  const launched = [effect('heal', 'a'), effect('heal', 'b'), effect('manual', null, null)];
+  assert.deepEqual(combatEffectsWithDamage(launched, damage('b')),
+    [effect('heal', 'a'), damage('b'), effect('heal', 'b'), effect('manual', null, null)]);
+  assert.deepEqual(combatEffectsWithDamage(launched, damage('c')), [...launched, damage('c')]);
+  assert.deepEqual(combatEffectsWithDamage([effect('heal', null)], damage(null)), [damage(null), effect('heal', null)]);
+  assert.deepEqual(combatEffectsWithDamage([], damage('a')), [damage('a')]);
 });

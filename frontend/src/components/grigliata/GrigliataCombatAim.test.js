@@ -12,6 +12,24 @@ const props = {
   tokens,viewport:{x:100,y:100,scale:0.25},grid:{cellSizePx:20},stageSize:{width:600,height:400},setViewport:jest.fn(),
 };
 
+test('the ground picker can aim a spell by keyboard and shares pointer range validation', () => {
+  const pickPoint = jest.fn();
+  const bomb = { ...action, id: 'bomb', kind: 'spell', name: 'Bomba Scasso', mode: 'point', rangeFt: 5 };
+  render(<GrigliataCombatAim {...props} aim={{...props.aim, action: bomb, pickPoint}} />);
+  const cursor = screen.getByRole('button', { name: 'Scegli casella (1, 1)' });
+  expect(cursor).toHaveFocus();
+  fireEvent.keyDown(cursor, {key: 'ArrowUp'});
+  fireEvent.keyDown(cursor, {key: 'ArrowUp'});
+  fireEvent.click(cursor);
+  expect(pickPoint).not.toHaveBeenCalled();
+  expect(screen.getByRole('status')).toHaveTextContent('Casella fuori gittata');
+  fireEvent.keyDown(cursor, {key: 'ArrowDown'});
+  fireEvent.keyDown(cursor, {key: 'ArrowRight'});
+  expect(cursor).toHaveAccessibleName('Scegli casella (2, 0)');
+  fireEvent.click(cursor);
+  expect(pickPoint).toHaveBeenCalledWith({col: 2, row: 0});
+});
+
 test('the crosshair draws its minimum screen-size halo on the actor; the target button selects the other placement', () => {
   const {rerender} = render(<GrigliataCombatAim {...props}/>);
   expect(screen.getByTestId('combat-actor-ring')).toHaveStyle({width:'54px',left:'110px',top:'110px'});

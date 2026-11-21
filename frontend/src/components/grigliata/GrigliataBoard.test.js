@@ -840,6 +840,22 @@ describe('GrigliataBoard', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame;
   });
 
+  test('combat dice land inside the board viewport while the numerical result stays in the edge tray', async () => {
+    const props = buildProps({
+      combatTray: {
+        id: {}, phase: 'result', kind: 'attack', title: 'Spada', notation: 'd12',
+        anchor: { backgroundId: 'map-1', targetIds: ['map-1__hidden-foe'] }, rolls: [{ sides: 12, value: 7 }],
+      },
+    });
+    render(<GrigliataBoard {...props} />);
+    const projection = await screen.findByTestId('grigliata-board-dice-projection');
+    expect(projection).toHaveAttribute('aria-hidden', 'true');
+    expect(projection.parentElement.querySelector('[data-konva-type="Stage"]')).toBeInTheDocument();
+    const result = screen.getByRole('region', { name: 'Spada' });
+    expect(result).toHaveTextContent('d12 7');
+    expect(result).not.toContainElement(projection);
+  });
+
   test('renders uniform subtle grid lines without major-line emphasis', async () => {
     render(<GrigliataBoard {...buildProps()} />);
 

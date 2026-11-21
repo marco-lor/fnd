@@ -12,6 +12,8 @@ export type CombatScope = "equipped" | "personal" | "common";
 type TargetMode = "single" | "multiple" | "self" | "area" |
   "point" | "ground" | "manual";
 export type CombatStatus = "waiting" | "retry" | "done";
+// Only the event waits for damage: its targets are done once the defense is answered.
+export type CombatEventStatus = CombatStatus | "awaitingDamage";
 type CombatOutcome = "tie" | "hit" | "resisted" | "accepted" | "declined";
 export type AnimaDie = number;
 type Fields = Record<string, unknown>;
@@ -108,6 +110,8 @@ export interface CombatAction extends CombatCheck {
   media: Fields | null;
   // Fingerprint of the definition the arsenal served (see readArsenal).
   version?: string;
+  // Guided journals only: whether the critical formula has dice to throw.
+  criticalHasDice?: boolean;
 }
 
 export interface CombatCell {
@@ -161,6 +165,36 @@ export interface CombatCritical {
   roll: number | null;
   bonus: number;
   reduction: number;
+  // Guided journals only, added by the handler: the faces of `roll`, kept through every correction.
+  rolls?: CombatDie[];
+}
+
+// A die as the tray shows it; a subtracted die carries sign -1.
+export interface CombatDie {
+  sides: number;
+  value: number;
+  sign?: -1;
+}
+
+// Guided mode: a damage formula with dice that waits for the actor's throw. A weapon
+// hit keeps the RD the defender answered.
+export interface CombatPendingDamage {
+  round: number;
+  kind: "effect" | "weapon";
+  label: string;
+  expr: string;
+  reduction?: number;
+}
+
+// The stored throw: faces never change, raw is the formula's sum, total the damage proposed.
+export interface CombatDamageRoll {
+  round: number;
+  kind: CombatPendingDamage["kind"];
+  label: string;
+  expr: string;
+  rolls: CombatDie[];
+  raw: number;
+  total: number;
 }
 
 export interface CombatTarget extends CombatPawn {
@@ -176,6 +210,8 @@ export interface CombatTarget extends CombatPawn {
   critical: CombatCritical | null;
   // The amount the DM agreed and applied; balances stay with the resources.
   damageApplied?: {amount: number};
+  pendingDamage?: CombatPendingDamage;
+  damageRoll?: CombatDamageRoll;
 }
 
 export interface CombatDefense {
@@ -450,12 +486,30 @@ const LEADING_DICE_SUM = new RegExp(
 const fieldExpression = (text: string): string =>
   diceExpression(text.match(LEADING_DICE_SUM)?.[1] ?? "");
 
+// Every die of the expression in formula order, and its sum. Constants are folded
+// into the total, never listed.
+export const rollCombatDice = (
+  expression: string, roll: (sides: number) => number
+): {rolls: CombatDie[]; total: number} | null => {
+  const plan = dicePlan(expression);
+  if (!plan) return null;
+  const rolls: CombatDie[] = [];
+  const total = plan.reduce((sum, {sign, count, sides}) => {
+    if (sides === null) return sum + sign * count;
+    const faces = Array.from({length: count}, () => roll(sides));
+    rolls.push(...faces.map((value): CombatDie => sign < 0 ? {sides, value, sign: -1} : {sides, value}));
+    return sum + sign * faces.reduce((subtotal, value) => subtotal + value, 0);
+  }, 0);
+  return {rolls, total};
+};
+
 export const rollCombatDamage = (
   expression: string, roll: (sides: number) => number
-): number | null => dicePlan(expression)?.reduce((sum, {sign, count, sides}) => (
-  sum + sign * (sides === null ? count : Array.from({length: count}, () => roll(sides))
-    .reduce((total, value) => total + value, 0))
-), 0) ?? null;
+): number | null => rollCombatDice(expression, roll)?.total ?? null;
+
+// Only an expression the app can roll and that holds at least one die waits for a throw.
+export const combatHasDice = (expression: string): boolean =>
+  dicePlan(expression)?.some(({sides}) => sides !== null) ?? false;
 
 // Damage an action proposes against a target at this distance: the card's
 // expression, or the band that covers the distance. Journal entries written
@@ -495,16 +549,59 @@ const criticalRows = [
 export const combatWeaponDamage = (subtotal: number, reduction: number, hands: number): number =>
   Math.ceil(Math.max(0, subtotal - reduction) * (hands === 2 ? 1.5 : 1));
 
-export const combatCritical = (
+// A weapon hit: Attacco + the rolled dice + Bonus Danno, less RD, then the two-handed multiplier.
+export const combatWeaponHit = (
+  action: Pick<CombatAction, "attackStat" | "damageBonus" | "hands">, raw: number, reduction: number
+): {damage: number; damageDetails: CombatDamageDetails} => {
+  const damageDetails = {raw, subtotal: action.attackStat + raw + action.damageBonus, reduction, hands: action.hands};
+  return {damage: combatWeaponDamage(damageDetails.subtotal, reduction, action.hands), damageDetails};
+};
+
+// Guided mode leaves a damage formula with dice to the actor's throw; null when the
+// proposal resolves at once (a table effect, a constant, a formula the app cannot roll).
+export const combatPendingDamage = (
+  proposal: Pick<CombatEffect, "kind" | "label" | "expr"> | null, round: number, reduction: number | null = null
+): CombatPendingDamage | null => {
+  if (proposal?.kind !== "damage" || !combatHasDice(proposal.expr)) return null;
+  const {label, expr} = proposal;
+  return reduction === null ? {round, kind: "effect", label, expr} : {round, kind: "weapon", label, expr, reduction};
+};
+
+// The throw of a pending damage, with the amount the immediate path proposes for the same faces.
+export const resolveCombatDamage = (
+  pending: CombatPendingDamage,
+  action: Pick<CombatAction, "attackStat" | "damageBonus" | "hands">,
+  roll: (sides: number) => number
+): {damageRoll: CombatDamageRoll; damageDetails: CombatDamageDetails | null} => {
+  const {round, kind, label, expr} = pending;
+  const {rolls, total: raw} = rollCombatDice(expr, roll) ?? {rolls: [], total: 0};
+  const weapon = kind === "weapon" ? combatWeaponHit(action, raw, pending.reduction ?? 0) : null;
+  return {
+    damageRoll: {round, kind, label, expr, rolls, raw, total: weapon ? weapon.damage : raw},
+    damageDetails: weapon?.damageDetails ?? null,
+  };
+};
+
+// A thrown damage takes the place an immediate roll gives it: before the first cure of the
+// same target (or of the ground), else last.
+export const combatEffectsWithDamage = (effects: CombatEffect[], damage: CombatEffect): CombatEffect[] => {
+  const at = effects.findIndex((item) => item.kind === "heal" && item.targetPlacementId === damage.targetPlacementId);
+  return at < 0 ? [...effects, damage] : [...effects.slice(0, at), damage, ...effects.slice(at)];
+};
+
+// The critical and the faces of its dice, from one roll: the first confirmation rolls the
+// formula whatever the row; a correction rolls nothing and keeps the roll and faces stored.
+export const combatCriticalThrow = (
   score: number,
   base: CombatDamageDetails,
   action: Pick<CombatAction, "criticalExpr" | "criticalBonus">,
   previous: CombatCritical | null,
   roll: (sides: number) => number
-): CombatCritical => {
+): {critical: CombatCritical; rolls: CombatDie[]} => {
   const row = Number.isSafeInteger(score) ? criticalRows[score - 1] : undefined;
   if (!row) throw new CombatProblem("invalid-argument", "Il punteggio critico deve essere tra 1 e 41.");
-  const die = previous ? previous.roll : rollCombatDamage(action.criticalExpr, roll);
+  const thrown = previous ? null : rollCombatDice(action.criticalExpr, roll);
+  const die = previous ? previous.roll : thrown?.total ?? null;
   const reduction = row.effect.includes(IGNORE_RD) ? 0 :
     row.effect.includes(HALF_RD) ? base.reduction / 2 : base.reduction;
   const bonus = action.criticalBonus;
@@ -514,7 +611,7 @@ export const combatCritical = (
     ? `max(0, ${base.subtotal + row.factor * bonus} + x${row.factor} (${action.criticalExpr}) − ${reduction} RD)` +
       (base.hands === 2 ? " × 1,5" : "") + ", arrotondato per eccesso"
     : "";
-  return {
+  return {critical: {
     score,
     multiplier: row.factor ? `x${row.factor}` : "–",
     factor: row.factor,
@@ -524,8 +621,12 @@ export const combatCritical = (
     roll: die,
     bonus,
     reduction,
-  };
+  }, rolls: previous ? previous.rolls ?? [] : thrown?.rolls ?? []};
 };
+
+// The critical alone, as a journal without faces stores it.
+export const combatCritical = (...args: Parameters<typeof combatCriticalThrow>): CombatCritical =>
+  combatCriticalThrow(...args).critical;
 
 export const makeCombatRoll = (
   label: string, bonus: number, sides: AnimaDie | null,
@@ -540,10 +641,35 @@ export const compareCombatRolls = (attack: number, defense: number): CombatOutco
   return attack > defense ? "hit" : "resisted";
 };
 
-export const combatStatus = (targets: {status: CombatStatus}[]): CombatStatus => {
+// A re-roll first, then a defense, then a damage throw (of a target or of a targetless action).
+export const combatStatus = (
+  targets: {status: CombatStatus; pendingDamage?: unknown}[], pendingDamage: unknown = null
+): CombatEventStatus => {
   if (targets.some(({status}) => status === "retry")) return "retry";
-  return targets.some(({status}) => status === "waiting") ? "waiting" : "done";
+  if (targets.some(({status}) => status === "waiting")) return "waiting";
+  return pendingDamage || targets.some((target) => target.pendingDamage) ? "awaitingDamage" : "done";
 };
+
+// The faces of a check roll, as the tray shows them.
+export const combatRollFaces = (roll: Pick<CombatRoll, "sides" | "rolls"> | null | undefined): CombatDie[] => {
+  if (!roll?.sides || !Array.isArray(roll.rolls)) return [];
+  const {sides} = roll;
+  return roll.rolls.map((value) => ({sides, value}));
+};
+
+// The attack a target faced in a round: its current one, else the one its trial keeps.
+export const combatRoundAttack = (
+  target: Pick<CombatTarget, "round" | "attack" | "trials">, round: number
+): CombatRoll | null => (
+  target.round === round ? target.attack : target.trials?.find((trial) => trial.round === round)?.attack ?? null
+);
+
+// The faces a launch rolled: each target's first attack in target order, else the targetless attack.
+export const combatLaunchRolls = (
+  targets: Pick<CombatTarget, "round" | "attack" | "trials">[], attack: CombatRoll | null | undefined
+): CombatDie[] => (
+  targets.length ? targets.flatMap((target) => combatRollFaces(combatRoundAttack(target, 1))) : combatRollFaces(attack)
+);
 
 // The DM can spot a manual adjustment in the journal; the original values stay on the request.
 export const combatDefenseAdjusted = (
