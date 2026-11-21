@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Group,
   Image as KonvaImage,
@@ -95,13 +95,18 @@ export default function GrigliataFogOfWarMask({
     }),
     [currentVisiblePolygons]
   );
+  const previousAtlases = useRef([]);
   const rasterAtlases = useMemo(
     () => buildFogRasterMemoryAtlases({
       memoryTiles,
       grid: normalizedGrid,
+      previousAtlases: previousAtlases.current,
     }),
     [memoryTiles, normalizedGrid]
   );
+  useEffect(() => {
+    previousAtlases.current = rasterAtlases;
+  }, [rasterAtlases]);
   const normalizedCurrentPolygons = polygonBands.currentPolygons;
   const currentPolygonPathData = useMemo(
     () => buildFogPolygonPathData(normalizedCurrentPolygons),

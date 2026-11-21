@@ -55,13 +55,16 @@ const grid = {
   offsetYPx: 0,
 };
 
-const buildMemoryTile = ({ tileKey = '0:0', tileCol = 0, tileRow = 0 } = {}) => {
+const buildMemoryTile = ({
+  tileCol = 0, tileRow = 0, firstByte = 0xff, backgroundId = 'map-1', ownerUid = 'user-1',
+  offsetXPx = 0,
+} = {}) => {
+  const tileKey = `${tileCol}:${tileRow}`;
   const maskBytes = createEmptyFogRasterMaskBytes();
-  maskBytes[0] = 0xff;
+  maskBytes[0] = firstByte;
   return normalizeFogRasterMemoryTileDoc({
-    id: `map-1__user-1__fog-raster-c8-s16-v1__${tileKey}`,
-    backgroundId: 'map-1',
-    ownerUid: 'user-1',
+    backgroundId,
+    ownerUid,
     tileKey,
     tileCol,
     tileRow,
@@ -69,7 +72,7 @@ const buildMemoryTile = ({ tileKey = '0:0', tileCol = 0, tileRow = 0 } = {}) => 
     tileSizeCells: 8,
     samplesPerCell: 16,
     cellSizePx: 70,
-    offsetXPx: 0,
+    offsetXPx,
     offsetYPx: 0,
     maskEncoding: FOG_RASTER_MASK_ENCODING,
     maskBase64: encodeFogRasterMaskBase64(maskBytes),
@@ -130,6 +133,51 @@ describe('GrigliataFogOfWarMask', () => {
     expect(screen.queryByTestId('fog-remembered-cell-clear')).not.toBeInTheDocument();
     expect(screen.queryByTestId('fog-remembered-cell-overlay')).not.toBeInTheDocument();
     expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
+  });
+
+  test('retains unchanged atlas images as exploration expands and repaints erased pixels', () => {
+    const context = {
+      createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+      putImageData: jest.fn(),
+    };
+    const userAgent = jest.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('test-browser');
+    const getContext = jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    try {
+      const firstTile = buildMemoryTile({ tileCol: 1 });
+      const farTile = buildMemoryTile({ tileCol: 4 });
+      const negativeTile = buildMemoryTile({ tileCol: -1, tileRow: -1 });
+      const renderMask = (tiles, props = {}) => (
+        <GrigliataFogOfWarMask bounds={bounds} grid={grid} memoryTiles={tiles} {...props} />
+      );
+      const { rerender } = render(renderMask([firstTile, farTile]));
+      expect(context.putImageData).toHaveBeenCalledTimes(2);
+
+      rerender(renderMask([negativeTile, farTile, buildMemoryTile({ tileCol: 1 })]));
+      expect(context.putImageData).toHaveBeenCalledTimes(3);
+
+      const partlyErased = buildMemoryTile({ tileCol: 1, firstByte: 0x02 });
+      rerender(renderMask([farTile, partlyErased]));
+      expect(context.putImageData).toHaveBeenCalledTimes(4);
+      const lastPixels = context.putImageData.mock.calls[3][0].data;
+      expect([...lastPixels.slice(0, 12)]).toEqual([0, 0, 0, 0, 2, 6, 23, 255, 0, 0, 0, 0]);
+      expect(screen.getAllByTestId('fog-remembered-raster-overlay')).toHaveLength(2);
+
+      rerender(renderMask([farTile, buildMemoryTile({ tileCol: 1, firstByte: 0 })]));
+      expect(context.putImageData).toHaveBeenCalledTimes(4);
+      expect(screen.getByTestId('fog-remembered-raster-overlay')).toHaveAttribute('data-x', '2240');
+
+      rerender(renderMask([buildMemoryTile({ tileCol: 4, ownerUid: 'user-2' })]));
+      rerender(renderMask([buildMemoryTile({ tileCol: 4, ownerUid: 'user-2', backgroundId: 'map-2' })]));
+      const movedGrid = { ...grid, offsetXPx: 10 };
+      rerender(renderMask([buildMemoryTile({
+        tileCol: 4, ownerUid: 'user-2', backgroundId: 'map-2', offsetXPx: 10,
+      })], { grid: movedGrid }));
+      expect(context.putImageData).toHaveBeenCalledTimes(7);
+      expect(screen.getByTestId('fog-remembered-raster-overlay')).toHaveAttribute('data-x', '2250');
+    } finally {
+      getContext.mockRestore();
+      userAgent.mockRestore();
+    }
   });
 
   test('renders overlapping current vision polygons as merged live vision', () => {
