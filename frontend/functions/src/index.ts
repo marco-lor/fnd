@@ -23,6 +23,7 @@ import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
 import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
 import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeTokenV2";
+import {getGrigliataCombatArsenal, mutateGrigliataCombat} from "./grigliataCombat";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
 import {syncUserDirectory} from "./syncUserDirectory";
@@ -120,6 +121,8 @@ export {
   deleteGrigliataCustomToken,
   spawnGrigliataCustomTokenInstance,
   spawnGrigliataFoeToken,
+  getGrigliataCombatArsenal,
+  mutateGrigliataCombat,
   updateGrigliataCustomTokenTemplate,
   clientFirebaseConfig,
   syncUserDirectory,

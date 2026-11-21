@@ -123,6 +123,7 @@ import {
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
 import { sortTokensByLayerOrder } from './tokenLayering';
+import GrigliataCombatAim from './GrigliataCombatAim';
 import {
   buildBackgroundMap,
   buildInitialNarrationPlacement,
@@ -2286,6 +2287,7 @@ const TurnOrderPanel = ({
 };
 
 export default function GrigliataBoard({
+  combatAim,
   activeBackground,
   combatBackgroundName = '',
   grid,
@@ -6541,6 +6543,8 @@ export default function GrigliataBoard({
         onDragLeave={handleDragLeave}
         onContextMenu={(event) => event.preventDefault()}
       >
+        {combatAim && <GrigliataCombatAim aim={combatAim} tokens={visibleRenderedTokens} viewport={viewport} grid={normalizedGrid}
+          stageSize={stageSize} setViewport={setViewport} applyScale={applyScale} />}
         {isTokenDragActive && (
           <div
             data-testid="grigliata-board-drop-overlay"

@@ -251,6 +251,18 @@
       "owner": "grigliata",
       "compatibilityAliasOf": null
     },
+    "getGrigliataCombatArsenal": {
+      "functionId": "getGrigliataCombatArsenal",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
+    "mutateGrigliataCombat": {
+      "functionId": "mutateGrigliataCombat",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
     "updateGrigliataCustomTokenTemplate": {
       "functionId": "updateGrigliataCustomTokenTemplate",
       "region": "europe-west1",

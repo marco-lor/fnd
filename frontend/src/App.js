@@ -83,9 +83,11 @@ const AuthenticatedStatus = ({ children }) => {
   return BOOTSTRAP_V2_ENABLED && shellProfile ? <AuthenticatedLayout>{children}</AuthenticatedLayout> : children;
 };
 
+const CombatInbox = React.lazy(() => import('./components/grigliata/GrigliataCombatInbox'));
+
 export const AuthenticatedRoute = () => {
   const { user, authReady, authStatus, logout } = useAuthSession();
-  const { profileStatus, profileFresh, retryProfile } = useProfileState();
+  const { profileStatus, profileFresh, retryProfile, userData } = useProfileState();
 
   if (!authReady) {
     return <StatusPanel title="Checking your session" message="Confirming your authenticated session…" />;
@@ -98,6 +100,8 @@ export const AuthenticatedRoute = () => {
   if (profileFresh) {
     return (
       <AuthenticatedLayout>
+        {(process.env.REACT_APP_FND_FIREBASE_PROJECT_ID === 'fatin-test' || process.env.REACT_APP_FND_PERF === '1') &&
+          <React.Suspense fallback={null}><CombatInbox key={user.uid} uid={user.uid} isManager={userData?.role === 'dm'}/></React.Suspense>}
         <Outlet />
       </AuthenticatedLayout>
     );

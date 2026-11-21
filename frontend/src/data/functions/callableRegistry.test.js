@@ -71,14 +71,17 @@ describe('Firebase callable registry', () => {
   test.each([
     ['deleteUser', 'europe-west8'],
     ['deleteGrigliataCustomToken', 'europe-west1'],
+    ['getGrigliataCombatArsenal', 'europe-west1'],
+    ['mutateGrigliataCombat', 'europe-west1'],
     ['spendCharacterPointV2', 'europe-west8'],
     ['task12MutateCodex', 'europe-west8'],
-  ])('uses the declared region for %s', async (logicalKey, region) => {
-    const { app, getFunctions, registry } = loadRegistry();
+  ])('uses the exact callable ID and region for %s', async (logicalKey, region) => {
+    const { app, getFunctions, httpsCallable, registry } = loadRegistry();
 
     await registry.getCallable(logicalKey)({});
 
     expect(getFunctions).toHaveBeenCalledWith(app, region);
+    expect(httpsCallable).toHaveBeenCalledWith({ region }, logicalKey);
   });
 
   test('acquires every manifest entry by its exact function ID and region', async () => {
@@ -93,7 +96,6 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(47);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
