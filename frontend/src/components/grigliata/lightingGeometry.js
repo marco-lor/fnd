@@ -1,5 +1,8 @@
+import { isInteractiveWallSegment } from './wallRuntimeState';
+
 export const LIGHTING_GEOMETRY_EPSILON = 1e-6;
 export const DEFAULT_LIGHTING_RAY_COUNT = 96;
+export const DEFAULT_TOKEN_VISION_RAY_COUNT = 256;
 export const DEFAULT_ENDPOINT_ANGLE_OFFSET = 0.0001;
 
 const FULL_CIRCLE_RADIANS = Math.PI * 2;
@@ -76,8 +79,17 @@ const filterSegmentsForVisibilityCircle = ({
   }))
 );
 
-const normalizeSegment = (wall, index) => {
-  if (wall?.blocksSight !== true) {
+export const wallBlocksVisibility = (wall, kind = 'vision') => {
+  if (wall?.isOpen === true && isInteractiveWallSegment(wall)) {
+    return false;
+  }
+
+  const blocks = kind === 'light' ? wall?.blocksLight : wall?.blocksVision;
+  return typeof blocks === 'boolean' ? blocks : wall?.blocksSight === true;
+};
+
+const normalizeSegment = (wall, index, kind) => {
+  if (!wallBlocksVisibility(wall, kind)) {
     return null;
   }
 
@@ -102,9 +114,9 @@ const normalizeSegment = (wall, index) => {
   };
 };
 
-export const normalizeLightingWallSegments = (walls = []) => (
+export const normalizeLightingWallSegments = (walls = [], kind = 'vision') => (
   (Array.isArray(walls) ? walls : [])
-    .map(normalizeSegment)
+    .map((wall, index) => normalizeSegment(wall, index, kind))
     .filter(Boolean)
 );
 
@@ -255,6 +267,18 @@ const collectVisibilityAngles = ({
   return [...anglesByKey.values()].sort((left, right) => left - right);
 };
 
+const castVisibilityPolygon = ({
+  origin,
+  radius,
+  segments,
+  rayCount,
+  endpointAngleOffset,
+  tolerance,
+}) => (
+  collectVisibilityAngles({ origin, segments, rayCount, endpointAngleOffset })
+    .map((angle) => castRayToNearestSegment({ origin, angle, radius, segments, tolerance }))
+);
+
 export const computeVisibilityPolygon = ({
   origin,
   radius,
@@ -282,24 +306,18 @@ export const computeVisibilityPolygon = ({
     radius: normalizedRadius,
     tolerance,
   });
-  const angles = collectVisibilityAngles({
+  return castVisibilityPolygon({
     origin: normalizedOrigin,
+    radius: normalizedRadius,
     segments: relevantSegments,
     rayCount,
     endpointAngleOffset,
-  });
-
-  return angles.map((angle) => castRayToNearestSegment({
-    origin: normalizedOrigin,
-    angle,
-    radius: normalizedRadius,
-    segments: relevantSegments,
     tolerance,
-  }));
+  });
 };
 
 export const normalizeRenderableLight = (light) => {
-  if (!isFinitePoint(light)) {
+  if (light?.enabled === false || !isFinitePoint(light)) {
     return null;
   }
 
@@ -322,11 +340,9 @@ export const normalizeRenderableLight = (light) => {
   };
 };
 
-export const buildTokenVisionPolygon = ({
+const normalizeTokenVisionSource = ({
   token,
   visionRadiusPx,
-  segments = [],
-  rayCount = DEFAULT_LIGHTING_RAY_COUNT,
 }) => {
   const position = token?.renderPosition || token?.position || null;
   const x = Number(position?.x);
@@ -348,18 +364,87 @@ export const buildTokenVisionPolygon = ({
     x: x + (size / 2),
     y: y + (size / 2),
   };
+  if (!isFinitePoint(origin)) return null;
 
   return {
     tokenId: token?.tokenId || token?.id || token?.ownerUid || '',
     origin,
     radius,
-    polygon: computeVisibilityPolygon({
-      origin,
-      radius,
-      segments,
-      rayCount,
-    }),
   };
+};
+
+export const buildTokenVisionPolygon = ({
+  token,
+  visionRadiusPx,
+  segments = [],
+  rayCount,
+}) => {
+  const source = normalizeTokenVisionSource({ token, visionRadiusPx });
+  return source && {
+    ...source,
+    polygon: computeVisibilityPolygon({ ...source, segments, rayCount }),
+  };
+};
+
+export const createVisibilitySourceCache = () => ({
+  entries: new Map(),
+  footprints: [],
+});
+
+// Keep only the most recent cast of each active source. Wall snapshots may be
+// recreated by edits outside this source's reach, or by updates to other fields.
+const buildSourceFootprints = ({
+  sources,
+  segments,
+  cache,
+  rayCount,
+  endpointAngleOffset = DEFAULT_ENDPOINT_ANGLE_OFFSET,
+  includeKey = false,
+}) => {
+  const entries = new Map();
+  const occurrences = new Map();
+  const footprints = sources.map(({ key, source }) => {
+    const occurrence = occurrences.get(key) || 0;
+    occurrences.set(key, occurrence + 1);
+    const entryKey = JSON.stringify([key, occurrence]);
+    const { origin, radius } = source;
+    const geometryKey = JSON.stringify([origin.x, origin.y, radius, rayCount, endpointAngleOffset]);
+    const sourceKey = JSON.stringify(source);
+    const previous = cache?.entries.get(entryKey);
+    const isSameGeometry = previous?.geometryKey === geometryKey;
+    let wallKey = previous?.wallKey;
+    let polygon = previous?.footprint.polygon;
+
+    if (!isSameGeometry || previous.segments !== segments) {
+      const relevantSegments = filterSegmentsForVisibilityCircle({ segments, origin, radius });
+      wallKey = JSON.stringify(relevantSegments.map(({ id, x1, y1, x2, y2 }) => [id, x1, y1, x2, y2]));
+      if (!isSameGeometry || previous.wallKey !== wallKey) {
+        polygon = castVisibilityPolygon({
+          origin,
+          radius,
+          segments: relevantSegments,
+          rayCount,
+          endpointAngleOffset,
+          tolerance: LIGHTING_GEOMETRY_EPSILON,
+        });
+      }
+    }
+
+    const footprint = previous?.sourceKey === sourceKey && previous.footprint.polygon === polygon
+      ? previous.footprint
+      : { ...source, polygon, ...(includeKey ? { key: entryKey } : {}) };
+    entries.set(entryKey, { geometryKey, sourceKey, segments, wallKey, footprint });
+    return footprint;
+  });
+
+  if (!cache) return footprints;
+
+  cache.entries = entries;
+  if (cache.footprints.length !== footprints.length
+    || footprints.some((footprint, index) => footprint !== cache.footprints[index])) {
+    cache.footprints = footprints;
+  }
+  return cache.footprints;
 };
 
 export const buildTokenVisionPolygons = ({
@@ -367,13 +452,37 @@ export const buildTokenVisionPolygons = ({
   visionRadiusPx,
   segments = [],
   rayCount = DEFAULT_LIGHTING_RAY_COUNT,
-}) => (
-  (Array.isArray(tokens) ? tokens : [])
-    .map((token) => buildTokenVisionPolygon({
-      token,
-      visionRadiusPx,
-      segments,
-      rayCount,
-    }))
-    .filter(Boolean)
-);
+  endpointAngleOffset,
+  cache,
+}) => buildSourceFootprints({
+  sources: (Array.isArray(tokens) ? tokens : []).flatMap((token) => {
+    const source = normalizeTokenVisionSource({ token, visionRadiusPx });
+    return source ? [{ key: source.tokenId, source }] : [];
+  }),
+  segments,
+  rayCount: normalizeRayCount(rayCount),
+  endpointAngleOffset,
+  cache,
+});
+
+export const buildLightFootprints = ({
+  lights = [],
+  segments = [],
+  rayCount = DEFAULT_LIGHTING_RAY_COUNT,
+  endpointAngleOffset,
+  cache,
+}) => buildSourceFootprints({
+  sources: (Array.isArray(lights) ? lights : []).flatMap((light) => {
+    const normalized = normalizeRenderableLight(light);
+    if (!normalized) return [];
+
+    const radius = Math.max(normalized.brightRadiusPx, normalized.dimRadiusPx);
+    const key = light.id || `${normalized.id}-${radius}`;
+    return [{ key, source: { ...normalized, radius } }];
+  }),
+  segments,
+  rayCount: normalizeRayCount(rayCount),
+  endpointAngleOffset,
+  cache,
+  includeKey: true,
+});

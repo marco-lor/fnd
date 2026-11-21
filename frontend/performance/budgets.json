@@ -341,7 +341,7 @@
     }
   ],
   "task11Dashboard": {
-    "fixture": "fnd-performance-v2-task05-runtime-retired-task07-media-codex-map",
+    "fixture": "fnd-performance-v3-grigliata-lighting",
     "pageSize": 10,
     "maxExpanded": 3,
     "listeners": [

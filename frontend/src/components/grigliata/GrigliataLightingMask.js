@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { memo, useMemo } from 'react';
 import {
   Circle,
   Group,
@@ -7,13 +7,8 @@ import {
 } from 'react-konva';
 import { normalizeGridConfig } from './boardUtils';
 import { normalizeRenderableFogPolygons } from './fogPolygonGeometry';
-import {
-  buildTokenVisionPolygons,
-  computeVisibilityPolygon,
-  normalizeLightingWallSegments,
-  normalizeRenderableLight,
-} from './lightingGeometry';
 import { DEFAULT_TOKEN_VISION_RADIUS_SQUARES } from './lightingVisibility';
+import { useLightFootprints, useTokenSightFootprints } from './useGrigliataLightingGeometry';
 
 export { DEFAULT_TOKEN_VISION_RADIUS_SQUARES };
 
@@ -26,6 +21,8 @@ const GLOBAL_BRIGHT_LIGHT_TINT_OPACITY = 0.26;
 const FOG_DIM_LIGHT_TINT_OPACITY = 0.045;
 const FOG_BRIGHT_LIGHT_TINT_OPACITY = 0.12;
 const DARKNESS_SOURCE_FILL = 'rgba(2, 6, 23, 1)';
+const GRADIENT_CENTER = { x: 0, y: 0 };
+const EMPTY_POLYGONS = [];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -62,11 +59,6 @@ const polygonToPoints = (polygon = []) => (
 
 const hasRenderablePolygon = (polygon) => Array.isArray(polygon) && polygon.length >= 3;
 
-const getGradientRadius = (light) => Math.max(
-  asFiniteNumber(light?.dimRadiusPx, 0),
-  asFiniteNumber(light?.brightRadiusPx, 0)
-);
-
 const getBrightStop = (light, radius) => clamp(
   radius > 0 ? asFiniteNumber(light?.brightRadiusPx, 0) / radius : 0,
   0,
@@ -74,7 +66,7 @@ const getBrightStop = (light, radius) => clamp(
 );
 
 const buildLightCutoutGradientStops = (light) => {
-  const radius = getGradientRadius(light);
+  const { radius } = light;
   const brightStop = getBrightStop(light, radius);
   const brightHoldStop = clamp(brightStop * 0.86, 0, 1);
   const dimStopOpacity = brightStop > 0 && brightStop < 1 ? 0.7 : DIM_LIGHT_CUTOUT_OPACITY;
@@ -92,7 +84,7 @@ const buildLightCutoutGradientStops = (light) => {
 };
 
 const buildLightTintGradientStops = (light, isDefaultBrightness) => {
-  const radius = getGradientRadius(light);
+  const { radius } = light;
   const brightStop = getBrightStop(light, radius);
   const dimOpacity = isDefaultBrightness ? GLOBAL_DIM_LIGHT_TINT_OPACITY : DIM_LIGHT_TINT_OPACITY;
   const brightOpacity = isDefaultBrightness ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY;
@@ -110,7 +102,7 @@ const buildLightTintGradientStops = (light, isDefaultBrightness) => {
 };
 
 const buildFogLightTintGradientStops = (light) => {
-  const radius = getGradientRadius(light);
+  const { radius } = light;
   const brightStop = getBrightStop(light, radius);
 
   return [
@@ -133,19 +125,19 @@ const buildPolygonClipFunc = (polygons = []) => {
   return (context) => {
     context.beginPath();
     polygons.forEach((polygon) => {
-      const outerRing = polygon?.[0];
-      if (!hasRenderablePolygon(outerRing)) {
-        return;
-      }
+      polygon.forEach((ring, ringIndex) => {
+        if (!hasRenderablePolygon(ring)) return;
 
-      outerRing.forEach((point, index) => {
-        if (index === 0) {
-          context.moveTo(point.x, point.y);
-          return;
+        // Normalized rings have the same winding. Reverse holes so the
+        // nonzero rule cuts them out and keeps overlapping sight sources lit.
+        const first = ringIndex === 0 ? 0 : ring.length - 1;
+        const step = ringIndex === 0 ? 1 : -1;
+        context.moveTo(ring[first].x, ring[first].y);
+        for (let index = first + step; index >= 0 && index < ring.length; index += step) {
+          context.lineTo(ring[index].x, ring[index].y);
         }
-        context.lineTo(point.x, point.y);
+        context.closePath();
       });
-      context.closePath();
     });
   };
 };
@@ -172,64 +164,127 @@ const buildCoverRect = ({ bounds, grid }) => {
   };
 };
 
-export default function GrigliataLightingMask({
+const TokenSightCutout = memo(function TokenSightCutout({ vision }) {
+  return (
+    <Line
+      data-testid="lighting-token-vision-cutout"
+      data-tokenid={vision.tokenId || ''}
+      points={polygonToPoints(vision.polygon)}
+      closed
+      fill="#ffffff"
+      globalCompositeOperation="destination-out"
+      listening={false}
+    />
+  );
+});
+
+const LightGradient = memo(function LightGradient({ light, isGlobalLightEnabled, isFogClip }) {
+  const clipFunc = useMemo(() => buildPolygonClipFunc([[light.polygon]]), [light.polygon]);
+  const { radius, brightRadiusPx, color, origin } = light;
+  const shouldCutOut = isGlobalLightEnabled && !isFogClip;
+  const brightTintOpacity = isFogClip
+    ? FOG_BRIGHT_LIGHT_TINT_OPACITY * 0.5
+    : (isGlobalLightEnabled ? BRIGHT_LIGHT_TINT_OPACITY : GLOBAL_BRIGHT_LIGHT_TINT_OPACITY);
+  const gradientProps = {
+    x: origin.x,
+    y: origin.y,
+    fillRadialGradientStartPoint: GRADIENT_CENTER,
+    fillRadialGradientStartRadius: 0,
+    fillRadialGradientEndPoint: GRADIENT_CENTER,
+    listening: false,
+  };
+
+  return (
+    <Group data-testid="lighting-light-gradient" clipFunc={clipFunc} listening={false}>
+      {shouldCutOut && (
+        <Circle
+          {...gradientProps}
+          data-testid="lighting-light-dim-cutout"
+          radius={radius}
+          fillRadialGradientEndRadius={radius}
+          fillRadialGradientColorStops={buildLightCutoutGradientStops(light)}
+          globalCompositeOperation="destination-out"
+        />
+      )}
+      {shouldCutOut && brightRadiusPx > 0 && (
+        <Circle
+          {...gradientProps}
+          data-testid="lighting-light-bright-cutout"
+          radius={brightRadiusPx}
+          fillRadialGradientEndRadius={brightRadiusPx}
+          fillRadialGradientColorStops={[
+            0, whiteWithAlpha(0.36), 0.82, whiteWithAlpha(0.24), 1, whiteWithAlpha(0),
+          ]}
+          globalCompositeOperation="destination-out"
+        />
+      )}
+      <Circle
+        {...gradientProps}
+        data-testid="lighting-light-dim-polygon"
+        radius={radius}
+        fillRadialGradientEndRadius={radius}
+        fillRadialGradientColorStops={isFogClip
+          ? buildFogLightTintGradientStops(light)
+          : buildLightTintGradientStops(light, !isGlobalLightEnabled)}
+      />
+      {brightRadiusPx > 0 && (
+        <Circle
+          {...gradientProps}
+          data-testid="lighting-light-bright-polygon"
+          radius={brightRadiusPx}
+          fillRadialGradientEndRadius={brightRadiusPx}
+          fillRadialGradientColorStops={[0, withAlpha(color, brightTintOpacity), 1, withAlpha(color, 0)]}
+        />
+      )}
+    </Group>
+  );
+});
+
+export default memo(function GrigliataLightingMask({
   bounds,
   grid,
   metadata,
-  tokens = [],
+  tokens = EMPTY_POLYGONS,
   visionSources = null,
   precomputedTokenVisionPolygons = null,
+  precomputedLightFootprints = null,
   lightClipPolygons,
   rayCount,
 }) {
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
   const resolvedVisionSources = Array.isArray(visionSources) ? visionSources : tokens;
   const isGlobalLightEnabled = metadata?.scene?.globalLight === true;
-  const wallSegments = useMemo(
-    () => normalizeLightingWallSegments(metadata?.walls),
-    [metadata?.walls]
-  );
-  const tokenVisionPolygons = useMemo(
-    () => {
-      if (!isGlobalLightEnabled) return [];
-      if (Array.isArray(precomputedTokenVisionPolygons)) return precomputedTokenVisionPolygons;
-      return buildTokenVisionPolygons({
-        tokens: resolvedVisionSources,
-        visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
-        segments: wallSegments,
-        rayCount,
-      });
-    },
-    [
-      isGlobalLightEnabled,
-      normalizedGrid.cellSizePx,
-      precomputedTokenVisionPolygons,
-      rayCount,
-      resolvedVisionSources,
-      wallSegments,
-    ]
-  );
+  const hasPrecomputedSight = Array.isArray(precomputedTokenVisionPolygons);
+  const localSight = useTokenSightFootprints({
+    backgroundId: metadata?.backgroundId,
+    tokens: resolvedVisionSources,
+    visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
+    walls: metadata?.walls,
+    rayCount,
+    enabled: isGlobalLightEnabled && !hasPrecomputedSight,
+  });
+  const tokenVisionPolygons = hasPrecomputedSight
+    ? precomputedTokenVisionPolygons
+    : localSight || EMPTY_POLYGONS;
   const shouldClipLightContributions = Array.isArray(lightClipPolygons);
-  const lights = useMemo(
-    () => (Array.isArray(metadata?.lights) ? metadata.lights : []).map(normalizeRenderableLight).filter(Boolean),
-    [metadata?.lights]
+  const normalizedLightClipPolygons = useMemo(
+    () => (shouldClipLightContributions
+      ? normalizeRenderableFogPolygons(lightClipPolygons) || EMPTY_POLYGONS
+      : EMPTY_POLYGONS),
+    [lightClipPolygons, shouldClipLightContributions]
   );
-  const lightsWithClips = useMemo(() => {
-    if (shouldClipLightContributions) return lights;
-
-    return lights.map((light) => {
-      const polygon = computeVisibilityPolygon({
-        origin: light.origin,
-        radius: light.dimRadiusPx || light.brightRadiusPx,
-        segments: wallSegments,
-        rayCount,
-      });
-      return { ...light, clipFunc: buildPolygonClipFunc([[polygon]]) };
-    });
-  }, [lights, rayCount, shouldClipLightContributions, wallSegments]);
+  const canRenderLightContributions = !shouldClipLightContributions || normalizedLightClipPolygons.length > 0;
+  const localLightFootprints = useLightFootprints({
+    metadata,
+    rayCount,
+    enabled: !!metadata && !precomputedLightFootprints && canRenderLightContributions,
+  });
+  const lights = precomputedLightFootprints || localLightFootprints || EMPTY_POLYGONS;
   const darknessSources = useMemo(
     () => (Array.isArray(metadata?.darknessSources) ? metadata.darknessSources : [])
       .map((darkness) => {
+        if (darkness?.enabled === false) return null;
+
         const x = Number(darkness?.x);
         const y = Number(darkness?.y);
         const radiusPx = Math.max(0, asFiniteNumber(darkness?.radiusPx, 0));
@@ -249,12 +304,6 @@ export default function GrigliataLightingMask({
       .filter(Boolean),
     [metadata?.darknessSources]
   );
-  const normalizedLightClipPolygons = useMemo(
-    () => (shouldClipLightContributions
-      ? normalizeRenderableFogPolygons(lightClipPolygons) || []
-      : []),
-    [lightClipPolygons, shouldClipLightContributions]
-  );
   const lightClipFunc = useMemo(
     () => buildPolygonClipFunc(normalizedLightClipPolygons),
     [normalizedLightClipPolygons]
@@ -269,141 +318,19 @@ export default function GrigliataLightingMask({
   }
 
   const scene = metadata.scene || {};
-  const isDefaultBrightness = !isGlobalLightEnabled;
   const darknessOpacity = clamp(asFiniteNumber(scene.darkness, 0), 0, 1);
   const hasDarkness = isGlobalLightEnabled && darknessOpacity > 0;
   const hasDarknessSourceContribution = darknessSources.length > 0;
-  const canRenderLightContributions = !shouldClipLightContributions || normalizedLightClipPolygons.length > 0;
-  const shouldUseFogLightGlows = shouldClipLightContributions;
   const lightContributionNodes = canRenderLightContributions ? (
     <>
-      {lightsWithClips.map((light) => {
-        const radius = getGradientRadius(light);
-
-        if (shouldUseFogLightGlows) {
-          return (
-            <Group
-              key={`light-gradient-${light.id}`}
-              data-testid="lighting-light-gradient"
-              listening={false}
-            >
-              <Circle
-                data-testid="lighting-light-dim-polygon"
-                x={light.origin.x}
-                y={light.origin.y}
-                radius={radius}
-                fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                fillRadialGradientStartRadius={0}
-                fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                fillRadialGradientEndRadius={radius}
-                fillRadialGradientColorStops={buildFogLightTintGradientStops(light)}
-                listening={false}
-              />
-
-              {asFiniteNumber(light.brightRadiusPx, 0) > 0 && (
-                <Circle
-                  data-testid="lighting-light-bright-polygon"
-                  x={light.origin.x}
-                  y={light.origin.y}
-                  radius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                  fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                  fillRadialGradientStartRadius={0}
-                  fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                  fillRadialGradientEndRadius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                  fillRadialGradientColorStops={[
-                    0,
-                    withAlpha(light.color, FOG_BRIGHT_LIGHT_TINT_OPACITY * 0.5),
-                    1,
-                    withAlpha(light.color, 0),
-                  ]}
-                  listening={false}
-                />
-              )}
-            </Group>
-          );
-        }
-
-        return (
-          <Group
-            key={`light-gradient-${light.id}`}
-            data-testid="lighting-light-gradient"
-            clipFunc={light.clipFunc}
-            listening={false}
-          >
-            {isGlobalLightEnabled && (
-              <Circle
-                data-testid="lighting-light-dim-cutout"
-                x={light.origin.x}
-                y={light.origin.y}
-                radius={radius}
-                fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                fillRadialGradientStartRadius={0}
-                fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                fillRadialGradientEndRadius={radius}
-                fillRadialGradientColorStops={buildLightCutoutGradientStops(light)}
-                globalCompositeOperation="destination-out"
-                listening={false}
-              />
-            )}
-
-            {isGlobalLightEnabled && asFiniteNumber(light.brightRadiusPx, 0) > 0 && (
-              <Circle
-                data-testid="lighting-light-bright-cutout"
-                x={light.origin.x}
-                y={light.origin.y}
-                radius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                fillRadialGradientStartRadius={0}
-                fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                fillRadialGradientEndRadius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                fillRadialGradientColorStops={[
-                  0,
-                  whiteWithAlpha(0.36),
-                  0.82,
-                  whiteWithAlpha(0.24),
-                  1,
-                  whiteWithAlpha(0),
-                ]}
-                globalCompositeOperation="destination-out"
-                listening={false}
-              />
-            )}
-
-            <Circle
-              data-testid="lighting-light-dim-polygon"
-              x={light.origin.x}
-              y={light.origin.y}
-              radius={radius}
-              fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-              fillRadialGradientStartRadius={0}
-              fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-              fillRadialGradientEndRadius={radius}
-              fillRadialGradientColorStops={buildLightTintGradientStops(light, isDefaultBrightness)}
-              listening={false}
-            />
-
-            {asFiniteNumber(light.brightRadiusPx, 0) > 0 && (
-              <Circle
-                data-testid="lighting-light-bright-polygon"
-                x={light.origin.x}
-                y={light.origin.y}
-                radius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                fillRadialGradientStartRadius={0}
-                fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                fillRadialGradientEndRadius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
-                fillRadialGradientColorStops={[
-                  0,
-                  withAlpha(light.color, isDefaultBrightness ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY),
-                  1,
-                  withAlpha(light.color, 0),
-                ]}
-                listening={false}
-              />
-            )}
-          </Group>
-        );
-      })}
+      {lights.map((light) => (
+        <LightGradient
+          key={light.key}
+          light={light}
+          isGlobalLightEnabled={isGlobalLightEnabled}
+          isFogClip={shouldClipLightContributions}
+        />
+      ))}
 
       {darknessSources.map((darkness, index) => (
         <Circle
@@ -441,15 +368,9 @@ export default function GrigliataLightingMask({
 
       {isGlobalLightEnabled && tokenVisionPolygons.map((vision) => (
         hasRenderablePolygon(vision.polygon) && (
-          <Line
+          <TokenSightCutout
             key={`token-vision-${vision.tokenId || `${vision.origin.x}-${vision.origin.y}`}`}
-            data-testid="lighting-token-vision-cutout"
-            data-tokenid={vision.tokenId || ''}
-            points={polygonToPoints(vision.polygon)}
-            closed
-            fill="#ffffff"
-            globalCompositeOperation="destination-out"
-            listening={false}
+            vision={vision}
           />
         )
       ))}
@@ -467,4 +388,4 @@ export default function GrigliataLightingMask({
       ) : lightContributionNodes}
     </Group>
   );
-}
+});

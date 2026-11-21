@@ -103,6 +103,7 @@
     "test": "react-scripts test",
     "task13:test:models": "node --test scripts/performance/task13b-model.test.js scripts/task13/foe-order-migration.test.js",
     "task13:test:emulator": "node scripts/task13/run-emulator-tests.js",
+    "grigliata:test:fog-emulator": "node scripts/grigliata/run-fog-emulator-tests.js",
     "eject": "react-scripts eject",
     "fb:login": "npx firebase login",
     "fb:whoami": "npx firebase projects:list",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
   doc,
@@ -33,6 +33,39 @@ const sortMemoryTiles = (left, right) => (
   || left.id.localeCompare(right.id)
 );
 
+const EMPTY_TILES = [];
+
+// Firestore sends all documents as additions on the first snapshot, then only
+// the edited documents. Keep unchanged decoded masks and their coordinate order.
+const applyRasterTileChanges = (previous, changes, backgroundId, ownerUid) => {
+  if (!changes.length) return previous;
+  const changedIds = new Set();
+  const replacements = [];
+  for (const { type, doc: snapshot } of changes) {
+    changedIds.add(snapshot.id);
+    if (type === 'removed') continue;
+    const tile = normalizeFogRasterMemoryTileDoc(
+      { ...snapshot.data(), id: snapshot.id }, { immutableSnapshot: true }
+    );
+    if (tile && tile.backgroundId === backgroundId && tile.ownerUid === ownerUid) {
+      replacements.push(tile);
+    }
+  }
+  replacements.sort(sortMemoryTiles);
+  if (!previous.length) return replacements;
+
+  const next = [];
+  let index = 0;
+  for (const tile of previous) {
+    if (changedIds.has(tile.id)) continue;
+    while (index < replacements.length && sortMemoryTiles(replacements[index], tile) < 0) {
+      next.push(replacements[index++]);
+    }
+    next.push(tile);
+  }
+  return next.concat(replacements.slice(index));
+};
+
 export function useGrigliataFogRasterMemory({
   backgroundId = '',
   ownerUid = '',
@@ -48,7 +81,8 @@ export function useGrigliataFogRasterMemory({
   });
   const rasterSubscriptionGenerationRef = useRef(0);
   const isCurrentRasterScope = rasterTileState.scopeKey === rasterScopeKey;
-  const currentMemoryTiles = isCurrentRasterScope ? rasterTileState.memoryTiles : [];
+  const currentMemoryTiles = isCurrentRasterScope ? rasterTileState.memoryTiles : EMPTY_TILES;
+  const memoryTilesById = useMemo(() => buildTileMap(currentMemoryTiles), [currentMemoryTiles]);
   const isRasterFogReady = isCurrentRasterScope && rasterTileState.isReady;
 
   useEffect(() => {
@@ -61,6 +95,7 @@ export function useGrigliataFogRasterMemory({
     }
 
     const subscriptionScopeKey = `${backgroundId}::${ownerUid}`;
+    let memoryTiles = EMPTY_TILES;
     setRasterTileState({
       scopeKey: subscriptionScopeKey,
       memoryTiles: [],
@@ -79,16 +114,7 @@ export function useGrigliataFogRasterMemory({
           return;
         }
 
-        const memoryTiles = (snapshot.docs || [])
-          .map((docSnapshot) => normalizeFogRasterMemoryTileDoc({
-            id: docSnapshot.id,
-            ...docSnapshot.data(),
-          }))
-          .filter((tile) => (
-            tile?.backgroundId === backgroundId
-            && tile?.ownerUid === ownerUid
-          ))
-          .sort(sortMemoryTiles);
+        memoryTiles = applyRasterTileChanges(memoryTiles, snapshot.docChanges(), backgroundId, ownerUid);
 
         setRasterTileState({
           scopeKey: subscriptionScopeKey,
@@ -120,7 +146,7 @@ export function useGrigliataFogRasterMemory({
 
   return {
     memoryTiles: currentMemoryTiles,
-    memoryTilesById: buildTileMap(currentMemoryTiles),
+    memoryTilesById,
     isRasterFogReady,
   };
 }

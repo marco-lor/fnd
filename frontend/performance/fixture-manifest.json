@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "fnd-performance-v2-task05-runtime-retired-task07-media-codex-map",
+  "version": "fnd-performance-v3-grigliata-lighting",
   "projectId": "demo-fnd-perf",
   "documentCount": 9139,
   "storageObjectCount": 136,
-  "canonicalHash": "afe55042f77b2c0b88719d6790701674cc8da1031fe31ae23b02107dc1767346",
+  "canonicalHash": "80c07e7957a240d58683d31e9b9ac3b9713f530c3e835952341155e612be317c",
   "counts": {
     "app_config": 1,
     "users": 200,

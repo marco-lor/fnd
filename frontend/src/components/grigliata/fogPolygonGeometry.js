@@ -2,10 +2,9 @@ export const FOG_POLYGON_MAX_POLYGONS = 8;
 export const FOG_POLYGON_MAX_RINGS_PER_POLYGON = 4;
 export const FOG_POLYGON_MAX_RING_POINTS = 32;
 export const FOG_POLYGON_RENDER_MAX_RING_POINTS = 384;
-export const FOG_POLYGON_MEMORY_MAX_RING_POINTS = FOG_POLYGON_RENDER_MAX_RING_POINTS;
+export const FOG_POLYGON_MEMORY_MAX_RING_POINTS = 384;
 export const FOG_POLYGON_MAX_TOTAL_POINTS = 512;
-export const FOG_POLYGON_RENDER_MAX_TOTAL_POINTS = 3072;
-export const FOG_POLYGON_MEMORY_MAX_TOTAL_POINTS = FOG_POLYGON_RENDER_MAX_TOTAL_POINTS;
+export const FOG_POLYGON_MEMORY_MAX_TOTAL_POINTS = 3072;
 export const FOG_POLYGON_DEFAULT_CIRCLE_SEGMENTS = 32;
 export const FOG_POLYGON_COORDINATE_LIMIT = 1000000;
 
@@ -254,30 +253,62 @@ const compareBounds = (leftBounds, rightBounds) => {
 };
 
 export const getFogPolygonBounds = (polygons = []) => {
-  const normalizedPolygons = Array.isArray(polygons) ? polygons : [];
-  const points = normalizedPolygons.flatMap((polygon) => (
-    (Array.isArray(polygon) ? polygon : []).flatMap((ring) => (
-      (Array.isArray(ring) ? ring : []).map(asPoint).filter(Boolean)
-    ))
-  ));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
 
-  if (points.length < 1) {
-    return null;
+  for (const polygon of Array.isArray(polygons) ? polygons : []) {
+    for (const ring of Array.isArray(polygon) ? polygon : []) {
+      for (const rawPoint of Array.isArray(ring) ? ring : []) {
+        const point = asPoint(rawPoint);
+        if (point) {
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+        }
+      }
+    }
   }
 
-  return {
-    minX: Math.min(...points.map((point) => point.x)),
-    minY: Math.min(...points.map((point) => point.y)),
-    maxX: Math.max(...points.map((point) => point.x)),
-    maxY: Math.max(...points.map((point) => point.y)),
-  };
+  return minX === Infinity ? null : { minX, minY, maxX, maxY };
 };
 
-export const normalizeFogPolygons = (polygons, {
+const orderFogPolygons = (entries) => entries
+  .sort((left, right) => (
+    compareBounds(left.bounds, right.bounds)
+    || JSON.stringify(left.polygon).localeCompare(JSON.stringify(right.polygon))
+  ))
+  .map(({ polygon }) => polygon);
+
+// A cast produces an immutable ring. Unmoved sources can share the exact same
+// render and exploration polygon, even when another source moves.
+const liveEntryByCastRing = new WeakMap();
+export const buildFogPolygonsFromLiveCasts = (casts) => {
+  const entries = [];
+  for (const cast of casts) {
+    const ring = cast?.polygon;
+    if (!Array.isArray(ring)) continue;
+    if (!liveEntryByCastRing.has(ring)) {
+      const simplified = simplifyFogRingToPointLimit(ring, FOG_POLYGON_RENDER_MAX_RING_POINTS);
+      const polygon = normalizePolygon([simplified], { maxRingPoints: FOG_POLYGON_RENDER_MAX_RING_POINTS });
+      liveEntryByCastRing.set(ring, polygon && polygon !== INVALID_COMPLEXITY
+        ? { polygon, bounds: getFogPolygonBounds([polygon]) }
+        : null);
+    }
+    const entry = liveEntryByCastRing.get(ring);
+    if (entry) entries.push(entry);
+  }
+  return orderFogPolygons(entries);
+};
+
+const normalizeFogPolygonSet = (polygons, {
   rejectInvalid = false,
-  maxRingPoints = FOG_POLYGON_MAX_RING_POINTS,
-  maxTotalPoints = FOG_POLYGON_MAX_TOTAL_POINTS,
-} = {}) => {
+  maxRingPoints,
+  maxPolygons = Infinity,
+  maxTotalPoints = Infinity,
+}) => {
   if (!Array.isArray(polygons)) {
     return null;
   }
@@ -292,30 +323,36 @@ export const normalizeFogPolygons = (polygons, {
     return null;
   }
 
-  const normalizedPolygons = mappedPolygons
-    .filter(Boolean)
-    .sort((left, right) => {
-      const boundsDelta = compareBounds(getFogPolygonBounds([left]), getFogPolygonBounds([right]));
-      return boundsDelta !== 0
-        ? boundsDelta
-        : JSON.stringify(left).localeCompare(JSON.stringify(right));
-    });
-
+  const normalizedPolygons = mappedPolygons.filter(Boolean);
   if (
-    normalizedPolygons.length > FOG_POLYGON_MAX_POLYGONS
+    normalizedPolygons.length > maxPolygons
     || countFogPolygonPoints(normalizedPolygons) > maxTotalPoints
   ) {
     return null;
   }
 
-  return normalizedPolygons;
+  return orderFogPolygons(normalizedPolygons.map((polygon) => ({ polygon, bounds: getFogPolygonBounds([polygon]) })));
 };
 
-export const normalizeRenderableFogPolygons = (polygons, options = {}) => normalizeFogPolygons(
+export const normalizeFogPolygons = (polygons, {
+  rejectInvalid,
+  maxRingPoints = FOG_POLYGON_MAX_RING_POINTS,
+  maxTotalPoints = FOG_POLYGON_MAX_TOTAL_POINTS,
+} = {}) => normalizeFogPolygonSet(
+  polygons,
+  {
+    rejectInvalid,
+    maxRingPoints,
+    maxTotalPoints,
+    maxPolygons: FOG_POLYGON_MAX_POLYGONS,
+  }
+);
+
+// Each live source has a ring budget. Legacy document budgets apply only to stored polygons.
+export const normalizeRenderableFogPolygons = (polygons, options = {}) => normalizeFogPolygonSet(
   polygons,
   {
     maxRingPoints: FOG_POLYGON_RENDER_MAX_RING_POINTS,
-    maxTotalPoints: FOG_POLYGON_RENDER_MAX_TOTAL_POINTS,
     ...options,
   }
 );

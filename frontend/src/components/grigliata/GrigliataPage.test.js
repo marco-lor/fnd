@@ -18,6 +18,7 @@ import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAs
 import { readAudioFileMetadata } from './music';
 import { __resetRepositoryRuntimeForTests } from '../../data/repositoryRuntime';
 import { buildGrigliataWorkspaceStorageKey } from './grigliataWorkspacePreferences';
+import * as fogVisibilityFiltering from './fogVisibilityFiltering';
 import {
   buildFogRasterTilePayload,
   FOG_RASTER_MASK_ENCODING,
@@ -716,21 +717,23 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button
           type="button"
-          onClick={() => props.fogBrushControls?.onPaintFogBrush?.({
+          // Mirrors GrigliataBoard, which catches the paint promise.
+          onClick={() => void Promise.resolve(props.fogBrushControls?.onPaintFogBrush?.({
             point: { x: 35, y: 35 },
             mode: props.fogBrushControls?.mode,
             radiusSquares: props.fogBrushControls?.radiusSquares,
-          })}
+          })).catch(() => {})}
         >
           paint fog brush
         </button>
         <button
           type="button"
-          onClick={() => props.fogBrushControls?.onPaintFogBrush?.({
+          // Mirrors GrigliataBoard, which catches the paint promise.
+          onClick={() => void Promise.resolve(props.fogBrushControls?.onPaintFogBrush?.({
             point: { x: 735, y: 35 },
             mode: props.fogBrushControls?.mode,
             radiusSquares: props.fogBrushControls?.radiusSquares,
-          })}
+          })).catch(() => {})}
         >
           paint distant fog brush
         </button>
@@ -4192,6 +4195,55 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('updates remembered tiles without refiltering current page tokens', async () => {
+    const filter = jest.spyOn(fogVisibilityFiltering, 'filterFogVisibleTokens');
+    try {
+      setDocData('grigliata_lighting_render_inputs/map-1', {
+        backgroundId: 'map-1',
+        scene: { darkness: 0.6, globalLight: false },
+        walls: [],
+        lights: [],
+      });
+      setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, []);
+      setCollectionData('grigliata_token_placements', [0, 24].map((col, index) => ({
+        id: `map-1__user-${index + 1}`,
+        backgroundId: 'map-1',
+        tokenId: `user-${index + 1}`,
+        ownerUid: `user-${index + 1}`,
+        col,
+        row: 0,
+        isVisibleToPlayers: true,
+        isDead: false,
+        visionRadiusSquares: 1,
+      })));
+      render(<GrigliataPage />);
+      const tileCount = screen.getByTestId('board-fog-memory-tile-count');
+      const visibleTokens = screen.getByTestId('board-token-ids');
+      await waitFor(() => {
+        expect(visibleTokens).toHaveTextContent(/^user-1$/);
+        expect(Number(tileCount.textContent)).toBeGreaterThan(0);
+      });
+      const previousTileCount = Number(tileCount.textContent);
+      expect(filter).toHaveBeenCalled();
+      filter.mockClear();
+
+      const memoryListener = mockFirestoreListeners.find(({ target }) => (
+        target?.base?.path === GRIGLIATA_FOG_MEMORY_TILES_COLLECTION
+        && target.constraints?.some(({ field, value }) => field === 'ownerUid' && value === 'user-1')
+      ));
+      const memoryDocs = buildTestFogMemoryTileDocs({
+        polygons: [buildCellFogPolygon({ col: 24, row: 0 })],
+      });
+      act(() => memoryListener.onNext(mockCreateQuerySnapshot(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, memoryDocs)));
+
+      expect(Number(tileCount.textContent)).toBe(previousTileCount + 1);
+      expect(visibleTokens).toHaveTextContent(/^user-1$/);
+      expect(filter).not.toHaveBeenCalled();
+    } finally {
+      filter.mockRestore();
+    }
+  });
+
   test('subscribes to own fog and writes raster exploration only to the current player tiles', async () => {
     setDocData('grigliata_lighting_render_inputs/map-1', {
       backgroundId: 'map-1',
@@ -5143,6 +5195,110 @@ describe('GrigliataPage', () => {
     expect(getTransactionSetCalls().some(([target]) => (
       target?.path?.startsWith('grigliata_fog_of_war/')
     ))).toBe(false);
+  });
+
+  const renderManagerFogBrushForUser2 = async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 3,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    const view = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set fog brush radius one/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-radius')).toHaveTextContent('1');
+    });
+    firestore.runTransaction.mockClear();
+    mockTransactionInstances.splice(0, mockTransactionInstances.length);
+    return view;
+  };
+
+  test('an unmounted board never applies its remaining queued DM brush strokes', async () => {
+    const { unmount } = await renderManagerFogBrushForUser2();
+    const firstTransaction = createDeferred();
+    firestore.runTransaction
+      .mockImplementationOnce((db, callback) => mockRunFirestoreTransaction(callback, firstTransaction.promise))
+      .mockImplementation((db, callback) => mockRunFirestoreTransaction(callback));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^paint fog brush$/i }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /paint distant fog brush/i }));
+      await Promise.resolve();
+    });
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+
+    // Leave the board while the first stroke is still committing.
+    unmount();
+    await act(async () => {
+      firstTransaction.resolve();
+      await firstTransaction.promise;
+      jest.advanceTimersByTime(60000);
+    });
+
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+    const user2TileWrites = getFogTileSetCallsByOwner('user-2');
+    expect(user2TileWrites.length).toBeGreaterThan(0);
+    expect(user2TileWrites.every(([, payload]) => payload.tileCol <= 0)).toBe(true);
+  });
+
+  test('retries a transient DM brush failure on backoff only while the board is mounted', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const { unmount } = await renderManagerFogBrushForUser2();
+    const offline = () => Promise.reject(Object.assign(new Error('offline'), { code: 'unavailable' }));
+    firestore.runTransaction
+      .mockImplementationOnce(offline)
+      .mockImplementationOnce(offline)
+      .mockImplementation((db, callback) => mockRunFirestoreTransaction(callback));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^paint fog brush$/i }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    // Control: while mounted, the retained stroke retries after the backoff.
+    await act(async () => {
+      jest.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    // The second failure scheduled another retry; unmounting must cancel it.
+    unmount();
+    await act(async () => {
+      jest.advanceTimersByTime(60000);
+      await Promise.resolve();
+    });
+
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+    expect(getFogTileSetCallsByOwner('user-2')).toEqual([]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to paint Grigliata fog brush:',
+      expect.objectContaining({ code: 'unavailable' })
+    );
+    consoleErrorSpy.mockRestore();
   });
 
   test('writes DM fog brush raster masks without legacy cell limit payloads', async () => {

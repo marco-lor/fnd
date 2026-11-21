@@ -1,11 +1,108 @@
 import {
   buildTokenVisionPolygons,
+  buildLightFootprints,
+  createVisibilitySourceCache,
   castRayToNearestSegment,
   computeVisibilityPolygon,
   intersectRayWithSegment,
   normalizeLightingWallSegments,
   normalizeRenderableLight,
 } from './lightingGeometry';
+import { buildEffectiveLightingRenderInput } from './wallRuntimeState';
+
+const verticalWall = {
+  id: 'barrier',
+  x1: 10,
+  y1: -100,
+  x2: 10,
+  y2: 100,
+  blocksSight: true,
+};
+
+test.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])('uses independent sight (%s) and light (%s) blockers', (blocksVision, blocksLight) => {
+  const walls = [{ ...verticalWall, blocksVision, blocksLight }];
+  const cast = (segments) => computeVisibilityPolygon({
+    origin: { x: 0, y: 0 },
+    radius: 20,
+    segments,
+    rayCount: 16,
+  })[0].x;
+
+  expect(cast(normalizeLightingWallSegments(walls, 'vision'))).toBe(blocksVision ? 10 : 20);
+  expect(cast(normalizeLightingWallSegments(walls, 'light'))).toBe(blocksLight ? 10 : 20);
+  expect(cast(normalizeLightingWallSegments([verticalWall], 'light'))).toBe(10);
+});
+
+test.each(['door', 'window'])('uses an open %s override for both blocker sets', (wallType) => {
+  const lightingRenderInput = { backgroundId: 'scene', walls: [{ ...verticalWall, wallType }] };
+  const effective = (isOpen) => buildEffectiveLightingRenderInput({
+    lightingRenderInput,
+    wallRuntimeState: { backgroundId: 'scene', segments: { barrier: { isOpen } } },
+  }).walls;
+
+  for (const blocker of ['vision', 'light']) {
+    expect(normalizeLightingWallSegments(effective(false), blocker)).toHaveLength(1);
+    expect(normalizeLightingWallSegments(effective(true), blocker)).toHaveLength(0);
+  }
+});
+
+test('reuses each active token cast across other movements and unrelated wall updates', () => {
+  const cache = createVisibilitySourceCache();
+  const first = { tokenId: 'first', renderPosition: { x: -1, y: -1, size: 2 } };
+  const second = { tokenId: 'second', renderPosition: { x: 499, y: -1, size: 2 } };
+  const moved = { ...first, renderPosition: { ...first.renderPosition, x: -2 } };
+  const cast = (tokens, wall = verticalWall, rayCount = 16, endpointAngleOffset) => buildTokenVisionPolygons({
+    tokens,
+    visionRadiusPx: 20,
+    segments: normalizeLightingWallSegments([wall]),
+    cache,
+    rayCount,
+    endpointAngleOffset,
+  });
+
+  const initial = cast([first, second]);
+  expect(cast([{ ...first, name: 'Renamed' }, { ...second }], { ...verticalWall })).toBe(initial);
+  const afterMove = cast([moved, second]);
+  expect(afterMove[0].polygon).not.toBe(initial[0].polygon);
+  expect(afterMove[1]).toBe(initial[1]);
+  const afterWall = cast([moved, second], { ...verticalWall, x1: 11, x2: 11 });
+  expect(afterWall[0].polygon[0].x).toBe(11);
+  expect(afterWall[1]).toBe(initial[1]);
+  const differentAngles = cast([moved, second], verticalWall, 16, 0.001);
+  expect(differentAngles[0].polygon.some(({ angle }) => (
+    Math.abs(angle - (Math.atan2(100, 11) - 0.001)) < 1e-10
+  ))).toBe(true);
+  expect(cast([moved, second], verticalWall, 24)[1].polygon).toHaveLength(24);
+  cast([first]);
+  expect(cast([first, second])[1].polygon).not.toBe(initial[1].polygon);
+});
+
+test('keeps lamp casts across palette changes and updates only the moved lamp', () => {
+  const cache = createVisibilitySourceCache();
+  const first = { x: 0, y: 0, brightRadiusPx: 20, dimRadiusPx: 10 };
+  const second = { x: 500, y: 0, dimRadiusPx: 20 };
+  const cast = (lights) => buildLightFootprints({
+    lights,
+    segments: normalizeLightingWallSegments([verticalWall], 'light'),
+    cache,
+    rayCount: 16,
+  });
+  const initial = cast([first, second]);
+  expect(Math.max(...initial[0].polygon.map(({ y }) => y))).toBe(20);
+  expect(initial[0].polygon[0].x).toBe(10);
+  expect(cast([{ ...first, color: '#ff0000' }, second])[0].polygon).toBe(initial[0].polygon);
+  const moved = cast([{ ...first, x: -2 }, second]);
+  expect(moved[0].polygon).not.toBe(initial[0].polygon);
+  expect(moved[1]).toBe(initial[1]);
+  expect(cast([second])[0]).toBe(initial[1]);
+  cast([first, { ...second, enabled: false }]);
+  expect(cast([first, second])[1]).not.toBe(initial[1]);
+});
 
 const maxDistanceFrom = (origin, polygon) => (
   Math.max(

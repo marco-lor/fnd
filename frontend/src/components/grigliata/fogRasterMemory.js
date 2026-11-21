@@ -45,8 +45,10 @@ const sortTiles = (left, right) => (
   || left.id.localeCompare(right.id)
 );
 
+const isFogMask = (bytes) => bytes instanceof Uint8Array && bytes.length === FOG_RASTER_TILE_MASK_BYTES;
+
 const cloneMaskBytes = (maskBytes) => (
-  maskBytes instanceof Uint8Array && maskBytes.length === FOG_RASTER_TILE_MASK_BYTES
+  isFogMask(maskBytes)
     ? new Uint8Array(maskBytes)
     : createEmptyFogRasterMaskBytes()
 );
@@ -94,42 +96,37 @@ export const decodeFogRasterMaskBase64 = (maskBase64) => {
 };
 
 export const countFogRasterMaskBits = (maskBytes) => {
-  const bytes = cloneMaskBytes(maskBytes);
+  if (!isFogMask(maskBytes)) return 0;
   let count = 0;
-  for (let index = 0; index < bytes.length; index += 1) {
-    count += BYTE_BIT_COUNTS[bytes[index]];
+  for (let index = 0; index < maskBytes.length; index += 1) {
+    count += BYTE_BIT_COUNTS[maskBytes[index]];
   }
   return count;
 };
 
 export const mergeFogRasterTileMasks = (leftMaskBytes, rightMaskBytes) => {
-  const left = cloneMaskBytes(leftMaskBytes);
-  const right = cloneMaskBytes(rightMaskBytes);
-  const merged = createEmptyFogRasterMaskBytes();
-
+  const merged = cloneMaskBytes(leftMaskBytes);
+  if (!isFogMask(rightMaskBytes)) return merged;
   for (let index = 0; index < merged.length; index += 1) {
-    merged[index] = left[index] | right[index];
+    merged[index] |= rightMaskBytes[index];
   }
   return merged;
 };
 
 export const subtractFogRasterTileMasks = (leftMaskBytes, rightMaskBytes) => {
-  const left = cloneMaskBytes(leftMaskBytes);
-  const right = cloneMaskBytes(rightMaskBytes);
-  const nextMask = createEmptyFogRasterMaskBytes();
-
+  const nextMask = cloneMaskBytes(leftMaskBytes);
+  if (!isFogMask(rightMaskBytes)) return nextMask;
   for (let index = 0; index < nextMask.length; index += 1) {
-    nextMask[index] = left[index] & (~right[index] & 0xff);
+    nextMask[index] &= ~rightMaskBytes[index];
   }
   return nextMask;
 };
 
 export const maskContainsFogRasterBits = (containerMaskBytes, containedMaskBytes) => {
-  const container = cloneMaskBytes(containerMaskBytes);
-  const contained = cloneMaskBytes(containedMaskBytes);
-
-  for (let index = 0; index < contained.length; index += 1) {
-    if ((container[index] & contained[index]) !== contained[index]) {
+  if (!isFogMask(containedMaskBytes)) return true;
+  if (!isFogMask(containerMaskBytes)) return !containedMaskBytes.some(Boolean);
+  for (let index = 0; index < containedMaskBytes.length; index += 1) {
+    if ((containerMaskBytes[index] & containedMaskBytes[index]) !== containedMaskBytes[index]) {
       return false;
     }
   }
@@ -168,18 +165,18 @@ export const buildFogRasterTileDocId = ({
     : ''
 );
 
-const pointIsOnSegment = (point, start, end) => {
+const pointIsOnSegment = (x, y, start, end) => {
   const cross = (
-    (point.y - start.y) * (end.x - start.x)
-    - (point.x - start.x) * (end.y - start.y)
+    (y - start.y) * (end.x - start.x)
+    - (x - start.x) * (end.y - start.y)
   );
   if (Math.abs(cross) > GEOMETRY_EPSILON) {
     return false;
   }
 
   const dot = (
-    (point.x - start.x) * (end.x - start.x)
-    + (point.y - start.y) * (end.y - start.y)
+    (x - start.x) * (end.x - start.x)
+    + (y - start.y) * (end.y - start.y)
   );
   if (dot < -GEOMETRY_EPSILON) {
     return false;
@@ -189,106 +186,303 @@ const pointIsOnSegment = (point, start, end) => {
   return dot <= squaredLength + GEOMETRY_EPSILON;
 };
 
-const buildRingEdges = (ring) => ring.map((end, index) => {
-  const start = ring[(index + ring.length - 1) % ring.length];
-  const longestAxis = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
-  // Both the cross and dot tests allow epsilon in squared world units.
-  // This bounds their combined Y slack, including short and zero-length edges.
-  const padding = (2 * GEOMETRY_EPSILON) / longestAxis;
-  return {
-    start,
-    end,
-    minY: Math.min(start.y, end.y) - padding,
-    maxY: Math.max(start.y, end.y) + padding,
-  };
-});
-
-const pointIsInRing = (point, edges) => {
-  let isInside = false;
-
-  for (const { start, end } of edges) {
-    if (pointIsOnSegment(point, start, end)) {
-      return true;
-    }
-
-    const intersects = (
-      (start.y > point.y) !== (end.y > point.y)
-      && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x
-    );
-    if (intersects) {
-      isInside = !isInside;
+const buildRingEdges = (ring) => {
+  const edges = [];
+  for (let index = 0; index < ring.length; index += 1) {
+    const start = ring[(index + ring.length - 1) % ring.length];
+    const end = ring[index];
+    const longestAxis = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y));
+    if (longestAxis > 0) {
+      // The cross and dot tests allow epsilon in squared world units.
+      const padding = (2 * GEOMETRY_EPSILON) / longestAxis;
+      edges.push({
+        start,
+        end,
+        padding,
+        minY: Math.min(start.y, end.y) - padding,
+        maxY: Math.max(start.y, end.y) + padding,
+      });
     }
   }
-
-  return isInside;
+  return edges;
 };
 
-const getPolygonEdgesForRow = (polygons, y) => {
-  const onRow = (edges) => edges.filter((edge) => y >= edge.minY && y <= edge.maxY);
-  return polygons.map(({ outer, holes }) => ({
-    outer: onRow(outer),
-    holes: holes.map(onRow),
-  }));
+// Raster samples sit at sub-cell centres. Span code uses global sample indexes:
+// index FOG_RASTER_TILE_SAMPLE_SIZE is the first sample of tile 1.
+const getSampleCenterPx = ({ originPx, tileWorldSizePx, sampleSizePx }, index) => {
+  const tile = Math.floor(index / FOG_RASTER_TILE_SAMPLE_SIZE);
+  const sample = index - (tile * FOG_RASTER_TILE_SAMPLE_SIZE);
+  // Tile origin plus local offset, the same arithmetic as the stored tile layout.
+  return originPx + (tile * tileWorldSizePx) + ((sample + 0.5) * sampleSizePx);
 };
 
-const pointIsInFogPolygons = (point, polygons) => polygons.some(({ outer, holes }) => (
-  pointIsInRing(point, outer) && !holes.some((hole) => pointIsInRing(point, hole))
-));
-
-const getPolygonsBounds = (polygons = []) => {
-  const points = polygons.flatMap((polygon) => (
-    (Array.isArray(polygon) ? polygon : []).flatMap((ring) => (
-      (Array.isArray(ring) ? ring : []).filter((point) => (
-        Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y))
-      ))
-    ))
-  ));
-
-  if (!points.length) {
-    return null;
-  }
-
+// The sample indexes whose centres lie in [minPx, maxPx]. Each end is clamped
+// with its own tile's local arithmetic, keeping clips identical to stored tiles.
+const createSampleAxis = ({ originPx, tileWorldSizePx, sampleSizePx }, minPx, maxPx) => {
+  const firstTile = Math.floor((minPx - originPx) / tileWorldSizePx);
+  const lastTile = Math.floor((maxPx - originPx) / tileWorldSizePx);
+  const firstTileMinPx = originPx + (firstTile * tileWorldSizePx);
+  const lastTileMinPx = originPx + (lastTile * tileWorldSizePx);
   return {
-    minX: Math.min(...points.map((point) => Number(point.x))),
-    minY: Math.min(...points.map((point) => Number(point.y))),
-    maxX: Math.max(...points.map((point) => Number(point.x))),
-    maxY: Math.max(...points.map((point) => Number(point.y))),
+    originPx,
+    tileWorldSizePx,
+    sampleSizePx,
+    first: (firstTile * FOG_RASTER_TILE_SAMPLE_SIZE)
+      + Math.max(0, Math.ceil(((minPx - firstTileMinPx) / sampleSizePx) - 0.5)),
+    last: (lastTile * FOG_RASTER_TILE_SAMPLE_SIZE)
+      + Math.min(FOG_RASTER_TILE_SAMPLE_SIZE - 1, Math.floor(((maxPx - lastTileMinPx) / sampleSizePx) - 0.5)),
   };
 };
 
-const getTileSampleRangeForBounds = ({
-  bounds,
-  tileMinX,
-  tileMinY,
-  sampleSizePx,
-} = {}) => {
-  const minSampleX = Math.max(
-    0,
-    Math.ceil(((bounds.minX - tileMinX) / sampleSizePx) - 0.5)
-  );
-  const maxSampleX = Math.min(
-    FOG_RASTER_TILE_SAMPLE_SIZE - 1,
-    Math.floor(((bounds.maxX - tileMinX) / sampleSizePx) - 0.5)
-  );
-  const minSampleY = Math.max(
-    0,
-    Math.ceil(((bounds.minY - tileMinY) / sampleSizePx) - 0.5)
-  );
-  const maxSampleY = Math.min(
-    FOG_RASTER_TILE_SAMPLE_SIZE - 1,
-    Math.floor(((bounds.maxY - tileMinY) / sampleSizePx) - 0.5)
-  );
+// The first index in [axis.first, axis.last + 1] whose sample centre is at or
+// past px (strictly past when `strict`). axis.last + 1 means no sample is.
+const findFirstSampleAtOrPast = (axis, px, strict = false) => {
+  const isAtOrPast = (index) => {
+    const centerPx = getSampleCenterPx(axis, index);
+    return strict ? centerPx > px : centerPx >= px;
+  };
+  const end = axis.last + 1;
+  const estimate = Math.ceil(((px - axis.originPx) / axis.sampleSizePx) - 0.5);
+  let index = Number.isNaN(estimate) ? end : Math.min(end, Math.max(axis.first, estimate));
+  while (index > axis.first && isAtOrPast(index - 1)) index -= 1;
+  while (index < end && !isAtOrPast(index)) index += 1;
+  return index;
+};
 
-  return minSampleX <= maxSampleX && minSampleY <= maxSampleY
-    ? { minSampleX, maxSampleX, minSampleY, maxSampleY }
+// Offsets o with low <= intercept + (slope * o) <= high.
+const solveOffsetRange = (slope, intercept, low, high) => {
+  if (slope === 0) {
+    return intercept >= low && intercept <= high ? { min: -Infinity, max: Infinity } : null;
+  }
+  const fromLow = (low - intercept) / slope;
+  const fromHigh = (high - intercept) / slope;
+  return { min: Math.min(fromLow, fromHigh), max: Math.max(fromLow, fromHigh) };
+};
+
+// Approximate x-range on row y where pointIsOnSegment holds, or null if none.
+// With offset = x - start.x, its cross and dot products are linear in offset.
+const getOnSegmentWindowPx = (y, start, end) => {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const across = solveOffsetRange(-dy, (y - start.y) * dx, -GEOMETRY_EPSILON, GEOMETRY_EPSILON);
+  const along = solveOffsetRange(
+    dx,
+    (y - start.y) * dy,
+    -GEOMETRY_EPSILON,
+    (dx ** 2) + (dy ** 2) + GEOMETRY_EPSILON
+  );
+  return across && along
+    ? { minPx: start.x + Math.max(across.min, along.min), maxPx: start.x + Math.min(across.max, along.max) }
     : null;
 };
 
-const setRasterBit = (maskBytes, sampleX, sampleY) => {
-  const bitIndex = (sampleY * FOG_RASTER_TILE_SAMPLE_SIZE) + sampleX;
-  const byteIndex = Math.floor(bitIndex / 8);
-  const bitOffset = bitIndex % 8;
-  maskBytes[byteIndex] |= 1 << bitOffset;
+// The span of samples on row y that pointIsOnSegment accepts. Along a row the
+// rounded cross and dot products are still monotone in x, so accepted samples
+// are contiguous. Solve for the run, then settle both ends with the exact test.
+const findOnSegmentSpan = (xAxis, y, start, end) => {
+  const windowPx = getOnSegmentWindowPx(y, start, end);
+  if (!windowPx) {
+    return null;
+  }
+
+  const isOnSegment = (index) => pointIsOnSegment(getSampleCenterPx(xAxis, index), y, start, end);
+  const lastCandidate = Math.min(xAxis.last, findFirstSampleAtOrPast(xAxis, windowPx.maxPx, true));
+  let spanStart = Math.max(xAxis.first, findFirstSampleAtOrPast(xAxis, windowPx.minPx) - 1);
+  while (spanStart <= lastCandidate && !isOnSegment(spanStart)) spanStart += 1;
+  if (spanStart > lastCandidate) {
+    return null;
+  }
+
+  while (spanStart > xAxis.first && isOnSegment(spanStart - 1)) spanStart -= 1;
+  let spanEnd = spanStart + 1;
+  while (spanEnd <= xAxis.last && isOnSegment(spanEnd)) spanEnd += 1;
+  return [spanStart, spanEnd];
+};
+
+// Buckets a ring's edges by the sample rows whose centre passes each edge's
+// padded Y range. Rows outside every bucket cannot touch the ring.
+const indexRingEdgesByRow = (edges, yAxis) => {
+  const ranges = [];
+  let firstRow = Infinity;
+  let endRow = -Infinity;
+  for (const edge of edges) {
+    const edgeFirstRow = findFirstSampleAtOrPast(yAxis, edge.minY);
+    const edgeEndRow = findFirstSampleAtOrPast(yAxis, edge.maxY, true);
+    if (edgeFirstRow < edgeEndRow) {
+      ranges.push({ edge, edgeFirstRow, edgeEndRow });
+      firstRow = Math.min(firstRow, edgeFirstRow);
+      endRow = Math.max(endRow, edgeEndRow);
+    }
+  }
+  if (!ranges.length) {
+    return null;
+  }
+
+  const rows = Array.from({ length: endRow - firstRow }, () => []);
+  for (const { edge, edgeFirstRow, edgeEndRow } of ranges) {
+    for (let row = edgeFirstRow; row < edgeEndRow; row += 1) {
+      rows[row - firstRow].push(edge);
+    }
+  }
+  return { firstRow, rows };
+};
+
+// Sorts [start, end) spans and merges those that overlap or touch.
+const mergeSpans = (spans) => {
+  if (spans.length < 2) {
+    return spans;
+  }
+
+  spans.sort((left, right) => left[0] - right[0]);
+  const merged = [spans[0]];
+  for (let index = 1; index < spans.length; index += 1) {
+    const last = merged[merged.length - 1];
+    if (spans[index][0] <= last[1]) {
+      last[1] = Math.max(last[1], spans[index][1]);
+    } else {
+      merged.push(spans[index]);
+    }
+  }
+  return merged;
+};
+
+// Removes sorted, disjoint `removed` spans from sorted, disjoint `spans`.
+const subtractSpans = (spans, removed) => {
+  if (!removed.length) {
+    return spans;
+  }
+
+  const remaining = [];
+  let firstRemoved = 0;
+  for (const [start, end] of spans) {
+    let cursor = start;
+    while (firstRemoved < removed.length && removed[firstRemoved][1] <= cursor) firstRemoved += 1;
+    for (let index = firstRemoved; index < removed.length && removed[index][0] < end; index += 1) {
+      if (removed[index][0] > cursor) {
+        remaining.push([cursor, removed[index][0]]);
+      }
+      cursor = Math.max(cursor, removed[index][1]);
+    }
+    if (cursor < end) {
+      remaining.push([cursor, end]);
+    }
+  }
+  return remaining;
+};
+
+// Samples of one row inside a ring: edge-tolerance spans plus the even-odd
+// interior. A sample is inside when an odd number of crossings lie at or left
+// of it, i.e. in [crossings[2k], crossings[2k + 1]). Closed rings cross evenly.
+const getRingRowSpans = (ringRows, row, y, xAxis) => {
+  const edges = ringRows?.rows[row - ringRows.firstRow];
+  if (!edges) {
+    return [];
+  }
+
+  const crossings = [];
+  const spans = [];
+  for (const { start, end } of edges) {
+    if ((start.y > y) !== (end.y > y)) {
+      crossings.push(((end.x - start.x) * (y - start.y)) / (end.y - start.y) + start.x);
+    }
+    const onSegmentSpan = findOnSegmentSpan(xAxis, y, start, end);
+    if (onSegmentSpan) {
+      spans.push(onSegmentSpan);
+    }
+  }
+
+  crossings.sort((left, right) => left - right);
+  for (let index = 0; index + 1 < crossings.length; index += 2) {
+    const spanStart = findFirstSampleAtOrPast(xAxis, crossings[index]);
+    const spanEnd = findFirstSampleAtOrPast(xAxis, crossings[index + 1]);
+    if (spanStart < spanEnd) {
+      spans.push([spanStart, spanEnd]);
+    }
+  }
+  return mergeSpans(spans);
+};
+
+const getRasterPolygonBounds = (polygon) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const ring of polygon) {
+    for (const point of ring) {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  return minX === Infinity ? null : { minX, minY, maxX, maxY };
+};
+
+// Sets bits [startBit, endBit) of one tile row. Bit n of a row is sample n,
+// least significant bit first within each byte.
+const setMaskRowBits = (maskBytes, rowByteOffset, startBit, endBit) => {
+  const firstByte = rowByteOffset + (startBit >> 3);
+  const lastByte = rowByteOffset + ((endBit - 1) >> 3);
+  const firstByteBits = (0xff << (startBit & 7)) & 0xff;
+  const lastByteBits = 0xff >> (7 - ((endBit - 1) & 7));
+  if (firstByte === lastByte) {
+    maskBytes[firstByte] |= firstByteBits & lastByteBits;
+    return;
+  }
+
+  maskBytes[firstByte] |= firstByteBits;
+  maskBytes.fill(0xff, firstByte + 1, lastByte);
+  maskBytes[lastByte] |= lastByteBits;
+};
+
+// ORs global samples [start, end) of one row into tile masks, keyed by tile
+// row then tile column. Masks are created on first write, so every one is lit.
+const writeSampleSpan = (tileMasks, row, start, end) => {
+  const tileRow = Math.floor(row / FOG_RASTER_TILE_SAMPLE_SIZE);
+  const rowByteOffset = (row - (tileRow * FOG_RASTER_TILE_SAMPLE_SIZE)) * (FOG_RASTER_TILE_SAMPLE_SIZE / 8);
+  let masksByCol = tileMasks.get(tileRow);
+  if (!masksByCol) {
+    masksByCol = new Map();
+    tileMasks.set(tileRow, masksByCol);
+  }
+
+  for (let cursor = start; cursor < end;) {
+    const tileCol = Math.floor(cursor / FOG_RASTER_TILE_SAMPLE_SIZE);
+    const tileStart = tileCol * FOG_RASTER_TILE_SAMPLE_SIZE;
+    const tileEnd = Math.min(end, tileStart + FOG_RASTER_TILE_SAMPLE_SIZE);
+    let maskBytes = masksByCol.get(tileCol);
+    if (!maskBytes) {
+      maskBytes = createEmptyFogRasterMaskBytes();
+      masksByCol.set(tileCol, maskBytes);
+    }
+    setMaskRowBits(maskBytes, rowByteOffset, cursor - tileStart, tileEnd - tileStart);
+    cursor = tileEnd;
+  }
+};
+
+// Writes the samples inside one footprint, its outer ring minus its holes,
+// walking only the rows its outer ring reaches.
+const rasterizeFootprint = ({ outer, holes }, xAxis, yAxis, tileMasks) => {
+  const outerRows = indexRingEdgesByRow(outer, yAxis);
+  if (!outerRows) {
+    return;
+  }
+
+  const holeRows = holes.map((hole) => indexRingEdgesByRow(hole, yAxis)).filter(Boolean);
+  const endRow = outerRows.firstRow + outerRows.rows.length;
+  for (let row = outerRows.firstRow; row < endRow; row += 1) {
+    const y = getSampleCenterPx(yAxis, row);
+    const outerSpans = getRingRowSpans(outerRows, row, y, xAxis);
+    if (outerSpans.length) {
+      const holeSpans = mergeSpans(holeRows.flatMap((hole) => getRingRowSpans(hole, row, y, xAxis)));
+      subtractSpans(outerSpans, holeSpans)
+        .forEach(([start, end]) => writeSampleSpan(tileMasks, row, start, end));
+    }
+  }
 };
 
 const getRasterBit = (maskBytes, sampleX, sampleY) => {
@@ -304,76 +498,80 @@ export const rasterizeFogPolygonsToTiles = ({
   grid,
   polygons = [],
 } = {}) => {
-  const normalizedGrid = normalizeGridConfig(grid);
-  const bounds = getPolygonsBounds(polygons);
-  if (!bounds || !backgroundId || !ownerUid) {
+  if (!backgroundId || !ownerUid || !Array.isArray(polygons)) {
     return [];
   }
 
+  const sceneBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const footprints = [];
+  for (const polygon of polygons) {
+    if (!Array.isArray(polygon?.[0]) || polygon[0].length < 3) {
+      continue;
+    }
+
+    const rings = polygon.filter(Array.isArray);
+    const bounds = getRasterPolygonBounds(rings);
+    if (!bounds) {
+      continue;
+    }
+
+    sceneBounds.minX = Math.min(sceneBounds.minX, bounds.minX);
+    sceneBounds.minY = Math.min(sceneBounds.minY, bounds.minY);
+    sceneBounds.maxX = Math.max(sceneBounds.maxX, bounds.maxX);
+    sceneBounds.maxY = Math.max(sceneBounds.maxY, bounds.maxY);
+    const [outer, ...holes] = rings.map(buildRingEdges);
+    footprints.push({ bounds, outer, holes });
+  }
+
+  const normalizedGrid = normalizeGridConfig(grid);
   const tileWorldSizePx = getTileWorldSizePx(normalizedGrid);
   const sampleSizePx = normalizedGrid.cellSizePx / FOG_RASTER_SAMPLES_PER_CELL;
-  const minTileCol = Math.floor((bounds.minX - normalizedGrid.offsetXPx) / tileWorldSizePx);
-  const maxTileCol = Math.floor(((bounds.maxX - GEOMETRY_EPSILON) - normalizedGrid.offsetXPx) / tileWorldSizePx);
-  const minTileRow = Math.floor((bounds.minY - normalizedGrid.offsetYPx) / tileWorldSizePx);
-  const maxTileRow = Math.floor(((bounds.maxY - GEOMETRY_EPSILON) - normalizedGrid.offsetYPx) / tileWorldSizePx);
-  const polygonEdges = polygons
-    .filter((polygon) => Array.isArray(polygon?.[0]) && polygon[0].length >= 3)
-    .map(([outer, ...holes]) => ({ outer: buildRingEdges(outer), holes: holes.map(buildRingEdges) }));
-  const tiles = [];
+  const { offsetXPx, offsetYPx } = normalizedGrid;
+  const xGrid = { originPx: offsetXPx, tileWorldSizePx, sampleSizePx };
+  const yGrid = { originPx: offsetYPx, tileWorldSizePx, sampleSizePx };
+  const tileMasks = new Map();
 
-  for (let tileRow = minTileRow; tileRow <= maxTileRow; tileRow += 1) {
-    const edgesBySampleRow = [];
-    for (let tileCol = minTileCol; tileCol <= maxTileCol; tileCol += 1) {
-      const maskBytes = createEmptyFogRasterMaskBytes();
-      const tileMinX = normalizedGrid.offsetXPx + (tileCol * tileWorldSizePx);
-      const tileMinY = normalizedGrid.offsetYPx + (tileRow * tileWorldSizePx);
-      const sampleRange = getTileSampleRangeForBounds({
-        bounds,
-        tileMinX,
-        tileMinY,
-        sampleSizePx,
-      });
-      if (!sampleRange) {
-        continue;
-      }
-
-      let bitCount = 0;
-      for (let sampleY = sampleRange.minSampleY; sampleY <= sampleRange.maxSampleY; sampleY += 1) {
-        const y = tileMinY + ((sampleY + 0.5) * sampleSizePx);
-        if (!edgesBySampleRow[sampleY]) {
-          edgesBySampleRow[sampleY] = getPolygonEdgesForRow(polygonEdges, y);
-        }
-        const rowEdges = edgesBySampleRow[sampleY];
-        for (let sampleX = sampleRange.minSampleX; sampleX <= sampleRange.maxSampleX; sampleX += 1) {
-          const x = tileMinX + ((sampleX + 0.5) * sampleSizePx);
-          if (pointIsInFogPolygons({ x, y }, rowEdges)) {
-            setRasterBit(maskBytes, sampleX, sampleY);
-            bitCount += 1;
-          }
-        }
-      }
-
-      if (bitCount > 0) {
-        const tileKey = buildFogRasterTileKey({ tileCol, tileRow });
-        tiles.push({
-          id: buildFogRasterTileDocId({ backgroundId, ownerUid, tileKey }),
-          backgroundId,
-          ownerUid,
-          rasterProfileId: FOG_RASTER_PROFILE_ID,
-          tileKey,
-          tileCol,
-          tileRow,
-          tileSizeCells: FOG_RASTER_TILE_SIZE_CELLS,
-          samplesPerCell: FOG_RASTER_SAMPLES_PER_CELL,
-          cellSizePx: normalizedGrid.cellSizePx,
-          offsetXPx: normalizedGrid.offsetXPx,
-          offsetYPx: normalizedGrid.offsetYPx,
-          maskEncoding: FOG_RASTER_MASK_ENCODING,
-          maskBytes,
-        });
-      }
+  // Rasterize each footprint locally as row spans and union them in shared
+  // tiles. The rectangle enclosing all viewers can be vast and mostly empty.
+  for (const footprint of footprints) {
+    const { bounds, outer } = footprint;
+    // Preserve the edge tolerance within the scene's original sampling bounds.
+    const padding = outer.reduce((max, edge) => Math.max(max, edge.padding), 0);
+    const xAxis = createSampleAxis(
+      xGrid,
+      Math.max(sceneBounds.minX, bounds.minX - padding),
+      Math.min(sceneBounds.maxX, bounds.maxX + padding)
+    );
+    const yAxis = createSampleAxis(
+      yGrid,
+      Math.max(sceneBounds.minY, bounds.minY - padding),
+      Math.min(sceneBounds.maxY, bounds.maxY + padding)
+    );
+    if (xAxis.first <= xAxis.last && yAxis.first <= yAxis.last) {
+      rasterizeFootprint(footprint, xAxis, yAxis, tileMasks);
     }
   }
+
+  const tiles = [];
+  tileMasks.forEach((masksByCol, tileRow) => masksByCol.forEach((maskBytes, tileCol) => {
+    const tileKey = buildFogRasterTileKey({ tileCol, tileRow });
+    tiles.push({
+      id: buildFogRasterTileDocId({ backgroundId, ownerUid, tileKey }),
+      backgroundId,
+      ownerUid,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileKey,
+      tileCol,
+      tileRow,
+      tileSizeCells: FOG_RASTER_TILE_SIZE_CELLS,
+      samplesPerCell: FOG_RASTER_SAMPLES_PER_CELL,
+      cellSizePx: normalizedGrid.cellSizePx,
+      offsetXPx,
+      offsetYPx,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBytes,
+    });
+  }));
 
   return tiles.sort(sortTiles);
 };
@@ -418,7 +616,11 @@ export const buildFogRasterTilePayload = ({
   };
 };
 
-export const normalizeFogRasterMemoryTileDoc = (data) => {
+// A listener replaces a decoded tile on each document change. Other callers
+// can supply and later modify their own Uint8Arrays.
+const nonemptySnapshotTiles = new WeakMap();
+
+export const normalizeFogRasterMemoryTileDoc = (data, { immutableSnapshot = false } = {}) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return null;
   }
@@ -464,7 +666,7 @@ export const normalizeFogRasterMemoryTileDoc = (data) => {
     return null;
   }
 
-  return {
+  const tile = {
     schemaVersion: GRIGLIATA_FOG_MEMORY_TILE_SCHEMA_VERSION,
     id,
     backgroundId,
@@ -484,13 +686,17 @@ export const normalizeFogRasterMemoryTileDoc = (data) => {
     updatedAt: data.updatedAt || null,
     updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : '',
   };
+  if (immutableSnapshot) {
+    nonemptySnapshotTiles.set(tile, maskBytes.some((byte) => byte !== 0));
+  }
+  return tile;
 };
 
 export const mergeFogRasterMemoryTiles = (tiles = []) => {
   const tileMap = new Map();
 
   (Array.isArray(tiles) ? tiles : []).forEach((tile) => {
-    const normalizedTile = tile?.maskBytes instanceof Uint8Array
+    const normalizedTile = isFogMask(tile?.maskBytes)
       ? tile
       : normalizeFogRasterMemoryTileDoc(tile);
     if (!normalizedTile?.id) {
@@ -498,15 +704,17 @@ export const mergeFogRasterMemoryTiles = (tiles = []) => {
     }
 
     const existingTile = tileMap.get(normalizedTile.id);
-    tileMap.set(normalizedTile.id, existingTile
-      ? {
+    if (existingTile) {
+      tileMap.set(normalizedTile.id, {
         ...normalizedTile,
         maskBytes: mergeFogRasterTileMasks(existingTile.maskBytes, normalizedTile.maskBytes),
-      }
-      : {
-        ...normalizedTile,
-        maskBytes: cloneMaskBytes(normalizedTile.maskBytes),
       });
+    } else {
+      const snapshot = nonemptySnapshotTiles.has(normalizedTile) || normalizedTile !== tile
+        ? normalizedTile
+        : { ...tile, maskBytes: cloneMaskBytes(tile.maskBytes) };
+      tileMap.set(normalizedTile.id, snapshot);
+    }
   });
 
   return [...tileMap.values()].sort(sortTiles);
@@ -568,6 +776,7 @@ const createFogRasterAtlasImage = ({ id, width, height, tiles, minTileCol, minTi
 };
 
 const sameAtlasTile = (tile, previous) => {
+  if (tile === previous) return true;
   // Tile IDs include the map, viewer, raster profile and world tile coordinates.
   if (tile.id !== previous.id
     || tile.cellSizePx !== previous.cellSizePx
@@ -595,7 +804,7 @@ export const buildFogRasterMemoryAtlases = ({
       tile.cellSizePx === normalizedGrid.cellSizePx
       && tile.offsetXPx === normalizedGrid.offsetXPx
       && tile.offsetYPx === normalizedGrid.offsetYPx
-      && tile.maskBytes.some((byte) => byte !== 0)
+      && (nonemptySnapshotTiles.get(tile) ?? tile.maskBytes.some((byte) => byte !== 0))
     ));
 
   const normalizedMaxTileSide = Math.max(1, Math.floor(asFiniteNumber(maxTileSide, FOG_RASTER_ATLAS_TILE_SIDE)));

@@ -124,6 +124,14 @@ test('fixture generation is stable and contains the required scale', () => {
     documentPath === 'grigliata_background_lighting/perf-map'
   ))?.data;
   assert.equal(lightingMetadata?.backgroundId, boardState?.activeBackgroundId);
+  const renderInput = firstDocuments.find(({ path }) => path === 'grigliata_lighting_render_inputs/perf-map').data;
+  assert.equal(renderInput.scene.globalLight, true);
+  assert.equal(renderInput.walls.filter((wall) => wall.blocksVision && wall.blocksLight).length, 200);
+  assert.equal(renderInput.lights.filter((light) => light.dimRadiusPx > 0).length, 10);
+  assert.equal(renderInput.darknessSources.filter((source) => source.radiusPx > 0).length, 10);
+  const firstTile = firstDocuments.find(({ path }) => path.startsWith('grigliata_fog_memory_tiles/')).data;
+  const mask = Buffer.from(firstTile.maskBase64, 'base64');
+  assert.ok(mask.includes(0xff) && mask.includes(0));
 
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
   assert.equal(fixtureManifest.documentCount, first.documentCount);
