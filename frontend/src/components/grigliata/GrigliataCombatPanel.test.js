@@ -212,6 +212,18 @@ test('requires the confirmed PF cost to match the current mana balance and varia
   expect(onLaunch).toHaveBeenCalledWith(action, expect.objectContaining({ variableCost: 3, confirmHp: true, maxHpCost: 2 }));
 });
 
+test.each([undefined, null, -2])('requires full PF confirmation when the pawn has %s PM', mana => {
+  const onLaunch = jest.fn();
+  const action = { id: 'sforzo', kind: 'tecnica', name: 'Sforzo', mode: 'manual', cost: 4 };
+  render(<GrigliataCombatPanel actor={{ ...actor, mana }} actions={[action]} selection={{ actionId: action.id }} onLaunch={onLaunch} />);
+
+  const submit = screen.getByRole('button', { name: 'Usa tecnica' });
+  expect(submit).toBeDisabled();
+  fireEvent.click(screen.getByLabelText('Spendi 4 PF'));
+  fireEvent.click(submit);
+  expect(onLaunch).toHaveBeenCalledWith(action, expect.objectContaining({ confirmHp: true, maxHpCost: 4 }));
+});
+
 test('allows a reaction outside the actor’s turn and keeps tactical actions disabled', () => {
   const onLaunch = jest.fn();
   const reaction = { id: 'opportunita', kind: 'tecnica', name: 'Attacco d’opportunità', mode: 'single', actionEconomy: 'Reazione' };

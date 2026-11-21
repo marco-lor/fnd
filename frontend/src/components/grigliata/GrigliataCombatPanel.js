@@ -284,7 +284,7 @@ function CombatDraft({
   const targetIds = point ? [] : selection.targetIds || [];
   const selectedTargets = targetIds.map(id => targets.find(target => target.placementId === id)).filter(Boolean);
   const due = action.variableCost ? Number(variableCost) || 0 : (action.cost ?? 0);
-  const hpCost = actor.mana != null ? Math.max(0, due - actor.mana) : 0;
+  const hpCost = Math.max(0, due - Math.max(0, actor.mana ?? 0));
   const targetKey = JSON.stringify([targetIds, point]);
   const approvalKey = JSON.stringify([targetKey, check.channel]);
   useEffect(() => {
