@@ -335,7 +335,7 @@ const readArsenal = async (
     const name = (asTrimmedString(entry.displayName ?? entry.Nome ?? entry.name) || fallback).slice(0, 160);
     const action = name ? buildContentAction({
       id, kind, scope, sourceItem, entry, name, profile: state.profile,
-      weapons: weapons.actions, hasSheath: Boolean(slots.foderoArma),
+      weapons: weapons.actions, hasSheath: Boolean(slots.foderoArma), slots, catalogKey: fallback,
     }) : null;
     return action ? [action] : [];
   };

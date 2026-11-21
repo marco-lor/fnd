@@ -314,6 +314,60 @@ test('Ostruzione launches during the opponent turn while a weapon attack waits',
   await assert.rejects(() => launch('weapon', 'weaponMain'), /turno della pedina/);
 });
 
+test('the arsenal shows and the launch charges the PM cost after equipped per-card reductions', async () => {
+  const pike = {...greatsword, General: {Nome: 'Picca', ridCostoTecSingola: {Impedimento: 3}}};
+  const ring = {General: {Nome: 'Anello', ridCostoTecSingola: {Impedimento: 4, 'AttaccoOpportunità': 2}}};
+  fixture({slots: {weaponMain: pike, accessorio: ring}});
+  db.seed(`users/${attacker}/state/progression`, {
+    stats: {level: 6}, Parametri: {...parametri, Special: {ridCostoTec: {Tot: 2, Equip: 2}}},
+  });
+  db.seed('utils/tecniche_common', {
+    Impedimento: {Nome: 'Impedimento', Costo: 12, Azione: 'Tattica'},
+    'AttaccoOpportunità': {Nome: 'Attacco d\'Opportunità', Costo: 4, Azione: 'Movimento'},
+    Carica: {Nome: 'Carica', Costo: 4, Azione: 'Movimento'},
+  });
+  const listed = async () => Object.fromEntries((await arsenal()).actions
+    .filter(({scope}) => scope === 'common').map(action => [action.id, action]));
+  const priced = actions => Object.values(actions).map(({id, baseCost, cost}) => [id, baseCost, cost]);
+  const shown = await listed();
+  assert.deepEqual(priced(shown), [
+    ['common:Impedimento', 12, 3], ['common:AttaccoOpportunità', 4, 1], ['common:Carica', 4, 2],
+  ]);
+  const impediment = await launch('tecnica', 'common:Impedimento', {actionVersion: shown['common:Impedimento'].version});
+  assert.deepEqual([impediment.resources.mana, journal(impediment.combatId).cost.mana], [97, 3]);
+  assert.equal(db.read(`users/${attacker}/state/resources`).stats.manaCurrent, 97);
+
+  // One inventory item reached from two slots is still one item.
+  db.seed(`users/${attacker}/state/equipment`, {
+    slots: {weaponMain: 'item-weaponMain', accessorio: 'item-accessorio', headArmor: 'item-accessorio'},
+  });
+  assert.equal((await listed())['common:Impedimento'].cost, 3);
+
+  // Without the ring the card costs more, and a launch of the card shown before is refused.
+  db.seed(`users/${attacker}/state/equipment`, {slots: {weaponMain: 'item-weaponMain'}});
+  const bare = await listed();
+  assert.deepEqual(priced(bare), [
+    ['common:Impedimento', 12, 7], ['common:AttaccoOpportunità', 4, 2], ['common:Carica', 4, 2],
+  ]);
+  await assert.rejects(
+    () => launch('tecnica', 'common:Impedimento', {actionVersion: shown['common:Impedimento'].version}),
+    /azione è cambiata/
+  );
+  const full = await launch('tecnica', 'common:Impedimento', {actionVersion: bare['common:Impedimento'].version});
+  assert.deepEqual([full.resources.mana, journal(full.combatId).cost.mana], [90, 7]);
+});
+
+test('a two-handed attack rolls with the Mira 2H of the equipped sheath', async () => {
+  fixture({slots: {weaponMain: greatsword, foderoArma: {
+    General: {Nome: 'Fodero Arma a due Mani di Qualità'}, Parametri: {Special: {'Mira 2H': {1: 1, 4: 2, 7: 3, 10: 4}}},
+  }}});
+  const weapon = (await arsenal()).actions.find(({id}) => id === 'weaponMain');
+  assert.deepEqual([weapon.attackBonus, weapon.attackModifiers], [6, [{label: 'Mira', value: 4}, {label: 'Mira 2H', value: 2}]]);
+  const {combatId} = await launch('weapon', 'weaponMain', {actionVersion: weapon.version});
+  const {bonus, total} = journal(combatId).attack;
+  assert.deepEqual([bonus, total, request(combatId).attack.total], [6, 7, 7]);
+});
+
 test('Parte del Leone reaches the attack with the weapon and the cure within 30 ft, hit or not', async () => {
   fixture();
   seedSpell('lion', {Nome: 'PARTE DEL LEONE', Costo: 0, ...physicalCheck});

@@ -360,6 +360,101 @@ test('damage consumes the barrier first, then PF, never below zero', () => {
   assert.deepEqual(combatDamageBalances({}, false), {hp: null, barrier: null});
 });
 
+test('two-handed and ranged weapons add their conditional Mira, from the profile and what is equipped', () => {
+  const tiers = value => ({1: value - 1, 4: value, 7: value + 1, 10: value + 2});
+  const sheath = {General: {Nome: 'Fodero Arma a due Mani di Qualità'}, Parametri: {Special: {'Mira 2H': tiers(2)}}};
+  const quiver = {General: {Nome: 'Faretra'}, Parametri: {Special: {'Mira Ranged': tiers(2)}}};
+  const wield = (slots, Special = {}) =>
+    buildWeaponActions({...profile, parametri: {...profile.parametri, Special}, slots}).actions;
+  const rolled = ({attackBonus, attackModifiers}) => [attackBonus, attackModifiers];
+  const mira = {label: 'Mira', value: 4};
+  const pike = makeHandItem('Picca', 'Mischia', '2d12', 2);
+  const dagger = makeHandItem('Pugnale', 'Mischia', '1d4');
+
+  // The level-6 tier of the sheath, whether or not the profile already totals it as Equip.
+  const twoHanded = [6, [mira, {label: 'Mira 2H', value: 2}]];
+  assert.deepEqual(rolled(wield({weaponMain: pike, foderoArma: sheath})[0]), twoHanded);
+  assert.deepEqual(rolled(wield({weaponMain: pike, foderoArma: sheath}, {'Mira 2H': {Tot: 2, Equip: 2}})[0]), twoHanded);
+  // The hand bonus follows the weapon's hands, the ranged bonus its type.
+  assert.deepEqual(rolled(wield({weaponMain: dagger, foderoArma: sheath})[0]), [4, [mira]]);
+  assert.deepEqual(rolled(wield({weaponMain: pike, foderoArma: quiver})[0]), [4, [mira]]);
+  assert.deepEqual(rolled(wield({weaponMain: dagger}, {'Mira 1H': {Tot: 1, Mod: 1}, 'Mira 2H': {Tot: 5}})[0]),
+    [5, [mira, {label: 'Mira 1H', value: 1}]]);
+  // A ranged two-handed weapon stacks the hand bonus and the ranged one.
+  const longbow = makeHandItem('Arco Lungo', 'Distanza', '2d8', 2);
+  assert.deepEqual(
+    rolled(wield({weaponMain: longbow, foderoArma: quiver}, {'Mira 2H': {Tot: 1, Mod: 1}, 'Mira Ranged': {Tot: 2, Equip: 2}})[0]),
+    [7, [mira, {label: 'Mira 2H', value: 1}, {label: 'Mira Ranged', value: 2}]]
+  );
+  // A weapon's own ranged bonus stays with its hand; the other hand only gets the quiver's.
+  const crossbow = makeHandItem('Balestra Leggera', 'Distanza', '1d8');
+  crossbow.Parametri.Special['Mira Ranged'] = {4: 3};
+  const knives = makeHandItem('Coltelli da Lancio', 'Distanza', '1d4');
+  const [main, off] = wield({weaponMain: crossbow, weaponOff: knives, foderoArma: quiver}, {'Mira Ranged': {Tot: 5, Equip: 5}});
+  assert.deepEqual([rolled(main), rolled(off)], [
+    [9, [mira, {label: 'Mira Ranged', value: 5}]], [6, [mira, {label: 'Mira Ranged', value: 2}]],
+  ]);
+  // A card that attacks with the weapon rolls and shows the same modifiers.
+  const attack = buildContentAction({
+    id: 'common:Attacco', scope: 'common', kind: 'tecnica', name: 'Attacco', entry: {Costo: 0}, profile, weapons: [main],
+  });
+  assert.deepEqual(rolled(attack), rolled(main));
+});
+
+test('equipped per-card reductions lower the PM cost of the cards they name, once per item', () => {
+  const reducing = {...profile, parametri: {...profile.parametri, Special: {ridCostoTec: {Tot: 1}, ridCostoSpell: {Tot: 1}}}};
+  const priced = (kind, name, entry, slots, options = {}) => {
+    const {baseCost, cost, extraResource} = buildContentAction({
+      id: 'card', scope: 'common', kind, name, entry, profile: reducing, slots, weapons: armed, ...options,
+    });
+    return [baseCost, cost, extraResource];
+  };
+  const item = (Nome, General = {}, rest = {}) => ({General: {Nome, ...General}, ...rest});
+  const pike = {...makeHandItem('Picca', 'Mischia', '2d12', 2), General: {Nome: 'Picca', ridCostoTecSingola: {Frapposizione: 2}}};
+  const frapposizione = (slots, kind = 'tecnica') => priced(kind, 'Frapposizione', {Costo: 6}, slots);
+
+  // The global reduction stays; the equipped one adds only to the card it names, of its kind.
+  assert.deepEqual(frapposizione({}), [6, 5, null]);
+  assert.deepEqual(frapposizione({weaponMain: pike}), [6, 3, null]);
+  assert.deepEqual(priced('tecnica', 'Protezione', {Costo: 4}, {weaponMain: pike}), [4, 3, null]);
+  assert.deepEqual(frapposizione({weaponMain: pike}, 'spell'), [6, 5, null]);
+  // Distinct items stack like their Parametri; one item names a card once, however it spells it.
+  const ring = item('Anello', {ridCostoTecSingola: {FRAPPOSIZIONE: 1, Frapposizione: 1, Protezione: 0}});
+  assert.deepEqual(frapposizione({weaponMain: pike, accessorio: ring}), [6, 2, null]);
+  // The same item reached from two slots is still one item.
+  assert.deepEqual(frapposizione({accessorio: ring, headArmor: ring}), [6, 4, null]);
+  // Older items keep the map at the root, as the Bazaar editors read it; General wins when present.
+  assert.deepEqual(frapposizione({accessorio: item('Anello antico', {}, {ridCostoTecSingola: {Frapposizione: 1}})}), [6, 4, null]);
+  assert.deepEqual(frapposizione({accessorio: item('Anello', {ridCostoTecSingola: {}}, {ridCostoTecSingola: {Frapposizione: 3}})}), [6, 5, null]);
+  // Unusable values reduce nothing.
+  for (const value of ['tanto', true, null, {}, Number.NaN]) {
+    assert.deepEqual(frapposizione({accessorio: item('Anello', {ridCostoTecSingola: {Frapposizione: value}})}), [6, 5, null]);
+  }
+  // A key may name the card by its catalog key instead of its title.
+  const opportunity = (slots, catalogKey) => priced('tecnica', 'Attacco d\'Opportunità', {Costo: 4}, slots, {catalogKey});
+  const scabbard = {accessorio: item('Fodero', {ridCostoTecSingola: {'AttaccoOpportunità': 1}})};
+  assert.deepEqual(opportunity(scabbard), [4, 3, null]);
+  assert.deepEqual(opportunity(scabbard, 'AttaccoOpportunità'), [4, 2, null]);
+  // A paid card never drops below 1 PM, and a free one stays free.
+  assert.deepEqual(frapposizione({accessorio: item('Reliquia', {ridCostoTecSingola: {Frapposizione: 20}})}), [6, 1, null]);
+  assert.deepEqual(priced('tecnica', 'Attacco', {Costo: 0}, {accessorio: item('Reliquia', {ridCostoTecSingola: {Attacco: 3}})}), [0, 0, null]);
+  // A negative value is a malus, like a negative Parametri bonus, within the PM a launch accepts.
+  const cursed = {accessorio: item('Maledizione', {ridCostoTecSingola: {Frapposizione: -3}})};
+  assert.deepEqual(frapposizione(cursed), [6, 8, null]);
+  assert.deepEqual(priced('tecnica', 'Frapposizione', {Costo: 9999}, cursed), [9999, 9999, null]);
+
+  // Spells granted by items take spell reductions; charges and Essenza are never PM.
+  const blank = {Param1: '---', Param2: '---', ParamTarget: '---'};
+  const chain = item('Catena del Predatore', {spells: {Afferra: {Nome: 'Afferra', Costo: 8, TPC: blank}}});
+  const charm = item('Amuleto', {ridCostoSpellSingola: {Afferra: '3', 'Stasi Personale': 1, 'Runa del Caos': 2}});
+  const slots = {weaponOff: chain, accessorio: charm};
+  const [grant] = equippedItemSpells(slots);
+  assert.deepEqual(priced('spell', grant.key, grant.entry, slots, {scope: 'equipped', sourceItem: grant.sourceItem}), [8, 4, null]);
+  assert.deepEqual(priced('spell', 'Stasi Personale', {Costo: 1}, slots, {scope: 'equipped', sourceItem: 'Destino'}),
+    [0, 0, {name: 'Cariche', amount: 1}]);
+  assert.deepEqual(priced('spell', 'Runa del Caos', {Costo: '3 Essenza'}, slots), [0, 0, {name: 'Essenza', amount: 3}]);
+});
+
 test('the common Ostruzione card can be used during the opponent turn', () => {
   const entry = {Nome: 'Ostruzione', Costo: 4, Azione: 'Movimento'};
   const obstruction = scope => buildContentAction({id: 'card', scope, kind: 'tecnica', name: 'Ostruzione', entry, profile});

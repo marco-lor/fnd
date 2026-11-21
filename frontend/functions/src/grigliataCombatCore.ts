@@ -654,18 +654,21 @@ export const buildWeaponActions = (input: CombatProfile & {slots: Record<string,
     if (!item || !card || !damageExpr) return [];
     const general = asRecord(item.General);
     const specific = asRecord(item.Specific);
-    const melee = /^mischia$/i.test(firstText(specific.Tipo, item.Tipo, item.kind));
+    const weaponType = firstText(specific.Tipo, item.Tipo, item.kind);
+    const melee = /^mischia$/i.test(weaponType);
     const rangeText = card.description.match(/(?:gittata|portata)\s*(?:di|:)?\s*(\d+\s*(?:ft|piedi|m\b))/i)?.[1];
     const check = makeCheck(input, {channel: "Fisico", attackStats: ["Mira"], defenseStats: ["Difesa"]});
     const criticalText = firstText(itemSpecial(item, "Danno Critico", level));
-    const oneHandedMira = card.hands === 1 ? bonusFor("Mira 1H", slot) : 0;
+    // Mira 1H or 2H follows the hands the weapon takes, Mira Ranged a "Distanza" weapon; they stack.
+    const conditionalMira = [
+      card.hands === 2 ? "Mira 2H" : "Mira 1H",
+      ...(/^distanza$/i.test(weaponType) ? ["Mira Ranged"] : []),
+    ].map((label) => ({label, value: bonusFor(label, slot)})).filter(({value}) => value);
     const action = baseAction({...check, id: slot, kind: "weapon", scope: "equipped", name: card.name, die});
     return [{
       ...action,
-      attackBonus: check.attackBonus + oneHandedMira,
-      attackModifiers: [{label: "Mira", value: check.attackBonus}, ...(
-        oneHandedMira ? [{label: "Mira 1H", value: oneHandedMira}] : []
-      )],
+      attackBonus: conditionalMira.reduce((sum, {value}) => sum + value, check.attackBonus),
+      attackModifiers: [{label: "Mira", value: check.attackBonus}, ...conditionalMira],
       attackStat: combatStat(input, "Attacco") ?? 0,
       description: card.description,
       damageExpr,
@@ -825,6 +828,25 @@ const describeContent = (item: Fields): string => [...new Set([
   firstText(item["Effetti Negativi"]),
 ])].filter(Boolean).join("\n").slice(0, 2400);
 
+// PM an equipped item takes off the cards it names under General.ridCostoTecSingola or
+// ridCostoSpellSingola (older items keep the map at the root, as the Bazaar editors read it).
+// A key names the card by its title or its catalog key. One item lowers a card once,
+// however many of its keys name it, and distinct items stack as their Parametri do.
+const equippedCostReduction = (
+  slots: Record<string, Fields>, kind: Exclude<CombatKind, "weapon">, references: unknown[]
+): number => {
+  const field = kind === "spell" ? "ridCostoSpellSingola" : "ridCostoTecSingola";
+  const names = new Set(references.map((value) => normalizedKey(asTrimmedString(value))).filter(Boolean));
+  return [...new Set(Object.values(slots))].reduce((sum, item) => {
+    const values = Object.entries(asRecord(asRecord(item.General)[field] ?? item[field]))
+      .filter(([key]) => names.has(normalizedKey(key)))
+      .map(([, value]) => readNumber(value))
+      .filter((value): value is number => value !== null)
+      .map(Math.trunc);
+    return values.length ? sum + Math.max(...values) : sum;
+  }, 0);
+};
+
 const actionText = (value: unknown): string => {
   const match = asTrimmedString(value).match(/tattic[ao]|movimento|consumabile|comunicazione|reazione/i);
   if (!match) return "";
@@ -843,6 +865,9 @@ export const buildContentAction = (input: {
   weapons?: CombatAction[];
   sourceItem?: string;
   hasSheath?: boolean;
+  // What the pawn has equipped now, and the key its catalog lists the card under.
+  slots?: Record<string, Fields>;
+  catalogKey?: string;
 }): CombatAction | null => {
   const {id, kind, scope, name, entry, profile} = input;
   const key = normalizedKey(name);
@@ -900,7 +925,9 @@ export const buildContentAction = (input: {
   )));
   const reduction = Math.trunc(paramValue(locateStat(
     profile.parametri.Special, kind === "spell" ? "ridCostoSpell" : "ridCostoTec"
-  )) ?? 0);
+  )) ?? 0) + equippedCostReduction(input.slots ?? {}, kind, [
+    name, input.catalogKey, entry.displayName, entry.Nome, entry.name,
+  ]);
   const consent = metadata.targetConsent === true || legacy.targetConsent === true;
   const legacyCheck = checkedChannel(profile, {
     attackStats: metadata.attackStats ?? legacy.attackStats,
@@ -980,7 +1007,7 @@ export const buildContentAction = (input: {
       metadata.targetState === "dead" || legacy.requireDead === true,
     requireDead: metadata.targetState === "dead" || legacy.requireDead === true,
     baseCost,
-    cost: baseCost > 0 ? Math.max(1, baseCost - reduction) : 0,
+    cost: baseCost > 0 ? Math.min(9999, Math.max(1, baseCost - reduction)) : 0,
     extraResource,
     variableCost: firstText(metadata.variableCost, legacy.variableCost) || null,
     checks,
