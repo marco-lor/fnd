@@ -537,12 +537,15 @@ const buildDocuments = () => {
     });
   }
 
+  // The ten portrait rows occupy y=0..500. The player's 600 px sight still
+  // reaches these walls while the media probe can see its full set of portraits.
+  const wallFieldTop = 500;
   const walls = Array.from({ length: 200 }, (_, index) => ({
     id: `wall-${pad(index)}`,
     x1: (index % 20) * 200,
-    y1: Math.floor(index / 20) * 200,
+    y1: wallFieldTop + Math.floor(index / 20) * 200,
     x2: (index % 20) * 200 + 150,
-    y2: Math.floor(index / 20) * 200 + 100,
+    y2: wallFieldTop + Math.floor(index / 20) * 200 + 100,
     enabled: true,
     wallType: 'wall',
     blocksVision: true,
