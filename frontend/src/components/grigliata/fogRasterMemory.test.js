@@ -2,6 +2,7 @@ import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
   FOG_RASTER_TILE_MASK_BYTES,
+  FOG_RASTER_TILE_SAMPLE_SIZE,
   buildFogRasterTileDocId,
   buildFogRasterTilePayload,
   countFogRasterMaskBits,
@@ -129,6 +130,56 @@ describe('fogRasterMemory', () => {
       ownerUid: 'user-1',
       tileKey: '3:-1',
     })).toBe('map-1__user-1__fog-raster-c8-s16-v1__3:-1');
+  });
+
+  test('preserves exact tile bytes at sloped edges, hole boundaries and overlapping reveals', () => {
+    const shiftedGrid = { cellSizePx: 32, offsetXPx: 5, offsetYPx: -7 };
+    // Put each vertex exactly on a sample center, spanning the tile boundary at column zero.
+    const ring = (coords) => coords.map(([col, row]) => ({
+      x: shiftedGrid.offsetXPx + (col * 2) + 1,
+      y: shiftedGrid.offsetYPx + (row * 2) + 1,
+    }));
+    const tiles = rasterizeFogPolygonsToTiles({
+      backgroundId: 'map-1',
+      ownerUid: 'viewer',
+      grid: shiftedGrid,
+      polygons: [
+        [
+          ring([[-2, 0], [4, 0], [4, 5], [2, 5], [-2, 1]]),
+          ring([[0, 1], [2, 1], [2, 3], [0, 3]]),
+        ],
+        [ring([[1, 2], [3, 2], [1, 4]])],
+      ],
+    });
+
+    const bytesPerRow = FOG_RASTER_TILE_SAMPLE_SIZE / 8;
+    const expectedLeft = createEmptyFogRasterMaskBytes();
+    [0b11000000, 0b11000000, 0b10000000].forEach((byte, row) => {
+      expectedLeft[(row + 1) * bytesPerRow - 1] = byte;
+    });
+    const expectedRight = createEmptyFogRasterMaskBytes();
+    [0b11111, 0b11000, 0b11110, 0b11110, 0b11110, 0b11100].forEach((byte, row) => {
+      expectedRight[row * bytesPerRow] = byte;
+    });
+    expect(tiles.map((tile) => tile.tileKey)).toEqual(['-1:0', '0:0']);
+    expect(tiles.map((tile) => tile.maskBytes)).toEqual([expectedLeft, expectedRight]);
+  });
+
+  test.each([
+    [0.00005, false],
+    [0.0002, true],
+  ])('preserves segment tolerance for a short hole edge %s px above the sample', (gap, visible) => {
+    const [tile] = rasterizeFogPolygonsToTiles({
+      backgroundId: 'map-1',
+      ownerUid: 'viewer',
+      grid: { cellSizePx: 32, offsetXPx: 0, offsetYPx: 0 },
+      polygons: [[
+        [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 12 }, { x: 0, y: 12 }],
+        [{ x: 4.995, y: 3 + gap }, { x: 5.005, y: 3 + gap }, { x: 5, y: 9 }],
+      ]],
+    });
+    // With samples every 2 px, (5, 3) is bit 2 of the second row.
+    expect(Boolean(tile.maskBytes[FOG_RASTER_TILE_SAMPLE_SIZE / 8] & (1 << 2))).toBe(visible);
   });
 
   test('normalizes Firestore tile docs with base64 masks', () => {
