@@ -260,6 +260,18 @@ test('secondary-region plans are read-only and execution remains west8-only', as
   assert.equal(backend.calls.length, 0);
 });
 
+test('Grigliata combat functions are required only in staging europe-west1 plans', async () => {
+  const region = 'europe-west1';
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../src/data/functions/callableManifest.json'), 'utf8'));
+  const backend = createBackend({functions: []});
+  const keys = ['getGrigliataCombatArsenal', 'mutateGrigliataCombat'];
+  const combatEntries = ({entries}) => entries.filter(({logicalKey}) => keys.includes(logicalKey));
+  const staging = await buildPolicyPlan({backend, manifest, region, projectId: 'fatin-test'});
+  const production = await buildPolicyPlan({backend, manifest, region, projectId: PROJECT_ID});
+  assert.deepEqual(combatEntries(staging).map(({logicalKey}) => logicalKey), keys);
+  assert.deepEqual(combatEntries(production), []);
+});
+
 test('compatibility alias identity is part of manifest validation', () => {
   const manifest = createManifest();
   manifest.callables.task07ConfirmMediaReference.compatibilityAliasOf = null;

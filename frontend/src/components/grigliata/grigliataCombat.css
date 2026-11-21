@@ -1,0 +1,899 @@
+.gc-panel,
+.gc-dialog,
+.gc-defense-feed {
+  --gc-surface: #101b2d;
+  --gc-inset: #0a1424;
+  --gc-control: #162339;
+  --gc-border: #384a62;
+  --gc-muted: #b1bfd1;
+  --gc-text: #e3ebf4;
+  --gc-gold: #f6d48e;
+  --gc-teal: #a4ded5;
+  --gc-error: #fecaca;
+  color: var(--gc-text);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.gc-panel,
+.gc-stack {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.gc-surface,
+.gc-dialog {
+  border: 1px solid var(--gc-border);
+  border-radius: 0.85rem;
+  background: var(--gc-surface);
+}
+
+.gc-heading,
+.gc-identity,
+.gc-flex,
+.gc-mana,
+.gc-target-self {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.gc-heading {
+  padding: 0.68rem 0.85rem;
+  border-bottom: 1px solid var(--gc-border);
+  color: var(--gc-gold);
+}
+
+.gc-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: inherit;
+}
+
+.gc-heading small { margin-inline-start: auto; }
+
+.gc-panel-body,
+.gc-details-body {
+  padding: 0.8rem;
+}
+
+.gc-details-body p + p { margin-top: 0.5rem; }
+
+.gc-identity {
+  justify-content: space-between;
+}
+
+.gc-identity strong,
+.gc-identity small,
+.gc-hand small,
+.gc-target-control small,
+.gc-status-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.gc-panel small,
+.gc-dialog small,
+.gc-hint {
+  color: var(--gc-muted);
+  font-size: 0.75rem;
+}
+
+.gc-mana {
+  flex: none;
+  gap: 0.3rem;
+  padding: 0.26rem 0.45rem;
+  border: 1px solid #456280;
+  border-radius: 0.45rem;
+  background: #162a46;
+  color: #bbdcff;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-portrait {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  background: var(--gc-control);
+  color: var(--gc-muted);
+}
+
+.gc-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gc-categories,
+.gc-hands {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.gc-hands {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gc-categories button,
+.gc-hand,
+.gc-target-control,
+.gc-field :is(input, select),
+.gc-secondary {
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  background: var(--gc-control);
+  color: var(--gc-text);
+}
+
+.gc-categories button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-height: 2.5rem;
+  padding: 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.gc-categories button[aria-pressed='true'],
+.gc-hand[aria-pressed='true'] {
+  border-color: #b69559;
+  background: #312b24;
+  color: var(--gc-gold);
+}
+
+.gc-categories button:hover,
+button.gc-hand:hover,
+.gc-secondary:hover:enabled {
+  border-color: var(--gc-gold);
+}
+
+.gc-hand {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-height: 3.75rem;
+  padding: 0.48rem;
+  text-align: start;
+}
+
+.gc-hand strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.gc-hand > svg,
+.gc-flex > svg,
+.gc-heading > svg {
+  flex: none;
+  color: var(--gc-gold);
+}
+
+.gc-hand > svg { margin-block-start: 0.15rem; }
+
+.gc-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr));
+  gap: 0.45rem;
+  /* Rows fit their card: a clipped card in a height-capped grid could otherwise shrink below its text. */
+  grid-auto-rows: max-content;
+  max-height: 19rem;
+  padding: 0.15rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gc-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 5.4rem;
+  padding: 0.45rem 0.55rem;
+  overflow: hidden;
+  border: 1px solid var(--gc-card-edge);
+  border-radius: 0.52rem;
+  background: linear-gradient(140deg, var(--gc-card-glow), #101829);
+  color: #fff6e8;
+  text-align: start;
+  --gc-card-edge: #67568c;
+  --gc-card-glow: #33284b;
+  --gc-card-ink: #d4c4f4;
+}
+
+.gc-card[data-kind='tecnica'] {
+  --gc-card-edge: #4a7474;
+  --gc-card-glow: #203e42;
+  --gc-card-ink: #bbe4db;
+}
+
+.gc-card:hover { border-color: var(--gc-card-ink); }
+
+.gc-card[aria-pressed='true'] {
+  border-color: var(--gc-gold);
+  box-shadow: inset 0 0 0 1px var(--gc-gold);
+}
+
+.gc-card strong {
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 2px #05080d;
+}
+
+.gc-card-name { display: grid; gap: 0.1rem; }
+
+.gc-card .gc-card-source {
+  overflow-wrap: anywhere;
+  color: var(--gc-card-ink);
+  font-size: 0.68rem;
+  text-shadow: 0 1px 2px #05080d;
+}
+
+.gc-card-art,
+.gc-card-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.gc-card-art {
+  object-fit: cover;
+  object-position: 50% 37%;
+}
+
+.gc-card-scrim {
+  background: linear-gradient(180deg, #080d1744, #070c16ed);
+}
+
+.gc-card-emblem {
+  position: absolute;
+  color: var(--gc-card-ink);
+  width: 1.9rem;
+  height: 1.9rem;
+  inset: 0.5rem auto auto 0.5rem;
+  opacity: 0.65;
+  z-index: -1;
+}
+
+.gc-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.2rem;
+}
+
+.gc-card .gc-card-price {
+  margin-inline-start: auto;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid #8894ad;
+  border-radius: 0.28rem;
+  background: #0a1020f2;
+  color: #fff3dc;
+  font-size: 0.68rem;
+  text-align: end;
+}
+
+.gc-card-check {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  padding: 0.18rem;
+  border-radius: 50%;
+  background: var(--gc-gold);
+  color: #322818;
+}
+
+@media (forced-colors: active) {
+  .gc-card[aria-pressed='true'],
+  .gc-categories button[aria-pressed='true'],
+  .gc-hand[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
+}
+
+.gc-targets {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.gc-target-control {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2.7rem;
+  padding: 0.45rem 0.6rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.gc-target-control > span { flex: 1; min-width: 0; }
+.gc-target-control > svg,
+.gc-target-self > svg { flex: none; color: var(--gc-teal); }
+
+.gc-target-control:hover,
+.gc-target-control[aria-pressed='true'] {
+  border-color: #7bb6ae;
+  background: #163039;
+}
+
+.gc-target-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.gc-target-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 2rem;
+  padding: 0 0.45rem;
+  border: 1px solid #426563;
+  border-radius: 0.45rem;
+  background: #152936;
+  color: #d5edeb;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.gc-target-chips button {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  min-height: 2rem;
+  flex: none;
+  border-radius: 0.32rem;
+}
+
+.gc-target-chips button:hover { background: #2c4558; }
+
+.gc-details {
+  overflow: hidden;
+}
+
+.gc-rules {
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  background: var(--gc-inset);
+}
+
+.gc-details > summary,
+.gc-log-entry > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.48rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.72rem;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 650;
+}
+
+.gc-details > summary::-webkit-details-marker,
+.gc-log-entry > summary::-webkit-details-marker {
+  display: none;
+}
+
+.gc-details > summary::after,
+.gc-log-entry > summary::after {
+  width: 0.4rem;
+  height: 0.4rem;
+  margin: 0.2rem 0.1rem 0 auto;
+  flex: none;
+  transform: rotate(45deg);
+  border: solid var(--gc-muted);
+  border-width: 0 1px 1px 0;
+  content: '';
+}
+
+.gc-details[open] > summary::after,
+.gc-log-entry[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.gc-details > summary:hover,
+.gc-details[open] > summary {
+  color: var(--gc-gold);
+}
+
+.gc-details > summary > small {
+  padding-inline: 0.3rem;
+  border-radius: 0.23rem;
+  background: var(--gc-control);
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-details-body {
+  border-top: 1px solid var(--gc-border);
+}
+
+.gc-rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 0.6rem;
+  padding: 0.2rem 0;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.gc-rule-row dt { color: var(--gc-muted); }
+.gc-rule-row dd { text-align: end; font-variant-numeric: tabular-nums; }
+.gc-rule-row code,
+.gc-defense-roll code { color: var(--gc-teal); }
+.gc-rule-note { margin-bottom: 0.35rem; }
+
+.gc-source {
+  margin-top: 0.45rem;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--gc-muted);
+  font-size: 0.78rem;
+}
+
+/* A long card scrolls in place, so the consent dialog and the log entry stay compact. */
+.gc-dialog .gc-source,
+.gc-defense-receipt .gc-source,
+.gc-log-detail .gc-source {
+  max-height: 7.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gc-dialog .gc-source { margin-top: 0; }
+
+.gc-field {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+
+.gc-field :is(input, select) {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.55rem;
+  color-scheme: dark;
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  cursor: pointer;
+}
+
+.gc-confirm input { accent-color: var(--gc-gold); }
+
+.gc-primary,
+.gc-secondary,
+.gc-defense-launcher {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2.5rem;
+  padding: 0.43rem 0.65rem;
+  border-radius: 0.55rem;
+  font-weight: 700;
+}
+
+.gc-primary {
+  border: 1px solid #ffde9b;
+  background: linear-gradient(180deg, #f6d387, #e9b958);
+  color: #241908;
+  text-wrap: balance;
+}
+
+.gc-primary:hover:enabled { background: #ffdb8d; }
+
+.gc-primary:disabled,
+.gc-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gc-panel :is(button, summary, input, select):focus-visible,
+.gc-dialog :is(button, input, select):focus-visible,
+.gc-defense-feed :is(button, input):focus-visible {
+  outline: 2px solid #fff1bb;
+  outline-offset: -2px;
+}
+
+.gc-error {
+  margin-block: 0 0.55rem;
+  color: var(--gc-error);
+}
+
+.gc-empty {
+  padding: 0.45rem 0.6rem;
+  color: var(--gc-muted);
+}
+
+.gc-status-card {
+  margin-top: 0.75rem;
+  padding: 0.55rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  background: var(--gc-inset);
+}
+
+.gc-status-card p { color: var(--gc-muted); }
+.gc-status-card li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.45rem 0.15rem 0.2rem;
+  overflow-wrap: anywhere;
+}
+.gc-status-card li strong { font-size: 0.8rem; }
+.gc-status-card li .gc-secondary { font-size: 0.73rem; }
+
+.gc-log-list {
+  max-height: min(27rem, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gc-log-entry {
+  border-top: 1px solid var(--gc-border);
+}
+
+.gc-log-entry > summary:hover {
+  background: var(--gc-control);
+}
+
+.gc-log-icon {
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: none;
+  border-radius: 0.4rem;
+  background: #35291a;
+  color: var(--gc-gold);
+}
+
+.gc-log-icon[data-kind='spell'] { background: #2d2543; color: #d7c6f7; }
+.gc-log-icon[data-kind='tecnica'] { background: #18313b; color: var(--gc-teal); }
+
+.gc-log-caption {
+  display: grid;
+  gap: 0.06rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gc-log-caption small,
+.gc-log-caption > span {
+  color: var(--gc-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.gc-log-caption small > svg {
+  display: inline;
+  margin-inline: 0.35rem;
+  font-size: 0.63rem;
+}
+
+.gc-log-detail {
+  margin: 0 0.7rem 0.6rem 1rem;
+  padding-inline-start: 0.7rem;
+  border-inline-start: 1px solid var(--gc-border);
+}
+
+.gc-log-target + .gc-log-target {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--gc-border);
+}
+
+.gc-log-target > strong { font-size: 0.8rem; overflow-wrap: anywhere; }
+
+.gc-critical,
+.gc-critical-result {
+  margin-block: 0.45rem 0;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.5rem;
+  background: var(--gc-inset);
+}
+
+.gc-critical-result {
+  padding: 0.35rem 0.6rem;
+}
+
+.gc-critical > summary {
+  color: var(--gc-gold);
+  font-size: 0.78rem;
+}
+
+/* The DM's final damage for one target: label above, field, table formula and action on one wrapping row. */
+.gc-damage { margin-top: 0.45rem; }
+
+.gc-damage-form {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.4rem 0.6rem 0.5rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.5rem;
+  background: var(--gc-inset);
+  font-size: 0.78rem;
+}
+
+.gc-damage-form > label { color: var(--gc-muted); font-weight: 700; }
+
+.gc-damage-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gc-damage-row input {
+  flex: none;
+  width: 5.5rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.55rem;
+  background: var(--gc-control);
+  color: var(--gc-text);
+  color-scheme: dark;
+  font: inherit;
+  font-size: max(1rem, 1em);
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-damage-row input[aria-invalid='true'] { border-color: var(--gc-error); }
+.gc-damage-row input:read-only { opacity: 0.75; }
+
+.gc-damage-formula {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gc-damage-formula code { color: var(--gc-teal); }
+.gc-damage-row .gc-secondary { margin-inline-start: auto; }
+.gc-damage-form .gc-error { margin: 0; }
+
+.gc-secondary[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.gc-damage-changed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.45rem;
+}
+
+.gc-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gc-gold);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.gc-link:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.gc-damage-done {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--gc-teal);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.gc-damage-done:focus-visible {
+  outline: 2px solid #fff1bb;
+  outline-offset: 2px;
+  border-radius: 0.3rem;
+}
+
+@media (pointer: coarse) {
+  .gc-damage-row input,
+  .gc-damage-row .gc-secondary { min-height: 3rem; }
+}
+
+.gc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.gc-dialog {
+  color-scheme: dark;
+  position: fixed;
+  max-width: min(28rem, calc(100% - 1.25rem));
+  width: 100%;
+  max-height: calc(100% - 1.25rem);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  box-shadow: 0 0.75rem 2.5rem #0009;
+}
+
+.gc-dialog:modal { overscroll-behavior: contain; }
+
+.gc-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(2 7 15 / 72%);
+}
+
+.gc-defense-request {
+  padding: 0.62rem;
+  border: 1px solid #526278;
+  border-radius: 0.55rem;
+  background: var(--gc-inset);
+  overflow-wrap: anywhere;
+}
+
+.gc-defense-request > p { color: var(--gc-muted); }
+.gc-defense-request .gc-defense-roll { margin-top: 0.4rem; }
+
+.gc-defense-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.3rem), 1fr));
+  gap: 0.5rem;
+}
+
+.gc-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.gc-dialog-buttons > :first-child { margin-inline-end: auto; }
+
+.gc-defense-feed {
+  position: fixed;
+  z-index: 60;
+  inset-inline-end: max(0.8rem, env(safe-area-inset-right));
+  inset-block-end: calc(5rem + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  justify-items: end;
+  gap: 0.45rem;
+  max-width: calc(100% - 1.6rem);
+  /* At most 60% of the screen: on a phone the receipt stack scrolls and leaves the page usable below it. */
+  max-height: min(60dvh, calc(100dvh - 6rem - env(safe-area-inset-bottom, 0px)));
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.gc-defense-feed > .gc-defense-receipts {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.gc-defense-feed { pointer-events: none; }
+.gc-defense-feed button { pointer-events: auto; }
+
+/* The corner stack already scrolls: a card text inside it reads in full instead of scrolling twice. */
+.gc-defense-feed .gc-defense-receipt .gc-source { max-height: none; overflow: visible; }
+
+.gc-defense-receipt {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 22rem;
+  padding: 0.42rem 0.5rem 0.42rem 0.7rem;
+  border: 1px solid var(--gc-border);
+  border-radius: 0.6rem;
+  background: var(--gc-surface);
+  box-shadow: 0 0.25rem 0.8rem #0009;
+  overflow-wrap: anywhere;
+}
+
+/* The outcome's own lines and close button only: a damage form inside the receipt keeps its own look. */
+.gc-defense-receipt > div > p { color: var(--gc-muted); }
+.gc-defense-receipt > div > small,
+.gc-defense-receipt > div > strong { display: block; }
+.gc-defense-receipt > div > small { color: var(--gc-muted); font-size: 0.72rem; }
+.gc-defense-receipt > button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.3rem;
+}
+
+.gc-defense-receipt > button:hover { background: var(--gc-control); }
+
+/* Damage to confirm: the form spans the card below the outcome and the close button stays at the top. */
+.gc-defense-receipt-damage { align-items: flex-start; }
+.gc-defense-receipt-damage > div { flex: 1 1 auto; min-width: 0; }
+.gc-defense-feed .gc-defense-receipt-damage { width: 22rem; max-width: 100%; }
+.gc-defense-damage > :is(.gc-hint, .gc-damage-done, .gc-damage-retry) { margin-top: 0.45rem; }
+.gc-damage-retry {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+}
+
+.gc-damage-retry .gc-error { margin: 0; }
+
+.gc-defense-receipts {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
+.gc-dialog .gc-defense-receipts { justify-items: stretch; }
+.gc-dialog .gc-defense-receipts:not(:empty) { padding: 0.8rem 0.8rem 0; }
+.gc-dialog .gc-defense-receipt {
+  max-width: none;
+  background: var(--gc-inset);
+  box-shadow: none;
+}
+
+.gc-defense-launcher {
+  border: 1px solid #d3aa66;
+  background: #29231e;
+  color: var(--gc-gold);
+  box-shadow: 0 0.25rem 0.8rem #0009;
+}
+
+/* Damage left to confirm and postponed defenses: one row under the stack, wrapping on a narrow screen. */
+.gc-defense-launchers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+@media (min-width: 1024px) {
+  .gc-defense-feed {
+    inset-block-end: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+
+/* A defense the server refused once its request was gone: the reason reads as an error, not as a muted outcome line. */
+.gc-defense-receipt > div > p.gc-error { margin: 0; color: var(--gc-error); }
+
+/* An answer on its way, or awaiting its retry, holds the values sent. */
+.gc-defense-fields input:read-only { opacity: 0.75; }

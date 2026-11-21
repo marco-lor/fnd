@@ -3,7 +3,9 @@ import PerformanceProfiler from '../../performance/PerformanceProfiler';
 import { installGrigliataBenchmarkBridge } from '../../performance/grigliataBenchmarks';
 import { FaDiceD20 } from 'react-icons/fa';
 import { FiImage, FiMap, FiMusic } from 'react-icons/fi';
-import { GiCrackedHelm } from 'react-icons/gi';
+import { GiCrackedHelm, GiCrossedSwords } from 'react-icons/gi';
+import useGrigliataCombat from './useGrigliataCombat';
+import { GrigliataCombatPanel } from './GrigliataCombatPanel';
 import {
   addDoc,
   collection,
@@ -1767,6 +1769,13 @@ export default function GrigliataPage() {
       normalizedFogGrid,
     ]
   );
+  const combatEnabled = process.env.REACT_APP_FND_FIREBASE_PROJECT_ID === 'fatin-test'
+    || process.env.REACT_APP_FND_PERF === '1';
+  const combat = useGrigliataCombat({
+    uid:currentUserId, backgroundId:activeBackgroundId, enabled:combatEnabled,
+    open:activeSidebarTab === 'combat' && combatEnabled, isManager, tokens:boardRenderTokens,
+    activeTurnTokenId, suspended:isNarrationOverlayActive || isViewAsPlayerPreviewActive,
+  });
   const boardRenderAoEFigures = visibleAoeFigures;
   const boardRenderSharedInteractions = visibleSharedInteractions;
   const boardRenderTurnOrderEntries = useMemo(
@@ -1893,6 +1902,7 @@ export default function GrigliataPage() {
       ? [
         { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
         { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
+        ...(combatEnabled ? [{ key:'combat', label:'Combattimento', Icon:GiCrossedSwords }] : []),
         { key: 'gallery', label: 'DM Gallery', Icon: FiImage },
         { key: 'music', label: 'Music', Icon: FiMusic },
         { key: 'calibration', label: 'Map Calibration', Icon: FiMap },
@@ -1900,8 +1910,9 @@ export default function GrigliataPage() {
       : [
         { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
         { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
+        ...(combatEnabled ? [{ key:'combat', label:'Combattimento', Icon:GiCrossedSwords }] : []),
       ]
-  ), [isManager]);
+  ), [isManager, combatEnabled]);
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
   const isCompactFullHeightSidebarTab = ['tokens', 'dice'].includes(activeSidebarTab) || (isManager && ['gallery', 'music'].includes(activeSidebarTab));
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
@@ -7263,6 +7274,7 @@ export default function GrigliataPage() {
             <div className="h-full min-h-[480px] xl:min-h-0">
               <PerformanceProfiler id="grigliata-board">
                 <GrigliataBoard
+                combatAim={combat.overlay}
                 activeBackground={displayBackground}
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}
@@ -7522,6 +7534,17 @@ export default function GrigliataPage() {
                   />
                 )}
 
+                {activeSidebarTab === 'combat' && combatEnabled && <>
+                  {combat.actors.length > 1 && <label className="block rounded-xl bg-slate-900 p-2 text-xs text-slate-300">La tua pedina
+                    <select className="ml-2 max-w-[74%] rounded-lg border border-slate-600 bg-slate-950 p-1 text-white" value={combat.pawn?.placementId || ''} onChange={e => combat.setActor(e.target.value)}>
+                      {combat.actors.map(t => <option key={t.placementId} value={t.placementId}>{t.name}</option>)}
+                    </select>
+                  </label>}
+                  {isNarrationOverlayActive || isViewAsPlayerPreviewActive
+                    ? <p className="p-3 text-sm text-slate-300">Torna alla mappa di combattimento per agire.</p>
+                    : <GrigliataCombatPanel {...combat.panel} />}
+                  {!!combat.panel.error && <button type="button" onClick={combat.reload} className="rounded-lg border border-slate-600 px-3 py-1 text-sm">Ricarica arsenale</button>}
+                </>}
                 {activeSidebarTab === 'dice' && (
                   <GrigliataDicePanel
                     currentUserId={currentUserId}

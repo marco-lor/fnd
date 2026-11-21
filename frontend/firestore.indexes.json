@@ -75,6 +75,58 @@
       ]
     },
     {
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "shared", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "actorUid", "order": "ASCENDING"},
+        {"fieldPath": "updatedAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "actorUid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_combat_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "ownerUid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_combat_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "ownerUid", "order": "ASCENDING"},
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "ownerDamageUpdatedAt", "order": "DESCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "user_directory",
       "queryScope": "COLLECTION",
       "fields": [

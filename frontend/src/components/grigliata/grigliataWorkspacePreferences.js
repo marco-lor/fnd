@@ -5,8 +5,8 @@ import { UNFILED_MUSIC_FOLDER_ID } from './musicFolders';
 export const GRIGLIATA_WORKSPACE_PREFERENCES_VERSION = 1;
 export const GRIGLIATA_WORKSPACE_STORAGE_PREFIX = `grigliata.workspace.v${GRIGLIATA_WORKSPACE_PREFERENCES_VERSION}`;
 
-const MANAGER_SIDEBAR_TABS = new Set(['tokens', 'dice', 'gallery', 'music', 'calibration']);
-const PLAYER_SIDEBAR_TABS = new Set(['tokens', 'dice']);
+const MANAGER_SIDEBAR_TABS = new Set(['tokens', 'dice', 'combat', 'gallery', 'music', 'calibration']);
+const PLAYER_SIDEBAR_TABS = new Set(['tokens', 'dice', 'combat']);
 
 const normalizeId = (value, fallback = '') => (
   typeof value === 'string' && value.trim() ? value.trim() : fallback

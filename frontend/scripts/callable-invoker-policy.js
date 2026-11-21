@@ -273,6 +273,19 @@ const REQUIRED_CALLABLES_BY_REGION = Object.freeze({
   ]),
 });
 
+const STAGING_GRIGLIATA_CALLABLES = Object.freeze([
+  Object.freeze({
+    logicalKey: 'getGrigliataCombatArsenal',
+    owner: 'grigliata',
+    compatibilityAliasOf: null,
+  }),
+  Object.freeze({
+    logicalKey: 'mutateGrigliataCombat',
+    owner: 'grigliata',
+    compatibilityAliasOf: null,
+  }),
+]);
+
 const printHelp = () => console.log([
   'Callable public-invoker verifier/reconciler for an explicit Firebase environment.',
   '',
@@ -441,7 +454,9 @@ const readManifest = (manifestPath = MANIFEST_PATH) => (
   JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
 );
 
-const selectManagedCallables = (manifest, region = PRODUCTION_WRITE_REGION) => {
+const selectManagedCallables = (
+  manifest, region = PRODUCTION_WRITE_REGION, projectId = PRODUCTION_PROJECT_ID
+) => {
   if (!manifest || manifest.schemaVersion !== 1) {
     throw new Error('callableManifest.json must use schemaVersion 1.');
   }
@@ -453,7 +468,10 @@ const selectManagedCallables = (manifest, region = PRODUCTION_WRITE_REGION) => {
     throw new Error(`Callable manifest must support ${region}.`);
   }
   const callables = manifest.callables || {};
-  return REQUIRED_CALLABLES_BY_REGION[region].map((expected) => {
+  const shared = REQUIRED_CALLABLES_BY_REGION[region];
+  const managed = projectId === FIREBASE_ENVIRONMENTS.staging.projectId &&
+    region === 'europe-west1' ? [...shared, ...STAGING_GRIGLIATA_CALLABLES] : shared;
+  return managed.map((expected) => {
     const descriptor = callables[expected.logicalKey];
     if (!descriptor) {
       throw new Error(`Managed callable is missing from the manifest: ${expected.logicalKey}.`);
@@ -550,7 +568,7 @@ const buildPolicyPlan = async ({
   if (!LIVE_PROJECT_IDS.has(projectId) || !AUDIT_REGIONS.includes(region)) {
     throw new Error('Policy planning requires a reviewed production or staging project and audit region.');
   }
-  const managed = selectManagedCallables(manifest, region);
+  const managed = selectManagedCallables(manifest, region, projectId);
   const listing = await backend.listFunctions(projectId);
   const deployedById = new Map();
   const duplicateIds = new Set();
