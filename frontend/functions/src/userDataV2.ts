@@ -789,7 +789,7 @@ const parameterValue = (parametri: UnknownRecord, variable: string): number => {
   return baseTotal + combatTotal;
 };
 
-const evaluateEquipmentFormula = (
+export const evaluateEquipmentFormula = (
   raw: unknown,
   parametri: UnknownRecord
 ): number => {

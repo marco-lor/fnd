@@ -2403,6 +2403,21 @@ service cloud.firestore {
         );
     }
 
+    // One journal entry per launch. Hidden placements make the entry private
+    // to the initiating owner and the DM. Only a target owner sees its request.
+    match /grigliata_combat_actions/{combatId} {
+      allow read: if isActiveSignedIn()
+        && (resource.data.shared == true
+          || resource.data.actorUid == request.auth.uid
+          || isGrigliataManager());
+      allow write: if false;
+    }
+
+    match /grigliata_combat_requests/{requestId} {
+      allow read: if isActiveSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow write: if false;
+    }
+
     match /grigliata_live_interactions/{interactionId} {
       allow read: if isSignedIn();
 

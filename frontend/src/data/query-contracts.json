@@ -3,6 +3,90 @@
   "cursorVersion": 1,
   "contracts": [
     {
+      "id": "grigliata-combat-history",
+      "kind": "collection",
+      "queryKey": "grigliata.combat-actions.public.subscribe.v1",
+      "ownerTask": "Grigliata Combat",
+      "currentScope": "Newest 40 combat events of the public (players) or scene (managers) window on the selected background, plus the authenticated actor's own 40 most recently changed (updatedAt descending) and every unresolved action of theirs on it",
+      "targetOrdering": [
+        {
+          "field": "createdAt",
+          "direction": "DESCENDING"
+        }
+      ],
+      "cursor": {
+        "version": 1,
+        "status": "bounded",
+        "fields": [
+          "createdAt"
+        ]
+      },
+      "realtimePolicy": "Mounted Combat panel only; players subscribe to the public window and recent private damage for their own targets, managers to the scene window; both add their actor-owned window ordered by last change and one unwindowed listener for their own unresolved actions",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "components/grigliata/useGrigliataCombat.js",
+          "occurrence": 1
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-inbox",
+      "kind": "collection",
+      "queryKey": "grigliata.combat-requests.pending.subscribe.v1",
+      "ownerTask": "Grigliata Combat",
+      "currentScope": "Waiting defenses and immediate damage awaiting confirmation addressed to the authenticated owner across backgrounds",
+      "targetOrdering": [],
+      "cursor": {
+        "version": 1,
+        "status": "none",
+        "fields": []
+      },
+      "realtimePolicy": "One authenticated shell listener on the test environment for both pending statuses by owner",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "components/grigliata/GrigliataCombatInbox.js",
+          "occurrence": 1
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-receipt-damage",
+      "kind": "document",
+      "queryKey": "grigliata.combat-requests.receipt-damage.subscribe.v1",
+      "ownerTask": "Grigliata Combat",
+      "currentScope": "Current damage for one receipt owned by the authenticated recipient, with or without a defense",
+      "targetOrdering": [],
+      "cursor": {
+        "version": 1,
+        "status": "none",
+        "fields": []
+      },
+      "realtimePolicy": "Only while the corresponding receipt is shown; at most four active document listeners per signed-in shell",
+      "activation": "active",
+      "sources": [
+        {
+          "file": "components/grigliata/GrigliataCombatInbox.js",
+          "occurrence": 2
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-active-map",
+      "kind": "document",
+      "queryKey": "grigliata.combat-requests.active-map.subscribe.v1",
+      "ownerTask": "Grigliata Combat",
+      "currentScope": "Current map for pending immediate combat damage",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "none", "fields": [] },
+      "realtimePolicy": "One shell document listener while the owner has immediate damage awaiting confirmation",
+      "activation": "active",
+      "sources": [
+        { "file": "components/grigliata/GrigliataCombatInbox.js", "occurrence": 3 }
+      ]
+    },
+    {
       "id": "foes-paging-control",
       "kind": "document",
       "queryKey": "config.foes-paging.subscribe.v1",
@@ -583,6 +667,54 @@
     }
   ],
   "repositoryQueries": [
+    {
+      "id": "grigliata-combat-actions-manager",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-actions-manager",
+      "queryKey": "grigliata.combat-actions.manager.subscribe.v1",
+      "currentScope": "Active-background history for managers, sorted newest first and limited to 40"
+    },
+    {
+      "id": "grigliata-combat-actions-public",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-actions-public",
+      "queryKey": "grigliata.combat-actions.public.subscribe.v1",
+      "currentScope": "Shared history on the active background, sorted newest first and limited to 40"
+    },
+    {
+      "id": "grigliata-combat-actions-actor",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-actions-actor",
+      "queryKey": "grigliata.combat-actions.actor.subscribe.v1",
+      "currentScope": "Actor-owned history on the active background for players and managers, sorted by last change (updatedAt) newest first and limited to 40, so an own action just answered is always in the window"
+    },
+    {
+      "id": "grigliata-combat-actions-actor-pending",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-actions-actor-pending",
+      "queryKey": "grigliata.combat-actions.actor-pending.subscribe.v1",
+      "currentScope": "Every waiting or retry action launched by the authenticated actor on the active background; not windowed, each entry leaves when its defender answers"
+    },
+    {
+      "id": "grigliata-combat-requests-pending",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-requests-pending",
+      "queryKey": "grigliata.combat-requests.pending.subscribe.v1",
+      "currentScope": "All waiting defenses and immediate damage awaiting confirmation for the authenticated owner across backgrounds"
+    },
+    {
+      "id": "grigliata-combat-requests-owner-damage",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-requests-owner-damage",
+      "queryKey": "grigliata.combat-requests.owner-damage.subscribe.v1",
+      "currentScope": "Newest 40 private damage results for the authenticated target owner on the active background, ordered by last change; only while the combat panel is open"
+    },
     { "id": "task15b-npcs-complete-listener", "ownerTask": "Task 15B", "activation": "active", "indexMode": "automatic" },
     {"id":"task13-foe-pages","ownerTask":"Task 13","activation":"active","requiredIndexId":"task13-foe-order"},
     {"id": "task12-codex-rank-pages", "ownerTask": "Task 12", "activation": "active", "indexMode": "automatic", "currentScope": "Generation/category path scoped, one ascending rank field plus ascending document ID; no composite filter. Verified by Task12 emulator bounded-query and full-reachability tests."},
@@ -604,6 +736,112 @@
     { "id": "task05-techniques-updated-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-techniques-normalized-updated" }
   ],
   "activatedIndexSignatures": [
+    {
+      "id": "grigliata-combat-actions-manager",
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-actions-public",
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "shared",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-actions-actor",
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "actorUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-actions-actor-pending",
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "actorUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-requests-pending",
+      "collectionGroup": "grigliata_combat_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-combat-requests-owner-damage",
+      "collectionGroup": "grigliata_combat_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ownerDamageUpdatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
     {
       "id": "task13-foe-order",
       "collectionGroup": "foes",
