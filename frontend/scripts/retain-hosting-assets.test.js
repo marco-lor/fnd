@@ -45,6 +45,22 @@ function fixture(t, contents = {[oldMain]: 'old main', [oldChunk]: 'old lazy chu
 }
 const retainedManifest = assets => JSON.stringify({schemaVersion: 1, projectId: 'fatin-test', hostingSite: 'fatin-test', assets});
 
+test('a staging CDN 503 retries the same file on its verified Firebase Hosting alias', async t => {
+  const f = fixture(t);
+  const original = f.options.download;
+  const aliasReads = [];
+  f.options.download = (href, options) => {
+    const url = new URL(href);
+    if (url.origin === 'https://fatin-test.web.app') return {statusCode: 503};
+    assert.equal(url.origin, 'https://fatin-test.firebaseapp.com');
+    aliasReads.push(url.pathname);
+    return original(href, options);
+  };
+  await call('retainPreviousAssets', f.options);
+  assert.deepEqual(aliasReads.sort(), [oldMain, oldChunk].sort());
+  assert.equal(fs.readFileSync(path.join(f.buildDir, oldChunk), 'utf8'), 'old lazy chunk');
+});
+
 test('first transition keeps old entry and lazy chunk bytes alongside the new release', async t => {
   const f = fixture(t);
   const summary = await call('retainPreviousAssets', f.options);

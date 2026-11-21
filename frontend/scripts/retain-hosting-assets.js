@@ -146,7 +146,16 @@ async function retainPreviousAssets({selection, buildDir, api, download, now = D
     if (!digestPattern.test(file.hash) || (file.status && file.status !== 'ACTIVE')) throw new Error('Invalid live Hosting file hash or status.');
     const url = new URL(file.path, origin);
     if (url.origin !== origin || url.pathname !== file.path || url.search || url.hash) throw new Error('Asset download target / path mismatch.');
-    return verifyDownloadedFile(await bounded(timeoutMs => download(url.href, {maxBytes, timeoutMs})), file.hash, maxBytes);
+    const fetchAsset = assetUrl => bounded(timeoutMs => download(assetUrl, {maxBytes, timeoutMs}));
+    let response = await fetchAsset(url.href);
+    if (selection.hostingSite === 'fatin-test' && [502, 503, 504].includes(response.statusCode)) {
+      // Both default Hosting domains serve the same staging version. The inventory hash
+      // below still has to match the uploaded file, including for the retention manifest.
+      const fallback = new URL(file.path, 'https://fatin-test.firebaseapp.com');
+      response = await fetchAsset(fallback.href);
+    }
+    if (response.statusCode !== 200) throw new Error(`Asset download HTTP ${response.statusCode} for ${file.path}; redirects are refused.`);
+    return verifyDownloadedFile(response, file.hash, maxBytes);
   }
   let previouslyRetained = new Map();
   const oldManifest = inventory.get(MANIFEST_PATH);
