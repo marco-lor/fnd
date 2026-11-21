@@ -39,10 +39,20 @@ export const combatRoleRange = (action, roleIndex = 0) =>
 export const combatDamageBand = (action, distanceFt) =>
   action?.damageBands?.find(band => distanceFt >= band.minFt && distanceFt <= band.maxFt) || null;
 
+// The server's combatAllies on board tokens: foes stand apart from characters and custom pawns; within a side, a pawn's
+// allies are the pawns its account controls and every player character. Another account's custom pawn is never one: a
+// player's board reads another account's foe as `custom` too, so this matches the server without knowing which it is.
+export function combatAllies(origin, token) {
+  return (origin?.tokenType === 'foe') === (token?.tokenType === 'foe') && (
+    (!!origin?.ownerUid && origin.ownerUid === token?.ownerUid)
+    || (origin?.tokenType === 'character' && token?.tokenType === 'character'));
+}
+
 export function canTargetToken(origin, token, action, roleIndex = 0) {
   if (!origin || !action || (token.isDead && !action.allowDead)) return false;
   if (action.requireDead && !token.isDead) return false;
   if (action.mode === 'self') return origin.placementId === token.placementId;
   if ((!action.allowSelf || (action.targetRoles && roleIndex === 0)) && origin.placementId === token.placementId) return false;
+  if (['ally', 'selfOrAlly'].includes(action.relation) && !combatAllies(origin, token)) return false;
   return withinCombatRange(origin, token, {...action, rangeFt:combatRoleRange(action, roleIndex)});
 }

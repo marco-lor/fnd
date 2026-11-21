@@ -40,6 +40,11 @@ const storable = (value, inArray = false) => {
 
 const memoryFirestore = () => {
   const documents = new Map();
+  // Every read, tagged with how it was made: `transaction` documents and queries join the
+  // transaction's read set; a `query` runs outside it.
+  const reads = [];
+  let aborts = 0;
+  let afterQuery = null;
   const doc = path => ({id: path.split('/').at(-1), path});
   const snapshot = ref => {
     const value = structuredClone(documents.get(ref.path));
@@ -50,9 +55,16 @@ const memoryFirestore = () => {
   };
   const children = ({path, match}) => [...documents.keys()].filter(file => file.startsWith(path + '/')
     && file.split('/').length === path.split('/').length + 1 && (!match || match(documents.get(file))));
+  const listed = ref => ({docs: children(ref).map(file => snapshot(doc(file)))});
   const transaction = {
-    get: async ref => ref.collection ? {docs: children(ref).map(file => snapshot(doc(file)))} : snapshot(ref),
-    getAll: async (...refs) => refs.map(snapshot),
+    get: async ref => {
+      reads.push({via: ref.collection ? 'transaction-query' : 'transaction', path: ref.path});
+      return ref.collection ? listed(ref) : snapshot(ref);
+    },
+    getAll: async (...refs) => {
+      refs.forEach(ref => reads.push({via: 'transaction', path: ref.path}));
+      return refs.map(snapshot);
+    },
     set: (ref, data, options) => {
       const value = storable(data);
       if (options?.mergeFields) {
@@ -69,13 +81,34 @@ const memoryFirestore = () => {
     },
     update: (ref, data) => documents.set(ref.path, {...documents.get(ref.path), ...storable(data)}),
   };
+  const query = (path, match) => ({
+    path, collection: true, match,
+    // Outside any transaction: the snapshot is taken now, and whatever changes afterwards is not in it.
+    get: async () => {
+      reads.push({via: 'query', path});
+      const result = listed({path, match});
+      const next = afterQuery;
+      afterQuery = null;
+      next?.();
+      return result;
+    },
+  });
   return {
     doc,
     collection: path => ({
-      path, collection: true,
-      where: (key, _operator, value) => ({path, collection: true, match: item => item[key] === value}),
+      ...query(path),
+      where: (key, _operator, value) => query(path, item => item[key] === value),
     }),
-    runTransaction: async operation => operation(transaction),
+    // An aborted attempt reads like the real one, but none of its writes land.
+    runTransaction: async operation => {
+      for (; aborts > 0; aborts -= 1) {
+        await operation({...transaction, set: () => {}, create: () => {}, update: () => {}});
+      }
+      return operation(transaction);
+    },
+    abortNext: (count = 1) => { aborts = count; },
+    onNextQuery: change => { afterQuery = change; },
+    reads,
     seed: (path, data) => documents.set(path, structuredClone(data)),
     remove: path => documents.delete(path),
     read: path => documents.get(path),
@@ -489,6 +522,154 @@ test('review round 4: hidden pawns, artwork and requests from older clients', as
     channel: '', point: null, ids: [place(defender)],
     approval: {confirmHp: false, maxHpCost: undefined, confirmExtra: false, variableCost: undefined},
   }));
+});
+
+test('a canonical slot link that no longer resolves stays empty; only unlinked embedded gear counts', async () => {
+  const granting = {...greatsword, General: {...greatsword.General, spells: {
+    'Stasi Personale': {Nome: 'Stasi Personale', Costo: 1, Gittata: 10},
+  }}};
+  const equipped = async slots => {
+    db.seed(`users/${attacker}/state/equipment`, {slots});
+    return (await arsenal()).actions.filter(({scope}) => scope === 'equipped').map(({id}) => id);
+  };
+  fixture({slots: {}});
+  // Copies of inventory entries that were sold or deleted: neither the weapon nor its grant survives.
+  assert.deepEqual(await equipped({weaponMain: {...granting, _task05: {inventoryId: 'sold'}}}), []);
+  assert.deepEqual(await equipped({weaponMain: {currentSnapshot: granting, _instance: {instanceId: 'sold'}}}), []);
+  assert.deepEqual(await equipped({weaponMain: {...granting, _task05: {inventoryId: ''}, _instance: {instanceId: 'sold'}}}), []);
+  assert.deepEqual(await equipped({weaponMain: {...granting, _task05: {inventoryId: 'not/an/id'}}}), []);
+  // A live link reads the inventory entry, not the copy embedded with it.
+  db.seed(`users/${attacker}/inventory/kept`, {currentSnapshot: greatsword});
+  assert.deepEqual(await equipped({weaponMain: {...granting, _task05: {inventoryId: 'kept'}}}), ['weaponMain']);
+  // Older slots that embed the item itself, with no canonical link, keep working.
+  assert.deepEqual(await equipped({weaponMain: granting}), ['weaponMain', 'item:weaponMain:Stasi Personale']);
+  assert.deepEqual(await equipped({weaponMain: {currentSnapshot: granting, inventoryId: 'legacy'}}), [
+    'weaponMain', 'item:weaponMain:Stasi Personale',
+  ]);
+  const launched = await launch('weapon', 'weaponMain');
+  assert.equal(journal(launched.combatId).action.name, 'Spadone');
+});
+
+test('ally actions reach only allies: own pawns on the same side and any player character', async () => {
+  const foe = {tokenType: 'foe', Parametri: parametri, stats, dadoAnima: 'd12', spells: [
+    {name: 'Ululato', combat: {relation: 'ally'}},
+  ]};
+  // The DM runs the foes and a custom pawn of their own.
+  const setup = (dmUid = 'dm') => {
+    fixture();
+    db.seed(`grigliata_backgrounds/${board}`, {});
+    db.seed(`users/${dmUid}`, {role: 'dm'});
+    seedSpell('guard', {Nome: 'Scudo amico', Costo: 1, Gittata: '30 ft', combat: {relation: 'ally'}});
+    seedSpell('mend', {Nome: 'Cura amica', Costo: 1, Gittata: '30 ft', Cura: '1d4', combat: {relation: 'selfOrAlly'}});
+    seedPawn('summon', 2, {tokenType: 'custom', stats}, attacker);
+    seedPawn('companion', 2, {tokenType: 'custom', stats}, defender);
+    seedPawn('wolf', 1, foe, dmUid);
+    seedPawn('bear', 2, foe, dmUid);
+    seedPawn('npc', 2, {tokenType: 'custom', stats}, dmUid);
+  };
+  const cast = (actionId, target) => launch('spell', actionId, {targetPlacementIds: [place(target)]});
+  const refused = {code: 'invalid-argument', message: 'Questa azione richiede un alleato.'};
+
+  setup();
+  assert.ok((await cast('personal:guard', defender)).combatId);
+  assert.ok((await cast('personal:guard', 'summon')).combatId);
+  assert.ok((await cast('personal:mend', attacker)).combatId);
+  await assert.rejects(() => cast('personal:guard', attacker), /un'altra pedina/);
+  // Another account's non-character pawn answers alike, foe or not: a player's board cannot tell them apart.
+  for (const other of ['wolf', 'npc', 'companion']) {
+    await assert.rejects(() => cast('personal:guard', other), refused);
+    await assert.rejects(() => cast('personal:mend', other), refused);
+  }
+  // A weapon has no relation: it still reaches the foe. A refusal spends nothing.
+  assert.ok((await launch('weapon', 'weaponMain', {targetPlacementIds: [place('wolf')]})).combatId);
+  const before = db.read(`users/${attacker}/state/resources`);
+  await assert.rejects(() => cast('personal:guard', 'wolf'), refused);
+  assert.deepEqual(db.read(`users/${attacker}/state/resources`), before);
+
+  // The DM is a player too: their character's allies are the party, never the foes they run.
+  setup(attacker);
+  assert.ok((await cast('personal:guard', defender)).combatId);
+  assert.ok((await cast('personal:guard', 'npc')).combatId);
+  await assert.rejects(() => cast('personal:guard', 'wolf'), refused);
+  const howl = (await getGrigliataCombatArsenal.run({
+    auth: {uid: attacker}, data: {backgroundId: board, actorPlacementId: place('wolf')},
+  })).actions.find(({name}) => name === 'Ululato');
+  assert.equal(howl.relation, 'ally');
+  const foeCast = target => launch('spell', howl.id, {
+    actorPlacementId: place('wolf'), targetPlacementIds: [place(target)],
+  });
+  assert.ok((await foeCast('bear')).combatId);
+  for (const target of [attacker, defender, 'npc']) await assert.rejects(() => foeCast(target), refused);
+});
+
+test('a square area lists its pawns from a roster read outside the transaction and checked live', async () => {
+  const setup = () => {
+    fixture();
+    db.seed(`grigliata_backgrounds/${board}`, {turnOrderActive: {tokenId: attacker}, fogOfWarEnabled: false});
+    seedSpell('rain', {
+      Nome: 'Pioggia di sassi', Costo: 1, Gittata: '60 ft',
+      combat: {mode: 'area', area: {shape: 'square', sideSquares: 3}},
+    });
+    // The area centred on column 3 covers columns 2 to 4.
+    seedPawn('inside', 3, {tokenType: 'custom', stats}, defender);
+    seedPawn('mover', 4, {tokenType: 'custom', stats}, defender);
+    seedPawn('veiled', 2, {tokenType: 'custom', stats}, defender);
+    seedPawn('unveiled', 3, {tokenType: 'custom', stats}, defender);
+    db.seed(`grigliata_token_placements/${place('unveiled')}`, {
+      tokenId: 'unveiled', backgroundId: board, ownerUid: defender, col: 3, row: 0, isVisibleToPlayers: false,
+    });
+    seedPawn('far', 10, {tokenType: 'custom', stats}, defender);
+    // Between the roster snapshot and the transaction: one pawn leaves, one is hidden, one is revealed.
+    db.onNextQuery(() => {
+      db.seed(`grigliata_token_placements/${place('mover')}`, {
+        tokenId: 'mover', backgroundId: board, ownerUid: defender, col: 9, row: 0,
+      });
+      db.seed(`grigliata_token_placements/${place('veiled')}`, {
+        tokenId: 'veiled', backgroundId: board, ownerUid: defender, col: 2, row: 0, isVisibleToPlayers: false,
+      });
+      db.seed(`grigliata_token_placements/${place('unveiled')}`, {
+        tokenId: 'unveiled', backgroundId: board, ownerUid: defender, col: 3, row: 0,
+      });
+    });
+  };
+  const rain = () => launch('spell', 'personal:rain', {targetPlacementIds: [], point: {col: 3, row: 0}});
+  const placementReads = via => db.reads.filter(read => read.via === via &&
+    read.path.startsWith('grigliata_token_placements')).map(({path}) => path.split('/').at(-1));
+
+  setup();
+  db.abortNext();
+  const {combatId} = await rain();
+  const entry = journal(combatId);
+  assert.deepEqual(entry.affected.map(({placementId}) => placementId).sort(), [place('inside'), place('unveiled')]);
+  assert.equal(entry.shared, true);
+  // One roster read for both attempts, never a transactional scan of the map, and only
+  // the actor and the pawns the roster put in the area join the transaction.
+  assert.deepEqual(placementReads('query'), ['grigliata_token_placements']);
+  assert.deepEqual(placementReads('transaction-query'), []);
+  assert.deepEqual([...new Set(placementReads('transaction'))].sort(), [
+    place(attacker), place('inside'), place('mover'), place('unveiled'), place('veiled'),
+  ].sort());
+  // A retry of the same operation answers from its receipt.
+  assert.equal((await call(attacker, {
+    command: 'launch', operationId: `combat-test-${operations}`, backgroundId: board,
+    actorPlacementId: place(attacker), targetPlacementIds: [], kind: 'spell', actionId: 'personal:rain',
+    point: {col: 3, row: 0},
+  })).combatId, combatId);
+
+  // The DM's journal names the pawn hidden since the snapshot and stays private for it.
+  setup();
+  db.seed(`users/${attacker}`, {role: 'dm'});
+  const hidden = journal((await rain()).combatId);
+  assert.deepEqual(hidden.affected.map(({placementId}) => placementId).sort(), [
+    place('inside'), place('unveiled'), place('veiled'),
+  ]);
+  assert.equal(hidden.shared, false);
+
+  // With fog on, the area lists nobody and reads no roster.
+  setup();
+  db.seed(`grigliata_backgrounds/${board}`, {turnOrderActive: {tokenId: attacker}});
+  assert.deepEqual(journal((await rain()).combatId).affected, []);
+  assert.deepEqual(placementReads('query'), []);
 });
 
 const dm = 'dm';

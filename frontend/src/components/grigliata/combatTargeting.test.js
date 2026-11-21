@@ -30,6 +30,31 @@ test('only the board marker makes a target fallen: PF never change who can be ch
   expect(canTargetToken(origin, marked, revive)).toBe(true);
 });
 
+test('ally actions offer only allies, as the server decides: own pawns on the same side and any player character', () => {
+  const guard = { mode: 'single', rangeFt: 30, relation: 'ally' };
+  const mend = { ...guard, relation: 'selfOrAlly', allowSelf: true };
+  const sword = { mode: 'single', rangeFt: 30 };
+  const nyx = { ...origin, ownerUid: 'nyx', tokenType: 'character' };
+  const kai = at(1, { ownerUid: 'kai', tokenType: 'character' });
+  const summon = at(1, { ownerUid: 'nyx', tokenType: 'custom' });
+  // A player's board reads another account's foe or custom pawn as `custom`: both stay out.
+  const unknown = at(1, { ownerUid: 'dm', tokenType: 'custom' });
+  const companion = at(1, { ownerUid: 'kai', tokenType: 'custom' });
+  expect([kai, summon, unknown, companion].map(token => canTargetToken(nyx, token, guard))).toEqual([true, true, false, false]);
+  expect(canTargetToken(nyx, nyx, guard)).toBe(false);
+  expect(canTargetToken(nyx, nyx, mend)).toBe(true);
+  expect(canTargetToken(nyx, unknown, mend)).toBe(false);
+  expect(canTargetToken(nyx, unknown, sword)).toBe(true);
+
+  // The DM is a player too: their character stands with the party, apart from the foes they run.
+  const dmCharacter = { ...origin, ownerUid: 'dm', tokenType: 'character' };
+  const wolf = at(1, { ownerUid: 'dm', tokenType: 'foe' });
+  const bear = at(2, { ownerUid: 'dm', tokenType: 'foe' });
+  const npc = at(1, { ownerUid: 'dm', tokenType: 'custom' });
+  expect([kai, npc, wolf].map(token => canTargetToken(dmCharacter, token, guard))).toEqual([true, true, false]);
+  expect([bear, npc, dmCharacter, kai].map(token => canTargetToken(wolf, token, guard))).toEqual([true, false, false, false]);
+});
+
 test('a farthest-anchored footprint must fit around a token too, as the server measures it', () => {
   const cone = { mode: 'multiple', rangeFt: 15, area: { shape: 'cone', sideSquares: 3, anchor: 'farthest' } };
   expect(withinCombatRange(origin, at(2), cone)).toBe(true);

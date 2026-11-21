@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   buildWeaponActions,
   buildContentAction,
+  combatAllies,
   combatCost,
   combatCritical,
   combatDamageBalances,
@@ -13,6 +14,7 @@ const {
   combatDamageSplit,
   compareCombatRolls,
   combatDistance,
+  combatRelationAllows,
   combatRoleRange,
   combatStatus,
   equippedItemSpells,
@@ -84,6 +86,36 @@ test('a tied target can retry while another target is still waiting', () => {
 
 test('diagonal range measures from the edge of large tokens', () => {
   assert.equal(combatDistance({col: 0, row: 0, sizeSquares: 2}, {col: 2, row: 2, sizeSquares: 2}), 5);
+});
+
+test('allies share a side and a controller, and every player character stands with the others', () => {
+  const pawn = (ownerUid, tokenType) => ({ownerUid, tokenType});
+  const nyx = pawn('nyx', 'character');
+  const dmCharacter = pawn('dm', 'character');
+  const wolf = pawn('dm', 'foe');
+  const cases = [
+    [nyx, pawn('kai', 'character'), true],
+    [nyx, dmCharacter, true],
+    [nyx, pawn('nyx', 'custom'), true],
+    [nyx, pawn('kai', 'custom'), false],
+    [nyx, pawn('dm', 'custom'), false],
+    [nyx, wolf, false],
+    [dmCharacter, wolf, false],
+    [dmCharacter, pawn('dm', 'custom'), true],
+    [wolf, pawn('dm', 'foe'), true],
+    [wolf, pawn('dm', 'custom'), false],
+    [wolf, pawn('dm2', 'foe'), false],
+  ];
+  for (const [actor, target, expected] of cases) {
+    assert.equal(combatAllies(actor, target), expected, JSON.stringify([actor, target]));
+    assert.equal(combatAllies(target, actor), expected, JSON.stringify([target, actor]));
+  }
+  const action = relation => ({relation});
+  assert.equal(combatRelationAllows(action('any'), nyx, wolf), true);
+  assert.equal(combatRelationAllows(action(undefined), nyx, wolf), true);
+  assert.equal(combatRelationAllows(action('ally'), nyx, wolf), false);
+  assert.equal(combatRelationAllows(action('selfOrAlly'), nyx, wolf), false);
+  assert.equal(combatRelationAllows(action('selfOrAlly'), nyx, nyx), true);
 });
 
 test('Codex crits reuse the initial dice and apply reduction before the two-handed multiplier', () => {

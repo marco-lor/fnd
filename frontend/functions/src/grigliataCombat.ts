@@ -22,6 +22,7 @@ import {
   combatDie,
   combatDistance,
   combatInRange,
+  combatRelationAllows,
   combatResources,
   combatRoleRange,
   combatStatus,
@@ -42,6 +43,7 @@ import {
   CombatProfile,
   CombatResources,
   CombatRoll,
+  CombatSide,
   CombatTarget,
   CombatTrial,
   MAX_COMBAT_TARGETS,
@@ -77,7 +79,10 @@ type CharacterState = {
   inventory: Fields;
 };
 type BoardPawn = {pawn: CombatPawn; token: DocumentSnapshot; visible: boolean; dead: boolean};
-type Context = {db: Firestore; transaction: Transaction; uid: string; manager: boolean};
+// A read that needs no transactional consistency: it runs outside the transaction's
+// read set, once per call, and every retry of the transaction reuses its result.
+type AdvisoryRead = <T>(key: string, read: () => Promise<T>) => Promise<T>;
+type Context = {db: Firestore; transaction: Transaction; uid: string; manager: boolean; advisory: AdvisoryRead};
 type CombatEvent = {
   backgroundId: string;
   actorUid: string;
@@ -134,6 +139,11 @@ const withCaller = async <T>(
 ): Promise<T> => {
   assertCombatProject();
   const db = getFirestore();
+  const advisoryReads = new Map<string, Promise<unknown>>();
+  const advisory: AdvisoryRead = <T>(key: string, read: () => Promise<T>) => {
+    if (!advisoryReads.has(key)) advisoryReads.set(key, read());
+    return advisoryReads.get(key) as Promise<T>;
+  };
   try {
     return await db.runTransaction(async (transaction) => {
       const [caller, deletion] = await transaction.getAll(
@@ -143,7 +153,7 @@ const withCaller = async <T>(
       if (deletion.exists || caller.get("disabled") === true) {
         fail("permission-denied", "L'account non è attivo.");
       }
-      return command({db, transaction, uid, manager: caller.get("role") === "dm"});
+      return command({db, transaction, uid, manager: caller.get("role") === "dm", advisory});
     });
   } catch (error) {
     if (error instanceof CombatProblem) throw new HttpsError(error.code, error.message);
@@ -265,13 +275,18 @@ const readCharacterState = async (
   };
 };
 
-const slotInventoryId = (entry: unknown): string => {
+// The inventory entry a slot is bound to: its string ID, or the canonical link an
+// embedded copy of an inventory entry carries, as the Home projection reads it.
+// Empty for genuinely embedded gear.
+const canonicalSlotLink = (entry: unknown): string => {
+  if (typeof entry === "string") return asTrimmedString(entry);
   const item = asRecord(entry);
-  return asTrimmedString(
-    typeof entry === "string" ? entry : asRecord(item._task05).inventoryId ??
-      asRecord(item._instance).instanceId ?? item.inventoryId
-  );
+  return asTrimmedString(asRecord(item._task05).inventoryId) ||
+    asTrimmedString(asRecord(item._instance).instanceId);
 };
+
+const slotInventoryId = (entry: unknown): string =>
+  canonicalSlotLink(entry) || asTrimmedString(asRecord(entry).inventoryId);
 
 const readSlots = async (
   {db, transaction}: Context,
@@ -293,8 +308,9 @@ const readSlots = async (
     const id = slotInventoryId(value);
     const item = id ? items.get(id) : undefined;
     if (item) return [[slot, item]];
-    // A stale canonical ID must stay empty. Older embedded slots carry a snapshot.
-    if (typeof value === "string") return [];
+    // A canonical link that no longer resolves stays empty, whatever copy it embeds.
+    // Only older slots without one carry the item itself.
+    if (canonicalSlotLink(value)) return [];
     const legacy = equippedCombatItem(value);
     return Object.keys(legacy).length ? [[slot, legacy]] : [];
   }));
@@ -361,6 +377,12 @@ const readArsenal = async (
     .map((action) => ({...action, version: hashValue(publicAction(action)).slice(0, 16)}));
   return {actions, equipped: weapons.equipped};
 };
+
+// The side a pawn stands on, from its live token (see combatAllies).
+const pawnSide = ({pawn, token}: BoardPawn): CombatSide => ({
+  ownerUid: pawn.ownerUid,
+  tokenType: asTrimmedString(token.get("tokenType")),
+});
 
 const assertActor = ({uid, manager}: Context, actor: BoardPawn): void => {
   if (actor.pawn.ownerUid !== uid || (!actor.visible && !manager)) {
@@ -466,8 +488,34 @@ const projectOwnerDamage = (
   });
 };
 
+const MAX_AREA_PAWNS = 100;
+
+// A placement as an area pawn: where it stands now and whether players see it.
+const areaPawn = (placement: DocumentSnapshot): {pawn: CombatPawn; visible: boolean; dead: boolean} | null => {
+  const data = asRecord(placement.data());
+  const {col, row, ownerUid, label} = data;
+  const tokenId = placementTokenId(data);
+  if (!placement.exists || !isCellNumber(col) || !isCellNumber(row) || typeof ownerUid !== "string" ||
+    !isValidFirestoreDocumentId(tokenId)) return null;
+  return {
+    pawn: {
+      col, row, tokenId, ownerUid, placementId: placement.id,
+      name: (asTrimmedString(label) || "Pedina").slice(0, 160),
+      sizeSquares: Math.max(1, Math.min(20, Math.trunc(asFiniteNumber(data.sizeSquares, 1)))),
+    },
+    visible: data.isVisibleToPlayers !== false,
+    dead: data.isDead === true,
+  };
+};
+
+// Who stands in a square area is advisory: the map's roster is read outside the
+// transaction, so token moves elsewhere on the map never contend with a launch,
+// and only the placements it puts in the area join the transaction. Whether a pawn
+// still stands there, is still on this map and is seen by players is read live:
+// visibility, and the sharing that follows it, never come from the roster. A pawn
+// that steps into the area after the roster was read is left out.
 const readAffectedPawns = async (
-  {db, transaction, manager}: Context,
+  {db, transaction, manager, advisory}: Context,
   backgroundId: string,
   action: CombatAction,
   point: CombatCell | null,
@@ -479,21 +527,24 @@ const readAffectedPawns = async (
   const sizeSquares = action.area.sideSquares;
   const shift = Math.floor((sizeSquares - 1) / 2);
   const area = {col: point.col - shift, row: point.row - shift, sizeSquares};
-  const {docs} = await transaction.get(db.collection(PLACEMENTS).where("backgroundId", "==", backgroundId));
-  const areaPawns = docs.flatMap((doc) => {
-    const data = asRecord(doc.data());
-    const {col, row, ownerUid, label, isVisibleToPlayers, isDead} = data;
-    const tokenId = placementTokenId(data);
-    if (!isCellNumber(col) || !isCellNumber(row) || !tokenId ||
-      typeof ownerUid !== "string" || (isVisibleToPlayers === false && !manager) ||
-      (isDead === true && !action.allowDead)) return [];
-    const pawn = {
-      col, row, tokenId, ownerUid, placementId: doc.id,
-      name: (asTrimmedString(label) || "Pedina").slice(0, 160),
-      sizeSquares: Math.max(1, Math.min(20, Math.trunc(asFiniteNumber(doc.get("sizeSquares"), 1)))),
-    };
-    return combatDistance(area, pawn) === 0 ? [{pawn, visible: isVisibleToPlayers !== false}] : [];
-  }).slice(0, 100);
+  const roster = await advisory(`${PLACEMENTS}:${backgroundId}`, async () => (
+    await db.collection(PLACEMENTS).where("backgroundId", "==", backgroundId).get()
+  ).docs.flatMap((doc) => {
+    const entry = areaPawn(doc);
+    return entry ? [entry.pawn] : [];
+  }));
+  const candidates = roster.filter((pawn) => combatDistance(area, pawn) === 0).slice(0, MAX_AREA_PAWNS);
+  const live = candidates.length ? await transaction.getAll(
+    ...candidates.map(({placementId}) => db.doc(`${PLACEMENTS}/${placementId}`))
+  ) : [];
+  const areaPawns = live.flatMap((placement) => {
+    const entry = areaPawn(placement);
+    if (!entry || placement.get("backgroundId") !== backgroundId ||
+      placement.id !== `${backgroundId}__${entry.pawn.tokenId}` ||
+      (!entry.visible && !manager) || (entry.dead && !action.allowDead) ||
+      combatDistance(area, entry.pawn) !== 0) return [];
+    return [entry];
+  });
   return {affected: areaPawns.map(({pawn}) => pawn), visible: areaPawns.every(({visible}) => visible)};
 };
 
@@ -641,6 +692,9 @@ const launchCombat = async (context: Context, input: Fields) => {
     const primaryRole = !action.targetRoles || index === 0;
     if (targetId === actorPlacementId && (!action.allowSelf || (action.targetRoles && primaryRole))) {
       return fail("invalid-argument", "Questa azione richiede un'altra pedina.");
+    }
+    if (!combatRelationAllows(action, pawnSide(actor), pawnSide(targetPawn))) {
+      return fail("invalid-argument", "Questa azione richiede un alleato.");
     }
     // A fallen target is one the board marks as such, exactly what the picker shows.
     if ((targetPawn.dead && !action.allowDead) || (action.requireDead && !targetPawn.dead)) {

@@ -362,6 +362,34 @@ export const combatInRange = (
   return distance >= action.minRangeFt && (rangeFt === null || distance <= rangeFt);
 };
 
+// Who controls a pawn and which kind of token it is, as the board records them.
+export interface CombatSide {
+  ownerUid: string;
+  tokenType: string;
+}
+
+// Pawns carry no team, so sides come from the token type: foes (the DM's
+// bestiary) stand apart from characters and custom pawns. Within a side, a
+// pawn's allies are the other pawns its account controls and, across accounts,
+// every player character, the DM's own included. Another account's custom pawn
+// is never an ally, even a player's summon: a player's board cannot tell it from
+// a foe, so the picker and this check give the same answer and the refusal
+// reveals nothing the board does not show. Foes of two DM accounts are not
+// allies either.
+export const combatAllies = (actor: CombatSide, target: CombatSide): boolean =>
+  (actor.tokenType === "foe") === (target.tokenType === "foe") && (
+    actor.ownerUid === target.ownerUid ||
+    (actor.tokenType === "character" && target.tokenType === "character")
+  );
+
+// Whether the action's relation admits this target. A pawn is its own ally:
+// whether an action may target its actor is `allowSelf`'s business.
+export const combatRelationAllows = (
+  action: Pick<CombatAction, "relation">, actor: CombatSide, target: CombatSide
+): boolean => (
+  (action.relation !== "ally" && action.relation !== "selfOrAlly") || combatAllies(actor, target)
+);
+
 // Range of an ordered target role; null means no limit.
 export const combatRoleRange = (
   action: Pick<CombatAction, "rangeFt" | "roleRangesFt">, role: number
