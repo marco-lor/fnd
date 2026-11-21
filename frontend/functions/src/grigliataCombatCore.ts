@@ -132,22 +132,14 @@ export interface CombatRoll {
   rolls: number[];
 }
 
-// A defense value the defender typed instead of the one stored with the request.
-export interface CombatDefenseChange {
-  value: number;
-  default: number | null;
-}
-
-export type CombatDefenseOverrides = Partial<Record<"bonus" | "reduction" | "die", CombatDefenseChange>>;
-
 export interface CombatTrial {
   round: number;
   attack: CombatRoll | null;
   defense: CombatRoll | null;
   outcome: CombatOutcome;
   damage: number | null;
-  // Present only when the defender changed a stored default; never on a consent.
-  overrides?: CombatDefenseOverrides;
+  // A shared journal flags manual edits without copying the request's private defaults.
+  defenseAdjusted?: boolean;
 }
 
 export interface CombatDamageDetails {
@@ -553,26 +545,13 @@ export const combatStatus = (targets: {status: CombatStatus}[]): CombatStatus =>
   return targets.some(({status}) => status === "waiting") ? "waiting" : "done";
 };
 
-// Situational values are allowed: the trial records each one that differs from the
-// default stored with the request, with both numbers, so the DM sees it. Fields the
-// request did not ask for are never audited. Null when the defaults stood.
-export const combatDefenseOverrides = (
+// The DM can spot a manual adjustment in the journal; the original values stay on the request.
+export const combatDefenseAdjusted = (
   defaults: Pick<CombatDefense, "value" | "reduction" | "die" | "showReduction" | "showDie">,
   used: {bonus: number; reduction: number | null; die: number | null}
-): CombatDefenseOverrides | null => {
-  const stored = (value: unknown): number | null =>
-    typeof value === "number" && Number.isFinite(value) ? value : null;
-  const checked: [keyof CombatDefenseOverrides, number | null, number | null, boolean][] = [
-    ["bonus", used.bonus, stored(defaults.value), true],
-    ["reduction", used.reduction, stored(defaults.reduction), defaults.showReduction],
-    ["die", used.die, combatDie(defaults.die), defaults.showDie],
-  ];
-  const overrides: CombatDefenseOverrides = {};
-  checked.forEach(([key, value, standard, shown]) => {
-    if (shown && value !== null && value !== standard) overrides[key] = {value, default: standard};
-  });
-  return Object.keys(overrides).length ? overrides : null;
-};
+): boolean => used.bonus !== defaults.value ||
+  (defaults.showReduction && used.reduction !== defaults.reduction) ||
+  (defaults.showDie && used.die !== combatDie(defaults.die));
 
 export const getCombatDefense = (action: CombatCheck & {kind: CombatKind}, profile: CombatProfile): CombatDefense => ({
   label: statLabel(action.defenseStats, "Difesa"),

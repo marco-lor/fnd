@@ -19,7 +19,7 @@ import {
   combatDamageEligible,
   combatDamageProposal,
   combatDamageSplit,
-  combatDefenseOverrides,
+  combatDefenseAdjusted,
   combatDie,
   combatDistance,
   combatInRange,
@@ -81,10 +81,13 @@ type CharacterState = {
   inventory: Fields;
 };
 type BoardPawn = {pawn: CombatPawn; token: DocumentSnapshot; visible: boolean; dead: boolean};
-// A read that needs no transactional consistency: it runs outside the transaction's
-// read set, once per call, and every retry of the transaction reuses its result.
-type AdvisoryRead = <T>(key: string, read: () => Promise<T>) => Promise<T>;
-type Context = {db: Firestore; transaction: Transaction; uid: string; manager: boolean; advisory: AdvisoryRead};
+type Context = {
+  db: Firestore;
+  transaction: Transaction;
+  uid: string;
+  manager: boolean;
+  areaRosters: Map<string, Promise<CombatPawn[]>>;
+};
 type CombatEvent = {
   backgroundId: string;
   actorUid: string;
@@ -141,11 +144,7 @@ const withCaller = async <T>(
 ): Promise<T> => {
   assertCombatProject();
   const db = getFirestore();
-  const advisoryReads = new Map<string, Promise<unknown>>();
-  const advisory: AdvisoryRead = <T>(key: string, read: () => Promise<T>) => {
-    if (!advisoryReads.has(key)) advisoryReads.set(key, read());
-    return advisoryReads.get(key) as Promise<T>;
-  };
+  const areaRosters = new Map<string, Promise<CombatPawn[]>>();
   try {
     return await db.runTransaction(async (transaction) => {
       const [caller, deletion] = await transaction.getAll(
@@ -155,7 +154,7 @@ const withCaller = async <T>(
       if (deletion.exists || caller.get("disabled") === true) {
         fail("permission-denied", "L'account non è attivo.");
       }
-      return command({db, transaction, uid, manager: caller.get("role") === "dm", advisory});
+      return command({db, transaction, uid, manager: caller.get("role") === "dm", areaRosters});
     });
   } catch (error) {
     if (error instanceof CombatProblem) throw new HttpsError(error.code, error.message);
@@ -517,8 +516,9 @@ const areaPawn = (placement: DocumentSnapshot): {pawn: CombatPawn; visible: bool
 // visibility, and the sharing that follows it, never come from the roster. A pawn
 // that steps into the area after the roster was read is left out.
 const readAffectedPawns = async (
-  {db, transaction, manager, advisory}: Context,
+  {db, transaction, manager, areaRosters}: Context,
   backgroundId: string,
+  actor: BoardPawn,
   action: CombatAction,
   point: CombatCell | null,
   targets: CombatPawn[],
@@ -529,24 +529,41 @@ const readAffectedPawns = async (
   const sizeSquares = action.area.sideSquares;
   const shift = Math.floor((sizeSquares - 1) / 2);
   const area = {col: point.col - shift, row: point.row - shift, sizeSquares};
-  const roster = await advisory(`${PLACEMENTS}:${backgroundId}`, async () => (
-    await db.collection(PLACEMENTS).where("backgroundId", "==", backgroundId).get()
-  ).docs.flatMap((doc) => {
-    const entry = areaPawn(doc);
-    return entry ? [entry.pawn] : [];
-  }));
-  const candidates = roster.filter((pawn) => combatDistance(area, pawn) === 0).slice(0, MAX_AREA_PAWNS);
-  const live = candidates.length ? await transaction.getAll(
-    ...candidates.map(({placementId}) => db.doc(`${PLACEMENTS}/${placementId}`))
-  ) : [];
-  const areaPawns = live.flatMap((placement) => {
-    const entry = areaPawn(placement);
-    if (!entry || placement.get("backgroundId") !== backgroundId ||
-      placement.id !== `${backgroundId}__${entry.pawn.tokenId}` ||
-      (!entry.visible && !manager) || (entry.dead && !action.allowDead) ||
-      combatDistance(area, entry.pawn) !== 0) return [];
-    return [entry];
-  });
+  let roster = areaRosters.get(backgroundId);
+  if (!roster) {
+    roster = db.collection(PLACEMENTS).where("backgroundId", "==", backgroundId).get()
+      .then(({docs}) => docs.flatMap((doc) => {
+        const entry = areaPawn(doc);
+        return entry ? [entry.pawn] : [];
+      }));
+    areaRosters.set(backgroundId, roster);
+  }
+  const candidates = (await roster).filter((pawn) => combatDistance(area, pawn) === 0);
+  const actorSide = pawnSide(actor);
+  const areaPawns: NonNullable<ReturnType<typeof areaPawn>>[] = [];
+  for (let offset = 0; offset < candidates.length && areaPawns.length < MAX_AREA_PAWNS;) {
+    const batch = candidates.slice(offset, offset + MAX_AREA_PAWNS - areaPawns.length);
+    offset += batch.length;
+    const live = await transaction.getAll(...batch.map(({placementId}) => db.doc(`${PLACEMENTS}/${placementId}`)));
+    const eligible = live.flatMap((placement) => {
+      const entry = areaPawn(placement);
+      if (!entry || placement.get("backgroundId") !== backgroundId ||
+        placement.id !== `${backgroundId}__${entry.pawn.tokenId}` ||
+        (!entry.visible && !manager) || (entry.dead && !action.allowDead) ||
+        (!entry.dead && action.requireDead) || combatDistance(area, entry.pawn) !== 0) return [];
+      return [entry];
+    });
+    if (!eligible.length) continue;
+    const liveTokens = await transaction.getAll(...eligible.map(({pawn}) => db.doc(`${TOKENS}/${pawn.tokenId}`)));
+    const tokens = new Map(liveTokens.map((token) => [token.id, token]));
+    for (const entry of eligible) {
+      const token = tokens.get(entry.pawn.tokenId);
+      if (!token?.exists || token.get("ownerUid") !== entry.pawn.ownerUid ||
+        token.get("deletionState") === "pending" || token.get("task06Deletion.status") === "pending" ||
+        !combatRelationAllows(action, actorSide, pawnSide({...entry, token}))) continue;
+      areaPawns.push(entry);
+    }
+  }
   return {affected: areaPawns.map(({pawn}) => pawn), visible: areaPawns.every(({visible}) => visible)};
 };
 
@@ -747,7 +764,7 @@ const launchCombat = async (context: Context, input: Fields) => {
   const targets = attacks.map(({target}) => target);
   const status = combatStatus(targets);
   const areaTargets = await readAffectedPawns(
-    context, backgroundId, action, point, targetPawns.map(({pawn}) => pawn),
+    context, backgroundId, actor, action, point, targetPawns.map(({pawn}) => pawn),
     board.get("fogOfWarEnabled") !== false
   );
   const actorSummary = {...actor.pawn, ...actorState.resources};
@@ -810,7 +827,7 @@ const newDefenseTrial = (
 ): {trial: CombatTrial; damageDetails: CombatDamageDetails | null; proposed: CombatEffect[]} => {
   const {round, attack} = target;
   // An effect that lands without weapon damage proposes the card's own.
-  const landed = (outcome: "hit" | "accepted", defense: CombatRoll | null, audit = {}) => {
+  const landed = (outcome: "hit" | "accepted", defense: CombatRoll | null, audit: Pick<CombatTrial, "defenseAdjusted"> = {}) => {
     const proposed = proposeDamage(action, actor, target);
     const damage = proposed.find(({kind}) => kind === "damage")?.amount ?? null;
     return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails: null, proposed};
@@ -833,10 +850,10 @@ const newDefenseTrial = (
   if (defaults.showDie && !die) return fail("invalid-argument", "Scegli un Dado Anima valido.");
   const defense = makeCombatRoll(defaults.label, value, die, roll);
   // The defender may type situational values; the trial keeps each change for the DM.
-  const overrides = combatDefenseOverrides(defaults, {
+  const defenseAdjusted = combatDefenseAdjusted(defaults, {
     bonus: value, reduction: defaults.showReduction ? reduction : null, die,
   });
-  const audit = overrides ? {overrides} : {};
+  const audit = defenseAdjusted ? {defenseAdjusted} : {};
   const outcome = attack ? compareCombatRolls(attack.total, defense.total) : "hit";
   if (outcome !== "hit") {
     return {trial: {round, attack, defense, outcome, damage: null, ...audit}, damageDetails: null, proposed: []};

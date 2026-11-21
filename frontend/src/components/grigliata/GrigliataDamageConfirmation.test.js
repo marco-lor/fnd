@@ -100,3 +100,32 @@ test('AppliedDamage reads the recorded amount, 0 included, and takes focus only 
   expect(focusRef.current).toBe(screen.getByText('Danno applicato · 0'));
   expect(focusRef.current).toHaveAttribute('tabindex', '-1');
 });
+
+test('a live table critical receives focus and preserves the unsent draft when a numeric amount returns', () => {
+  const view = (proposal, floor, criticalScore) => (
+    <>
+      <button type="button">Mappa</button>
+      <TargetDamage name="Lia" proposal={proposal} floor={floor} criticalScore={criticalScore} onApply={jest.fn()} />
+    </>
+  );
+  const { rerender } = render(view({ amount: 9, formula: '' }, { minimum: 9 }, 13));
+  const field = screen.getByLabelText('Danno finale');
+  field.focus();
+  fireEvent.change(field, { target: { value: '16' } });
+
+  rerender(view({ amount: null, formula: '2d6 + 4' }, { table: true }, 30));
+  const note = screen.getByText('Critico da calcolare al tavolo: il danno lo applica il DM.');
+  expect(note).toHaveFocus();
+  expect(note).toHaveAccessibleDescription('2d6 + 4');
+
+  rerender(view({ amount: 12, formula: '' }, { minimum: 12 }, 21));
+  expect(screen.getByLabelText('Danno finale')).toHaveFocus();
+  expect(screen.getByLabelText('Danno finale')).toHaveValue('16');
+  expect(screen.getByRole('button', { name: 'Applica danno' })).toHaveAttribute('aria-disabled', 'true');
+
+  const outside = screen.getByRole('button', { name: 'Mappa' });
+  outside.focus();
+  rerender(view({ amount: null, formula: '2d6 + 4' }, { table: true }, 30));
+  expect(outside).toHaveFocus();
+  expect(screen.getByRole('status')).toHaveTextContent('Lia. Critico da calcolare al tavolo');
+});

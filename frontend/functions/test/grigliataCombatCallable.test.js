@@ -672,6 +672,27 @@ test('a square area lists its pawns from a roster read outside the transaction a
   assert.deepEqual(placementReads('query'), []);
 });
 
+test('square areas fill their limit with live eligible allies instead of the first placements', async () => {
+  fixture();
+  db.seed(`grigliata_backgrounds/${board}`, {fogOfWarEnabled: false});
+  seedSpell('ward', {
+    Nome: 'Cerchio protettivo', Costo: 1, Gittata: '60 ft',
+    combat: {mode: 'area', relation: 'selfOrAlly', area: {shape: 'square', sideSquares: 3}},
+  });
+  for (let i = 0; i < 100; i += 1) {
+    const id = `fallen-${i}`;
+    seedPawn(id, 3, {tokenType: 'character', stats}, defender);
+    const path = `grigliata_token_placements/${place(id)}`;
+    db.seed(path, {...db.read(path), isDead: true});
+  }
+  seedPawn('foe-in-area', 3, {tokenType: 'foe', stats}, attacker);
+  seedPawn('changed-owner', 3, {tokenType: 'character', stats}, defender);
+  seedPawn('ally-in-area', 3, {tokenType: 'character', stats}, defender);
+  db.onNextQuery(() => db.seed('grigliata_tokens/changed-owner', {ownerUid: attacker, tokenType: 'character'}));
+  const {combatId} = await launch('spell', 'personal:ward', {targetPlacementIds: [], point: {col: 3, row: 0}});
+  assert.deepEqual(journal(combatId).affected.map(({placementId}) => placementId), [place('ally-in-area')]);
+});
+
 const dm = 'dm';
 const applyDamage = (combatId, options = {}, uid = dm) => call(uid, {
   command: 'applyDamage', combatId, targetPlacementId: place(defender), amount: 7, criticalScore: null, ...options,
@@ -1030,7 +1051,7 @@ test('a critical left to the table is applied by the DM, never confirmed by the 
   assert.deepEqual([requestOf(combatId).status, requestOf(combatId).ownerDamage.target.damageApplied], ['done', {amount: 5}]);
 });
 
-test('typed defense values are audited on their trial against the stored defaults; others stay clean', async () => {
+test('typed defense values mark their trial without copying private defaults to the journal', async () => {
   fixture();
   const trialsOf = combatId => journal(combatId).targets[0].trials;
   const untouched = await launch('weapon', 'weaponMain');
@@ -1045,9 +1066,8 @@ test('typed defense values are audited on their trial against the stored default
   const dodged = await launch('weapon', 'weaponMain');
   const answer = await defend(dodged.combatId, {defense: 90, reduction: 0, die: 20});
   assert.deepEqual([answer.outcome, answer.overrides], ['resisted', undefined]);
-  assert.deepEqual(trialsOf(dodged.combatId)[0].overrides, {
-    bonus: {value: 90, default: 2}, reduction: {value: 0, default: 2}, die: {value: 20, default: 12},
-  });
+  assert.deepEqual(Object.keys(trialsOf(dodged.combatId)[0]), ['round', 'attack', 'defense', 'outcome', 'damage', 'defenseAdjusted']);
+  assert.equal(trialsOf(dodged.combatId)[0].defenseAdjusted, true);
   assert.deepEqual(await defend(dodged.combatId, {defense: 2}), answer);
   assert.deepEqual(trialsOf(dodged.combatId).length, 1);
 
@@ -1057,8 +1077,8 @@ test('typed defense values are audited on their trial against the stored default
   await call(attacker, {command: 'retry', combatId: tied.combatId, round: 1, targetPlacementId: place(defender)});
   assert.equal((await defend(tied.combatId, {round: 2})).outcome, 'hit');
   const [tie, decisive] = trialsOf(tied.combatId);
-  assert.deepEqual(tie.overrides, {bonus: {value: 4, default: 2}});
-  assert.equal('overrides' in decisive, false);
+  assert.equal(tie.defenseAdjusted, true);
+  assert.equal('defenseAdjusted' in decisive, false);
 
   // A spell defense without RD audits only what it asked for; a consent has nothing to audit.
   seedSpell('barrier', {
@@ -1067,12 +1087,12 @@ test('typed defense values are audited on their trial against the stored default
   });
   const spell = await launch('spell', 'personal:barrier');
   await defend(spell.combatId, {defense: 3, reduction: 50});
-  assert.deepEqual(trialsOf(spell.combatId)[0].overrides, {bonus: {value: 3, default: 2}});
+  assert.equal(trialsOf(spell.combatId)[0].defenseAdjusted, true);
   seedSpell('pact', {Nome: 'Patto', Costo: 1, danni: '1d8', Cura: '1d4', combat: {targetConsent: true}});
   for (const consent of [true, false]) {
     const pact = await launch('spell', 'personal:pact');
     await defend(pact.combatId, {consent, defense: 50});
-    assert.equal('overrides' in trialsOf(pact.combatId)[0], false);
+    assert.equal('defenseAdjusted' in trialsOf(pact.combatId)[0], false);
   }
 });
 

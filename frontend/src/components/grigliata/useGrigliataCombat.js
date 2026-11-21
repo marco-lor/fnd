@@ -5,7 +5,7 @@ import { getCallable } from '../../data/functions/callableRegistry';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
 import { buildPlacementDocId } from './boardUtils';
 import { combatTime } from './combatPresentation';
-import { canTargetToken, combatArea, combatDistance, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
+import { canTargetToken, combatAllies, combatArea, combatDistance, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
 
 const EMPTY = [];
 const UNRESOLVED = ['waiting', 'retry'];
@@ -229,7 +229,11 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     .map(t => ({...t,distanceFt:combatDistance(pawn,t)})).sort((a,b) => a.distanceFt-b.distanceFt || a.name.localeCompare(b.name,'it'));
   const point = ground && kept.point && withinCombatRange(pawn,kept.point,action) ? kept.point : null;
   const area = combatArea(action, point);
-  const areaTargets = area ? board.filter(t => (!t.isDead || action.allowDead) && combatDistance(area, t) === 0) : EMPTY;
+  const alliesOnly = action?.relation === 'ally' || action?.relation === 'selfOrAlly';
+  const areaTargets = area ? board.filter(t =>
+    (!t.isDead || action.allowDead) && (!action.requireDead || t.isDead) &&
+    (!alliesOnly || combatAllies(pawn, t)) && combatDistance(area, t) === 0
+  ) : EMPTY;
   const selection = {...kept, point, areaTargets, targetIds, actionId:action?.id || '', actionKind:action?.kind || base.actionKind,
     picking:!!(catalogKey && action && kept.picking)};
   useEffect(() => { if (!catalogKey) setDraft(initialSelection); }, [catalogKey]);

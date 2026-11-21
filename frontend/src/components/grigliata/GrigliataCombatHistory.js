@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FaArrowRight, FaClock, FaDiceD20, FaHistory } from 'react-icons/fa';
 import {
-  combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatDefenseOverrideLabel, combatOutcomeLabel,
+  combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatOutcomeLabel,
   combatPointLabel, combatSpentLabel, combatTargetName, combatTime, formatCombatRoll, signedCombatModifier,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
@@ -119,8 +119,9 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal,
           <DetailRow label={'Prova ' + (trial.round ?? index + 1)}>{combatOutcomeLabel(trial.outcome, kind, hands)}</DetailRow>
           <LoggedRoll roll={trial.attack} />
           <LoggedRoll roll={trial.defense} />
-          {/* The values the defender typed instead of the stored ones, for the DM only. */}
-          {isManager && <DetailRow label="Valori modificati" className="gc-override">{combatDefenseOverrideLabel(trial)}</DetailRow>}
+          {isManager && trial.defenseAdjusted === true && (
+            <DetailRow label="Valori modificati" className="gc-override">Difesa impostata manualmente</DetailRow>
+          )}
           <DetailRow label="Danno proposto">{trial.damage}</DetailRow>
         </dl>
       ))}
@@ -164,7 +165,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
   const { actor, action, targets = [], affected = [], cost, effects = [] } = event;
   const destination = eventDestinations(event);
   // The DM spots typed defense values without opening every entry.
-  const overridden = isManager && targets.some(target => (target.trials || []).some(trial => combatDefenseOverrideLabel(trial)));
+  const overridden = isManager && targets.some(target => (target.trials || []).some(trial => trial.defenseAdjusted === true));
   // Per target: the DM answers for every pawn, a player only for their own.
   const damageCommand = target => (onApplyDamage && event.id && (!canApplyDamage || canApplyDamage(event, target))
     ? amount => onApplyDamage(event, target, amount)

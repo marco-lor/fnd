@@ -223,16 +223,16 @@ test('a player’s own pawn keeps the proposal as the minimum, and a critical ro
   expect(onApplyDamage).toHaveBeenCalledTimes(1);
 });
 
-test('the DM reads each defense value typed instead of the stored one, round by round; players and older rounds read none', () => {
+test('the DM sees which rounds used manually adjusted defenses', () => {
   const defense = value => ({ label: 'Difesa', total: value + 1, bonus: value, sides: 20, rolls: [1] });
   const event = volley([
     struck({ round: 2, trials: [
-      { round: 1, attack, defense: defense(4), outcome: 'tie', damage: null, overrides: { bonus: { value: 4, default: 2 } } },
+      { round: 1, attack, defense: defense(4), outcome: 'tie', damage: null, defenseAdjusted: true },
       { round: 2, attack, defense: defense(2), outcome: 'hit', damage: 7 },
     ] }),
     { ...lia, status: 'done', outcome: 'resisted', round: 1, damage: null, trials: [{
       round: 1, attack, defense: defense(90), outcome: 'resisted', damage: null,
-      overrides: { bonus: { value: 90, default: 2 }, reduction: { value: 0, default: 2 }, die: { value: 20, default: 12 } },
+      defenseAdjusted: true,
     }] },
   ]);
   const { rerender } = render(<GrigliataCombatHistory events={[event]} isManager />);
@@ -240,16 +240,14 @@ test('the DM reads each defense value typed instead of the stored one, round by 
     .toBeInTheDocument();
   openLog();
   expect(screen.getAllByText('Valori modificati', { selector: '.gc-override dt' })).toHaveLength(2);
-  expect(screen.getByText('Difesa 4 invece di 2', { selector: '.gc-override dd' })).toBeInTheDocument();
-  expect(screen.getByText('Difesa 90 invece di 2 · RD 0 invece di 2 · Dado Anima d20 invece di d12', { selector: '.gc-override dd' }))
-    .toBeInTheDocument();
+  expect(screen.getAllByText('Difesa impostata manualmente', { selector: '.gc-override dd' })).toHaveLength(2);
 
   // Players see the rolls as before; untouched and older rounds read clean for the DM too.
   rerender(<GrigliataCombatHistory events={[event]} />);
   expect(screen.queryByText('Valori modificati')).not.toBeInTheDocument();
   expect(screen.queryByText(/valori di difesa modificati/)).not.toBeInTheDocument();
   const clean = volley(event.targets.map(({ trials, ...target }) => ({
-    ...target, trials: trials.map(({ overrides, ...trial }) => trial),
+    ...target, trials: trials.map(({ defenseAdjusted, ...trial }) => trial),
   })));
   rerender(<GrigliataCombatHistory events={[clean]} isManager />);
   expect(screen.queryByText('Valori modificati')).not.toBeInTheDocument();
