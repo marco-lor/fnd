@@ -123,9 +123,11 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   let backgroundSequence = 0;
   jest.setTimeout(60000);
 
-  const nextBackgroundId = (label) => {
+  const createBackground = async (label, grid = GRID) => {
     backgroundSequence += 1;
-    return `fog-emulator-${label}-${runId}-${backgroundSequence}`;
+    const id = `fog-emulator-${label}-${runId}-${backgroundSequence}`;
+    await seedBackground(id, grid);
+    return id;
   };
   const playerClient = () => environment.authenticatedContext(PLAYER).firestore();
   const managerClient = () => environment.authenticatedContext(DM).firestore();
@@ -159,12 +161,12 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
     updatedBy: PLAYER,
     ...options,
   });
-  const hideAsManager = (db, { backgroundId, cells }, options = {}) => persistFogBrushQueueEntry({
+  const paintAsManager = (db, { backgroundId, cells, mode = 'hide' }, options = {}) => persistFogBrushQueueEntry({
     db,
     entry: {
       backgroundId,
       ownerUids: [PLAYER],
-      mode: 'hide',
+      mode,
       ...GRID,
       updatedBy: DM,
       brushPolygons: cells.map(([col, row]) => cellPolygon(col, row)),
@@ -215,7 +217,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('two same-owner clients discovering different bits from the same stale tile keep both', async () => {
-    const backgroundId = nextBackgroundId('player-player');
+    const backgroundId = await createBackground('player-player');
     const base = rasterTile({ backgroundId, cells: [[1, 1]] });
     const first = rasterTile({ backgroundId, cells: [[3, 0]] });
     const second = rasterTile({ backgroundId, cells: [[5, 2]] });
@@ -247,7 +249,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('control: the pre-fix read/merge/write protocol loses one of the two discoveries', async () => {
-    const backgroundId = nextBackgroundId('legacy-player-player');
+    const backgroundId = await createBackground('legacy-player-player');
     const base = rasterTile({ backgroundId, cells: [[1, 1]] });
     const first = rasterTile({ backgroundId, cells: [[3, 0]] });
     const second = rasterTile({ backgroundId, cells: [[5, 2]] });
@@ -277,7 +279,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('manager hide commits first: a stale independent reveal cannot restore the hidden old bit', async () => {
-    const backgroundId = nextBackgroundId('hide-then-reveal');
+    const backgroundId = await createBackground('hide-then-reveal');
     const kept = rasterTile({ backgroundId, cells: [[1, 1]] });
     const hidden = rasterTile({ backgroundId, cells: [[0, 0]] });
     const fresh = rasterTile({ backgroundId, cells: [[3, 0]] });
@@ -295,8 +297,8 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
       runTransaction: playerGate.runTransaction,
     });
     await playerGate.arrived; // the player's transaction has read kept+hidden
-    const hideResult = await hideAsManager(managerClient(), { backgroundId, cells: [[0, 0]] });
-    expect(hideResult.failedOwnerUids).toEqual([]);
+    const hideResult = await paintAsManager(managerClient(), { backgroundId, cells: [[0, 0]] });
+    expect(hideResult.unfinishedOwners).toEqual([]);
     expect(hideResult.didWrite).toBe(true);
     playerGate.release();
     const [revealResult] = await reveal;
@@ -310,7 +312,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('control: the pre-fix full-mask write after a manager hide resurrects the hidden bit', async () => {
-    const backgroundId = nextBackgroundId('legacy-hide-then-reveal');
+    const backgroundId = await createBackground('legacy-hide-then-reveal');
     const kept = rasterTile({ backgroundId, cells: [[1, 1]] });
     const hidden = rasterTile({ backgroundId, cells: [[0, 0]] });
     const fresh = rasterTile({ backgroundId, cells: [[3, 0]] });
@@ -321,7 +323,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
     await legacyReadMergeWrite(
       playerClient(),
       withMask(fresh, fresh.maskBytes),
-      () => hideAsManager(managerClient(), { backgroundId, cells: [[0, 0]] })
+      () => paintAsManager(managerClient(), { backgroundId, cells: [[0, 0]] })
     );
 
     const stored = await rereadMask(kept.id);
@@ -329,7 +331,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('player reveal commits first: the manager hide re-reads and still removes only the old bit', async () => {
-    const backgroundId = nextBackgroundId('reveal-then-hide');
+    const backgroundId = await createBackground('reveal-then-hide');
     const kept = rasterTile({ backgroundId, cells: [[1, 1]] });
     const hidden = rasterTile({ backgroundId, cells: [[0, 0]] });
     const fresh = rasterTile({ backgroundId, cells: [[3, 0]] });
@@ -337,7 +339,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
     await persistAsPlayer(playerClient(), [withMask(kept, known)]);
 
     const managerGate = createCommitGate();
-    const hide = hideAsManager(managerClient(), { backgroundId, cells: [[0, 0]] }, {
+    const hide = paintAsManager(managerClient(), { backgroundId, cells: [[0, 0]] }, {
       runTransaction: managerGate.runTransaction,
     });
     await managerGate.arrived; // the manager's transaction has read kept+hidden
@@ -348,20 +350,20 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
     managerGate.release();
     const hideResult = await hide;
 
-    expect(hideResult.failedOwnerUids).toEqual([]);
+    expect(hideResult.unfinishedOwners).toEqual([]);
     expect(managerGate.attempts()).toBe(2);
     const stored = await rereadMask(kept.id);
     expect(sameMask(stored, mergeFogRasterTileMasks(kept.maskBytes, fresh.maskBytes))).toBe(true);
   });
 
   test('a hidden bit returns only through fresh discovery after the player re-reads memory', async () => {
-    const backgroundId = nextBackgroundId('fresh-discovery');
+    const backgroundId = await createBackground('fresh-discovery');
     const kept = rasterTile({ backgroundId, cells: [[1, 1]] });
     const hidden = rasterTile({ backgroundId, cells: [[0, 0]] });
     await persistAsPlayer(playerClient(), [
       withMask(kept, mergeFogRasterTileMasks(kept.maskBytes, hidden.maskBytes)),
     ]);
-    await hideAsManager(managerClient(), { backgroundId, cells: [[0, 0]] });
+    await paintAsManager(managerClient(), { backgroundId, cells: [[0, 0]] });
 
     // Reload: the player's known memory now comes from a clean re-read.
     const reloadedKnown = await rereadMask(kept.id);
@@ -374,7 +376,7 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('a rules-denied tile fails alone without losing the rest of the batch', async () => {
-    const backgroundId = nextBackgroundId('partial-failure');
+    const backgroundId = await createBackground('partial-failure');
     const own = rasterTile({ backgroundId, cells: [[2, 2]] });
     const foreign = rasterTile({ backgroundId, cells: [[2, 2]], ownerUid: OTHER_PLAYER });
 
@@ -387,9 +389,8 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
   });
 
   test('a delta queued on an outdated grid is discarded instead of overwriting the newer grid tile', async () => {
-    const backgroundId = nextBackgroundId('stale-grid');
     const realignedGrid = { ...GRID, offsetXPx: 8 };
-    await seedBackground(backgroundId, realignedGrid);
+    const backgroundId = await createBackground('stale-grid', realignedGrid);
     const newer = rasterTile({ backgroundId, cells: [[0, 0], [1, 1], [2, 2]], grid: realignedGrid });
     await persistAsPlayer(playerClient(), [newer]);
     const staleDelta = rasterTile({ backgroundId, cells: [[4, 4]] });
@@ -403,10 +404,34 @@ describeWithEmulator('fog memory persistence on the local Firestore emulator (tw
     expect(sameMask(stored.maskBytes, newer.maskBytes)).toBe(true);
   });
 
+  test('recalibrating before a first-tile commit rejects both a queued discovery and a manager reveal', async () => {
+    const backgroundId = await createBackground('empty-grid-race');
+    const cells = [[0, 0]];
+    const tile = rasterTile({ backgroundId, cells });
+    const playerGate = createCommitGate();
+    const managerGate = createCommitGate();
+    const discover = persistAsPlayer(playerClient(), [tile], { runTransaction: playerGate.runTransaction });
+    const reveal = paintAsManager(managerClient(), { backgroundId, cells, mode: 'reveal' }, {
+      runTransaction: managerGate.runTransaction,
+    });
+    try {
+      await Promise.all([playerGate.arrived, managerGate.arrived]);
+      await seedBackground(backgroundId, { ...GRID, offsetXPx: 8 });
+    } finally {
+      playerGate.release();
+      managerGate.release();
+    }
+    const [[discovery], stroke] = await Promise.all([discover, reveal]);
+    expect(discovery.status).toBe('stale-grid');
+    expect(stroke).toEqual({ didWrite: false, unfinishedOwners: [] });
+    expect(playerGate.attempts()).toBeGreaterThan(1);
+    expect(managerGate.attempts()).toBeGreaterThan(1);
+    expect(await rereadTile(tile.id)).toBeNull();
+  });
+
   test('a current-grid delta replaces a tile left from an earlier grid instead of merging', async () => {
-    const backgroundId = nextBackgroundId('replace-old-grid');
+    const backgroundId = await createBackground('replace-old-grid');
     const oldGrid = { ...GRID, offsetXPx: 8 };
-    await seedBackground(backgroundId, GRID);
     const oldGridTile = rasterTile({ backgroundId, cells: [[0, 0], [1, 1]], grid: oldGrid });
     await seedAsAdmin(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/${oldGridTile.id}`, buildFogRasterTilePayload({
       ...oldGridTile,

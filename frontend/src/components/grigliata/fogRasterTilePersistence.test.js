@@ -1,7 +1,6 @@
 import {
   applyFogBrushTilesForOwner,
   buildFogBrushQueueKey,
-  createFogRasterTileGridScopeResolver,
   FOG_BRUSH_MAX_TILES_PER_TRANSACTION,
   buildFogRasterDiscoveryDeltaMask,
   drainFogBrushQueue,
@@ -94,7 +93,8 @@ const createTransactionStore = (initialDocs = []) => {
         if (writes.length > 0) {
           throw new Error('Firestore transactions require all reads to be executed before all writes.');
         }
-        const stored = docs.get(target.id);
+        const stored = docs.get(target.id)
+          || (target.path === 'grigliata_backgrounds/map-1' ? { grid: GRID } : null);
         return {
           id: target.id,
           exists: () => !!stored,
@@ -262,23 +262,14 @@ describe('player discovery persistence', () => {
     expect(bitsOf(store.maskOf(newerTileId))).toEqual([1, 2, 3]);
   });
 
-  test('grid scope resolver reads the background at most once per transaction attempt', async () => {
-    const transaction = {
-      get: jest.fn(async () => ({ exists: () => true, data: () => ({ grid: GRID }) })),
-    };
-    const resolve = createFogRasterTileGridScopeResolver({ db: {}, transaction });
-    const operationTile = buildTile({ maskBytes: maskWithBits(1) });
-    const sameGridStored = { ...operationTile };
-    const oldGridStored = { ...operationTile, cellSizePx: 50 };
-
-    await expect(resolve({ storedTile: null, operationTile })).resolves.toEqual({ action: 'merge', baseTile: null });
-    await expect(resolve({ storedTile: sameGridStored, operationTile }))
-      .resolves.toEqual({ action: 'merge', baseTile: sameGridStored });
-    expect(transaction.get).not.toHaveBeenCalled();
-    await expect(resolve({ storedTile: oldGridStored, operationTile })).resolves.toEqual({ action: 'replace', baseTile: null });
-    await expect(resolve({ storedTile: oldGridStored, operationTile: { ...operationTile, offsetYPx: 3 } }))
-      .resolves.toEqual({ action: 'discard', baseTile: null });
-    expect(transaction.get).toHaveBeenCalledTimes(1);
+  test.each([false, true])('rejects stale discoveries on missing and untouched old-grid tiles (exists=%s)', async (exists) => {
+    const tile = buildTile({ maskBytes: maskWithBits(3) });
+    const oldTile = storedDocFor(buildTile({ maskBytes: maskWithBits(1) }));
+    const store = createTransactionStore([{ id: 'map-1', grid: { ...GRID, offsetXPx: 8 } }, ...(exists ? [oldTile] : [])]);
+    await expect(persistFogRasterDiscoveryTile({
+      db: {}, tile, updatedBy: tile.ownerUid, runTransaction: store.runTransaction,
+    })).resolves.toBe('stale-grid');
+    expect(store.docs.get(tile.id)).toEqual(exists ? oldTile : undefined);
   });
 
   test('settles tiles independently and reports failures for re-queueing', async () => {
@@ -518,12 +509,14 @@ describe('manager brush persistence', () => {
       runTransaction: store.runTransaction,
     });
 
-    expect(result).toEqual({ didWrite: true, failedOwnerUids: [], nextChunkByOwner: {}, error: null });
+    expect(result).toEqual({ didWrite: true, unfinishedOwners: [] });
     expect(FOG_BRUSH_MAX_TILES_PER_TRANSACTION).toBe(200);
     expect(store.transactions.map((transaction) => transaction.set.mock.calls.length)
       .sort((left, right) => left - right)).toEqual([25, 25, 200, 200]);
     store.transactions.forEach((transaction) => {
-      expect(transaction.get.mock.calls.length).toBeLessThanOrEqual(FOG_BRUSH_MAX_TILES_PER_TRANSACTION);
+      const reads = transaction.get.mock.calls.map(([ref]) => ref.path);
+      expect(reads.filter((path) => path === 'grigliata_backgrounds/map-1')).toHaveLength(1);
+      expect(reads.length).toBeLessThanOrEqual(FOG_BRUSH_MAX_TILES_PER_TRANSACTION + 1);
     });
     expect(store.docs.size).toBe(450);
   });
@@ -536,8 +529,10 @@ describe('manager brush persistence', () => {
       mode: 'reveal', updatedBy: 'dm-1', ...GRID,
       brushPolygons: [[[{ x: 0, y: 0 }, { x: 8400, y: 0 }, { x: 8400, y: 8400 }, { x: 0, y: 8400 }]]],
     };
-    await persistFogBrushQueueEntry({
+    const onOwnerResult = jest.fn();
+    const result = await persistFogBrushQueueEntry({
       db: {}, entry, concurrency: 1,
+      onOwnerResult,
       shouldContinue: () => active,
       runTransaction: async (db, callback) => {
         const result = await store.runTransaction(db, callback);
@@ -546,6 +541,11 @@ describe('manager brush persistence', () => {
       },
     });
     expect(store.transactions).toHaveLength(1);
+    expect(onOwnerResult).not.toHaveBeenCalled();
+    expect(result.unfinishedOwners).toEqual([
+      { ownerUid: 'player-2', nextChunk: 1, error: null },
+      { ownerUid: 'player-3', nextChunk: 0, error: null },
+    ]);
     expect(store.docs.size).toBe(FOG_BRUSH_MAX_TILES_PER_TRANSACTION);
     expect([...store.docs.values()].every((tile) => tile.ownerUid === 'player-2')).toBe(true);
   });
@@ -569,7 +569,7 @@ describe('manager brush persistence', () => {
         return store.runTransaction(db, callback);
       },
     });
-    expect(result).toBe(false);
+    expect(result).toBeNull();
     expect(store.transactions.map((transaction) => transaction.get.mock.calls.length)).toEqual([1, 0]);
     expect(store.docs.size).toBe(0);
   });
@@ -601,8 +601,9 @@ describe('manager brush persistence', () => {
     });
 
     expect(result.didWrite).toBe(true);
-    expect(result.failedOwnerUids).toEqual(['player-3']);
-    expect(result.error.code).toBe('unavailable');
+    expect(result.unfinishedOwners).toEqual([
+      { ownerUid: 'player-3', nextChunk: 0, error: expect.objectContaining({ code: 'unavailable' }) },
+    ]);
     expect(onOwnerResult.mock.calls.map(([call]) => call.ownerUid).sort()).toEqual(['player-2', 'player-4']);
     const expectedTileCount = rasterizeFogPolygonsToTiles({
       backgroundId: 'map-1',
@@ -639,7 +640,7 @@ describe('drainFogBrushQueue', () => {
       queue,
       persistEntry: async (queued) => {
         applied.push(queued.name);
-        return { didWrite: true, failedOwnerUids: [], error: null };
+        return { didWrite: true, unfinishedOwners: [] };
       },
     })).resolves.toBe(true);
 
@@ -651,7 +652,7 @@ describe('drainFogBrushQueue', () => {
     const queue = [entry('hide-1', ['player-2', 'player-3']), entry('reveal-1')];
     const failure = Object.assign(new Error('offline'), { code: 'unavailable' });
     const persistEntry = jest.fn()
-      .mockResolvedValueOnce({ didWrite: true, failedOwnerUids: ['player-3'], error: failure });
+      .mockResolvedValueOnce({ didWrite: true, unfinishedOwners: [{ ownerUid: 'player-3', nextChunk: 0, error: failure }] });
 
     await expect(drainFogBrushQueue({ queue, persistEntry })).rejects.toBe(failure);
 
@@ -665,7 +666,7 @@ describe('drainFogBrushQueue', () => {
     const applied = [];
     persistEntry.mockImplementation(async (queued) => {
       applied.push([queued.name, queued.ownerUids]);
-      return { didWrite: true, failedOwnerUids: [], error: null };
+      return { didWrite: true, unfinishedOwners: [] };
     });
     await expect(drainFogBrushQueue({ queue, persistEntry })).resolves.toBe(true);
     expect(applied).toEqual([
@@ -743,7 +744,7 @@ describe('drainFogBrushQueue', () => {
       persistEntry: async (queued) => {
         applied.push(queued.name);
         isSessionActive = false;
-        return { didWrite: true, failedOwnerUids: [], error: null };
+        return { didWrite: true, unfinishedOwners: [] };
       },
     })).resolves.toBe(true);
 
@@ -751,15 +752,31 @@ describe('drainFogBrushQueue', () => {
     expect(queue.map((queued) => queued.name)).toEqual(['reveal-1']);
   });
 
-  test('keeps the whole entry when persistence throws unexpectedly', async () => {
+  test('reports a rejected entry and applies the following stroke in the same drain', async () => {
     const queue = [entry('reveal-1'), entry('hide-1')];
-    const failure = new Error('rasterize failed');
+    const failure = Object.assign(new Error('invalid stroke'), { code: 'invalid-argument' });
+    const persistEntry = jest.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce({ didWrite: true, unfinishedOwners: [] });
+    const onPermanentFailure = jest.fn();
 
-    await expect(drainFogBrushQueue({
-      queue,
-      persistEntry: () => Promise.reject(failure),
-    })).rejects.toBe(failure);
+    await expect(drainFogBrushQueue({ queue, persistEntry, onPermanentFailure })).resolves.toBe(true);
+    expect(onPermanentFailure).toHaveBeenCalledWith(failure, 'player-2');
+    expect(persistEntry.mock.calls.map(([stroke]) => stroke.name)).toEqual(['reveal-1', 'hide-1']);
+    expect(queue).toEqual([]);
+  });
 
-    expect(queue.map((queued) => queued.name)).toEqual(['reveal-1', 'hide-1']);
+  test('reports a permanent owner failure and retries only the offline owner before later strokes', async () => {
+    const queue = [entry('hide-1', ['player-2', 'player-3']), entry('reveal-2')];
+    const denied = Object.assign(new Error('denied'), { code: 'permission-denied' });
+    const offline = Object.assign(new Error('offline'), { code: 'unavailable' });
+    const persistEntry = jest.fn().mockResolvedValueOnce({ didWrite: true, unfinishedOwners: [
+      { ownerUid: 'player-2', nextChunk: 0, error: denied },
+      { ownerUid: 'player-3', nextChunk: 2, error: offline },
+    ] }).mockResolvedValue({ didWrite: true, unfinishedOwners: [] });
+    const onPermanentFailure = jest.fn();
+    await expect(drainFogBrushQueue({ queue, persistEntry, onPermanentFailure })).rejects.toBe(offline);
+    expect(onPermanentFailure).toHaveBeenCalledWith(denied, 'player-2');
+    expect(queue[0]).toMatchObject({ ownerUids: ['player-3'], nextChunkByOwner: { 'player-3': 2 } });
+    await expect(drainFogBrushQueue({ queue, persistEntry, onPermanentFailure })).resolves.toBe(true);
+    expect(persistEntry.mock.calls.map(([stroke]) => stroke.name)).toEqual(['hide-1', 'hide-1', 'reveal-2']);
   });
 });

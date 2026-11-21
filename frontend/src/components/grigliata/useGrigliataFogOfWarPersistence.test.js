@@ -117,14 +117,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
       data: () => ({}),
     }));
     firestore.runTransaction.mockClear().mockImplementation((db, callback) => {
-      const transaction = {
-        get: jest.fn((target) => Promise.resolve({
-          id: target.id,
-          exists: () => false,
-          data: () => ({}),
-        })),
-        set: jest.fn(),
-      };
+      const transaction = buildMockTransaction();
       mockTransactionInstances.push(transaction);
       return Promise.resolve(callback(transaction));
     });
@@ -308,7 +301,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
   };
   const buildMockTransaction = (storedDocsById = new Map()) => ({
     get: jest.fn((target) => {
-      const stored = storedDocsById.get(target.id);
+      const stored = storedDocsById.get(target.id) || (target.path.startsWith('grigliata_backgrounds/') ? { grid } : null);
       return Promise.resolve({
         id: target.id,
         exists: () => !!stored,
@@ -503,7 +496,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
       expect(pendingTileCount()).toBe(0);
     });
     const retryReads = getTransactionReadIds().slice(firstFlushReads.length);
-    expect(retryReads).toEqual([failedTileId]);
+    expect(retryReads).toEqual([failedTileId, 'map-1']);
     expect(consoleErrorSpy).not.toHaveBeenCalledWith(
       'Failed to persist Grigliata raster fog memory:',
       expect.anything()
@@ -656,8 +649,9 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
 
   test('a flush that started before a grid realignment does not drop tiles queued on the new grid', async () => {
     let releaseFirstTransaction;
+    const storedDocs = new Map([['map-1', { grid }]]);
     firestore.runTransaction.mockImplementation((db, callback) => {
-      const transaction = buildMockTransaction();
+      const transaction = buildMockTransaction(storedDocs);
       mockTransactionInstances.push(transaction);
       if (!releaseFirstTransaction) {
         return new Promise((resolve) => {
@@ -680,6 +674,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
 
     // Realign, move, and let the new debounce expire while the old-grid
     // transaction is still open.
+    storedDocs.set('map-1', { grid: realignedGrid });
     rerender(<PersistenceProbe hookArgs={{
       ...baseArgs,
       grid: realignedGrid,

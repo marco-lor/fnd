@@ -72,7 +72,7 @@ const sampleWasPersisted = (masks, x, y) => {
 describe('live fog visibility with many owned sources', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    getDoc.mockResolvedValue({ exists: () => false });
+    getDoc.mockImplementation(async (path) => ({ exists: () => path === 'grigliata_backgrounds/map-1', data: () => ({ grid }) }));
     setDoc.mockResolvedValue(undefined);
     runTransaction.mockImplementation((_db, update) => update({ get: getDoc, set: setDoc }));
   });

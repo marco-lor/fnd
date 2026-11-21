@@ -113,47 +113,11 @@ export const fogRasterTileGridsMatch = (leftTile, rightTile) => (
   && leftTile.offsetYPx === rightTile.offsetYPx
 );
 
-/**
- * Creates a grid-scope resolver bound to one transaction attempt. Create it
- * inside the runTransaction callback so every retry re-reads.
- *
- *   resolve({ storedTile, operationTile }) =>
- *     Promise<{ action: 'merge' | 'replace' | 'discard', baseTile }>
- *
- * - No stored tile, or stored tile on the operation's grid: 'merge' with
- *   baseTile = storedTile (or null).
- * - Stored tile on a different grid: reads
- *   grigliata_backgrounds/{operationTile.backgroundId}.grid in the same
- *   transaction (once per background per attempt). If the operation's grid is
- *   the map's current grid, 'replace' (baseTile null: the old-grid bits are
- *   dropped); otherwise the operation is stale, 'discard' (write nothing).
- *
- * All reads happen before any write, as Firestore transactions require.
- */
-export const createFogRasterTileGridScopeResolver = ({ db, transaction }) => {
-  const authoritativeGridByBackgroundId = new Map();
-  const readAuthoritativeGrid = (backgroundId) => {
-    if (!authoritativeGridByBackgroundId.has(backgroundId)) {
-      authoritativeGridByBackgroundId.set(
-        backgroundId,
-        transaction.get(doc(db, GRIGLIATA_BACKGROUNDS_COLLECTION, backgroundId)).then((snapshot) => (
-          snapshot.exists() ? normalizeGridConfig(snapshot.data()?.grid) : null
-        ))
-      );
-    }
-    return authoritativeGridByBackgroundId.get(backgroundId);
-  };
-
-  return async ({ storedTile, operationTile }) => {
-    if (!storedTile || fogRasterTileGridsMatch(storedTile, operationTile)) {
-      return { action: 'merge', baseTile: storedTile || null };
-    }
-
-    const authoritativeGrid = await readAuthoritativeGrid(operationTile.backgroundId);
-    return fogRasterTileGridsMatch(authoritativeGrid, operationTile)
-      ? { action: 'replace', baseTile: null }
-      : { action: 'discard', baseTile: null };
-  };
+// Include the map in the transaction's read set before mutating any tile.
+// Recalibration between this read and the commit forces a fresh SDK attempt.
+const isCurrentFogGrid = async (db, transaction, tile) => {
+  const background = await transaction.get(doc(db, GRIGLIATA_BACKGROUNDS_COLLECTION, tile.backgroundId));
+  return background.exists() && fogRasterTileGridsMatch(normalizeGridConfig(background.data().grid), tile);
 };
 
 /**
@@ -170,7 +134,7 @@ export const buildFogRasterDiscoveryDeltaMask = (tileMaskBytes, knownMaskBytes) 
  * Adds a player's newly discovered bits to the latest stored tile.
  * The read/merge/write runs in a transaction so a concurrent same-owner
  * discovery or manager hide forces a re-read instead of being overwritten.
- * Bits are never merged across grids (see createFogRasterTileGridScopeResolver).
+ * Bits are merged only on the map's current grid.
  * Resolves to 'written', 'unchanged' (stored tile already contains every bit,
  * or nothing to write) or 'stale-grid' (the delta was computed on a grid the
  * map no longer uses and was discarded).
@@ -187,14 +151,13 @@ export const persistFogRasterDiscoveryTile = async ({
 
   const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, tile.id);
   return runTransaction(db, async (transaction) => {
-    const resolveGridScope = createFogRasterTileGridScopeResolver({ db, transaction });
     const storedTile = await readFogRasterTileInTransaction(transaction, tileRef);
-    const { action, baseTile } = await resolveGridScope({ storedTile, operationTile: tile });
-    if (action === 'discard') {
-      return 'stale-grid';
-    }
+    const baseTile = fogRasterTileGridsMatch(storedTile, tile) ? storedTile : null;
     if (baseTile && maskContainsFogRasterBits(baseTile.maskBytes, tile.maskBytes)) {
       return 'unchanged';
+    }
+    if (!await isCurrentFogGrid(db, transaction, tile)) {
+      return 'stale-grid';
     }
 
     transaction.set(
@@ -277,13 +240,10 @@ const planFogBrushHide = (storedTile, brushTile) => {
 
 // The mask a reveal writes, or null when nothing changes. A stored tile on
 // another grid is replaced only when the stroke is on the map's current grid.
-const planFogBrushReveal = async (resolveGridScope, storedTile, brushTile) => {
-  if (countFogRasterMaskBits(brushTile.maskBytes) < 1) {
-    return null;
-  }
-
-  const { action, baseTile } = await resolveGridScope({ storedTile, operationTile: brushTile });
-  if (action === 'discard' || (baseTile && maskContainsFogRasterBits(baseTile.maskBytes, brushTile.maskBytes))) {
+const planFogBrushReveal = (storedTile, brushTile) => {
+  const baseTile = fogRasterTileGridsMatch(storedTile, brushTile) ? storedTile : null;
+  if (countFogRasterMaskBits(brushTile.maskBytes) < 1
+      || (baseTile && maskContainsFogRasterBits(baseTile.maskBytes, brushTile.maskBytes))) {
     return null;
   }
   return { maskBytes: mergeFogRasterTileMasks(baseTile?.maskBytes, brushTile.maskBytes), emptiesTile: false };
@@ -296,7 +256,7 @@ const planFogBrushReveal = async (resolveGridScope, storedTile, brushTile) => {
  * ownerHasLegacyFogPolygons). Tiles the stroke would not change are not
  * written. A stored tile from a different grid is left alone by hide and
  * replaced by reveal only on the map's current grid. Every read precedes every
- * write, as Firestore transactions require.
+ * write, as Firestore transactions require. A cancelled attempt returns null.
  */
 export const applyFogBrushTilesForOwner = async ({
   db,
@@ -307,28 +267,28 @@ export const applyFogBrushTilesForOwner = async ({
   runTransaction = defaultRunTransaction,
   shouldContinue = () => true,
 }) => {
-  if (!brushTiles.length || !shouldContinue()) {
-    return false;
-  }
+  if (!brushTiles.length) return false;
+  if (!shouldContinue()) return null;
 
   const isHide = mode === 'hide';
   return runTransaction(db, async (transaction) => {
-    if (!shouldContinue()) return false;
-    const resolveGridScope = createFogRasterTileGridScopeResolver({ db, transaction });
+    if (!shouldContinue()) return null;
     const plans = await Promise.all(brushTiles.map(async (brushTile) => {
       const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, brushTile.id);
       const storedTile = await readFogRasterTileInTransaction(transaction, tileRef);
       const plan = isHide
         ? planFogBrushHide(storedTile, brushTile)
-        : await planFogBrushReveal(resolveGridScope, storedTile, brushTile);
+        : planFogBrushReveal(storedTile, brushTile);
       return plan && { ...plan, brushTile, tileRef };
     }));
     const writes = plans.filter(Boolean);
+    if (!shouldContinue()) return null;
+    if (!writes.length || !await isCurrentFogGrid(db, transaction, writes[0].brushTile)) return false;
     const emptiedTile = writes.find(({ emptiesTile }) => emptiesTile)?.brushTile;
     const keepsEmptiedTiles = !!emptiedTile
       && await ownerHasLegacyFogPolygons({ db, transaction, tile: emptiedTile, grid });
     // The board can close during a read or before Firestore retries a conflict.
-    if (!shouldContinue()) return false;
+    if (!shouldContinue()) return null;
     const updatedAt = serverTimestamp();
 
     writes.forEach(({ brushTile, tileRef, maskBytes, emptiesTile }) => {
@@ -344,7 +304,7 @@ export const applyFogBrushTilesForOwner = async ({
         updatedBy,
       }), { merge: true });
     });
-    return writes.length > 0;
+    return true;
   });
 };
 
@@ -389,9 +349,8 @@ const getFogBrushChunkStart = (entry, ownerUid) => {
  * that size is atomic per owner. An owner starts at
  * entry.nextChunkByOwner[ownerUid]: a committed chunk is never replayed over
  * discoveries made since.
- * Resolves to { didWrite, failedOwnerUids, nextChunkByOwner, error } and never
- * rejects for a per-owner failure. nextChunkByOwner holds the chunk each
- * failed owner stopped at, when past its first, so a retry resumes there.
+ * An unfinished owner carries its next uncommitted chunk and its own error.
+ * A null error means the board closed before the owner finished.
  */
 export const persistFogBrushQueueEntry = async ({
   db,
@@ -402,8 +361,16 @@ export const persistFogBrushQueueEntry = async ({
   onOwnerResult,
   shouldContinue = () => true,
 }) => {
-  if (!isValidFogBrushQueueEntry(entry) || !shouldContinue()) {
-    return { didWrite: false, failedOwnerUids: [], nextChunkByOwner: {}, error: null };
+  if (!isValidFogBrushQueueEntry(entry)) {
+    return { didWrite: false, unfinishedOwners: [] };
+  }
+  if (!shouldContinue()) {
+    return {
+      didWrite: false,
+      unfinishedOwners: entry.ownerUids.map((ownerUid) => ({
+        ownerUid, nextChunk: getFogBrushChunkStart(entry, ownerUid), error: null,
+      })),
+    };
   }
 
   const brushGrid = normalizeGridConfig({
@@ -446,14 +413,18 @@ export const persistFogBrushQueueEntry = async ({
             runTransaction,
             shouldContinue,
           });
+          if (didWriteChunk === null) break;
           didWriteTile = didWriteTile || didWriteChunk;
           inputTileCount += brushTiles.length;
         }
       } catch (error) {
-        return { ownerUid, didWriteTile, nextChunk, failed: true, error };
+        return { didWriteTile, unfinished: { ownerUid, nextChunk, error } };
+      }
+      if (nextChunk < chunks.length) {
+        return { didWriteTile, unfinished: { ownerUid, nextChunk, error: null } };
       }
       onOwnerResult?.({ ownerUid, inputTileCount, didWriteTile });
-      return { ownerUid, didWriteTile, nextChunk, failed: false, error: null };
+      return { didWriteTile };
     }
   );
 
@@ -461,36 +432,27 @@ export const persistFogBrushQueueEntry = async ({
     result.status === 'fulfilled'
       ? result.value
       : {
-        ownerUid: entry.ownerUids[index],
-        didWriteTile: false,
-        nextChunk: getFogBrushChunkStart(entry, entry.ownerUids[index]),
-        failed: true,
-        error: result.reason,
+        unfinished: {
+          ownerUid: entry.ownerUids[index],
+          nextChunk: getFogBrushChunkStart(entry, entry.ownerUids[index]),
+          error: result.reason,
+        },
       }
   ));
-  const failedOutcomes = outcomes.filter(({ failed }) => failed);
-
   return {
     didWrite: outcomes.some(({ didWriteTile }) => didWriteTile),
-    failedOwnerUids: failedOutcomes.map(({ ownerUid }) => ownerUid),
-    nextChunkByOwner: Object.fromEntries(failedOutcomes
-      .filter(({ nextChunk }) => nextChunk > 0)
-      .map(({ ownerUid, nextChunk }) => [ownerUid, nextChunk])),
-    error: failedOutcomes[0]?.error || null,
+    unfinishedOwners: outcomes.flatMap(({ unfinished }) => unfinished ? [unfinished] : []),
   };
 };
 
 /**
- * Drains the manager brush queue strictly in order. When an entry fails for
- * some owners, only those owners stay queued at the head (ahead of every later
- * stroke) with the chunk each stopped at, and the drain stops. A later
- * hide/reveal can never overtake an earlier one, and neither owners that
- * succeeded nor chunks already committed are re-applied.
- * Rejects with the first failure after retaining the unfinished work.
+ * Keeps interrupted or retryable chunks ahead of later strokes. Permanent
+ * failures are reported and removed so a rejected stroke cannot block the board.
  */
 export const drainFogBrushQueue = async ({
   queue,
   persistEntry,
+  onPermanentFailure,
   // Checked before each entry. Once the owning board session has ended, the
   // drain stops so a stale stroke cannot land after a newer board's edits.
   shouldContinue = () => true,
@@ -499,30 +461,36 @@ export const drainFogBrushQueue = async ({
 
   while (queue.length > 0 && shouldContinue()) {
     const entry = queue.shift();
-    let result;
+    let unfinishedOwners;
     try {
-      result = await persistEntry(entry);
+      const result = await persistEntry(entry);
+      didWrite = didWrite || result.didWrite;
+      unfinishedOwners = result.unfinishedOwners;
     } catch (error) {
-      queue.unshift(entry);
-      throw error;
+      unfinishedOwners = entry.ownerUids.map((ownerUid) => ({
+        ownerUid, nextChunk: getFogBrushChunkStart(entry, ownerUid), error,
+      }));
     }
 
-    didWrite = didWrite || !!result?.didWrite;
-    const failedOwnerUids = Array.isArray(result?.failedOwnerUids) ? result.failedOwnerUids : [];
-    if (failedOwnerUids.length > 0) {
-      const { nextChunkByOwner: previousProgress, ...retainedEntry } = entry;
-      const progress = result.nextChunkByOwner || previousProgress || {};
-      const nextChunkByOwner = Object.fromEntries(failedOwnerUids
-        .filter((ownerUid) => progress[ownerUid] > 0)
-        .map((ownerUid) => [ownerUid, progress[ownerUid]]));
-      retainedEntry.ownerUids = failedOwnerUids;
-      if (Object.keys(nextChunkByOwner).length > 0) {
-        retainedEntry.nextChunkByOwner = nextChunkByOwner;
-      }
-      retainedEntry.key = buildFogBrushQueueKey(retainedEntry);
-      queue.unshift(retainedEntry);
-      throw result.error || new Error('Fog brush write failed.');
+    const retry = [];
+    for (const owner of unfinishedOwners) {
+      if (!owner.error || isRetryableFogWriteError(owner.error)) retry.push(owner);
+      else onPermanentFailure?.(owner.error, owner.ownerUid);
     }
+    if (!retry.length) continue;
+
+    const retainedEntry = { ...entry, ownerUids: retry.map(({ ownerUid }) => ownerUid) };
+    const progress = retry.filter(({ nextChunk }) => nextChunk > 0);
+    if (progress.length) {
+      retainedEntry.nextChunkByOwner = Object.fromEntries(progress.map(({ ownerUid, nextChunk }) => [ownerUid, nextChunk]));
+    } else {
+      delete retainedEntry.nextChunkByOwner;
+    }
+    retainedEntry.key = buildFogBrushQueueKey(retainedEntry);
+    queue.unshift(retainedEntry);
+    const retryError = retry.find(({ error }) => error)?.error;
+    if (retryError && shouldContinue()) throw retryError;
+    break;
   }
 
   return didWrite;

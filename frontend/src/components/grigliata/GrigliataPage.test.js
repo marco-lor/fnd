@@ -5226,6 +5226,7 @@ describe('GrigliataPage', () => {
   };
 
   test('an unmounted board never applies its remaining queued DM brush strokes', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const { unmount } = await renderManagerFogBrushForUser2();
     const firstTransaction = createDeferred();
     firestore.runTransaction
@@ -5257,6 +5258,24 @@ describe('GrigliataPage', () => {
     const user2TileWrites = getFogTileSetCallsByOwner('user-2');
     expect(user2TileWrites.length).toBeGreaterThan(0);
     expect(user2TileWrites.every(([, payload]) => payload.tileCol <= 0)).toBe(true);
+    expect(warn).toHaveBeenCalledWith('Board closed with pending fog brush changes. Some changes may be incomplete.');
+    warn.mockRestore();
+  });
+
+  test('shows a permanently rejected brush stroke and lets the manager paint again', async () => {
+    const report = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await renderManagerFogBrushForUser2();
+    firestore.runTransaction.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+    fireEvent.click(screen.getByRole('button', { name: /^paint fog brush$/i }));
+    expect(await screen.findByText('Some fog brush changes could not be saved.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /paint distant fog brush/i }));
+    await waitFor(() => {
+      expect(getFogTileSetCallsByOwner('user-2').length).toBeGreaterThan(0);
+    });
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledWith('Fog brush change could not be saved for player:', 'user-2', expect.any(Error));
+    report.mockRestore();
   });
 
   test('retries a transient DM brush failure on backoff only while the board is mounted', async () => {

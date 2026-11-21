@@ -5821,11 +5821,8 @@ export default function GrigliataPage() {
     },
   }), []);
 
-  // Strokes apply strictly in queue order. A failed entry (only its failed
-  // owners) stays at the head with every later stroke behind it, so a
-  // hide/reveal is never dropped or reordered. Transient failures (contention,
-  // offline) retry on a capped backoff; any failure also retries on the next
-  // stroke.
+  // Retry transient failures in stroke order. A permanent rejection for one
+  // owner is surfaced to the manager while the rest of the queue proceeds.
   const flushFogBrushQueue = useCallback(() => {
     if (isFogBrushFlushActiveRef.current) {
       return fogBrushFlushPromiseRef.current || Promise.resolve(false);
@@ -5844,12 +5841,16 @@ export default function GrigliataPage() {
           queue: fogBrushQueueRef.current,
           persistEntry: persistFogBrushQueueEntryForPage,
           shouldContinue: () => isFogBrushSessionActiveRef.current,
+          onPermanentFailure: (error, ownerUid) => {
+            console.error('Fog brush change could not be saved for player:', ownerUid, error);
+            if (isFogBrushSessionActiveRef.current) setBoardError('Some fog brush changes could not be saved.');
+          },
         });
         fogBrushRetryAttemptRef.current = 0;
         return didWrite;
       } catch (error) {
         console.error('Failed to paint Grigliata fog brush:', error);
-        setBoardError('Unable to update fog of war right now.');
+        if (isFogBrushSessionActiveRef.current) setBoardError('Unable to update fog of war right now.');
         if (
           isFogBrushSessionActiveRef.current
           && isRetryableFogWriteError(error)
@@ -5866,7 +5867,7 @@ export default function GrigliataPage() {
       } finally {
         isFogBrushFlushActiveRef.current = false;
         fogBrushFlushPromiseRef.current = null;
-        setIsFogBrushMutationPending(false);
+        if (isFogBrushSessionActiveRef.current) setIsFogBrushMutationPending(false);
       }
     })();
 
@@ -5883,9 +5884,13 @@ export default function GrigliataPage() {
   // backoff retry may apply them, since a newly opened board could already
   // have made later edits to the same tiles.
   useEffect(() => {
+    const queue = fogBrushQueueRef.current;
     isFogBrushSessionActiveRef.current = true;
     return () => {
       isFogBrushSessionActiveRef.current = false;
+      if (queue.length || isFogBrushFlushActiveRef.current) {
+        console.warn('Board closed with pending fog brush changes. Some changes may be incomplete.');
+      }
       if (fogBrushRetryTimeoutRef.current) {
         window.clearTimeout(fogBrushRetryTimeoutRef.current);
         fogBrushRetryTimeoutRef.current = null;
