@@ -959,21 +959,121 @@ test('the target owner applies their own damage; anyone else gets one answer wha
   await assert.rejects(applyDamage(pending.combatId, {}, defender), {code: 'failed-precondition', message: /danno concreto/});
   assert.deepEqual(resources(defender).stats, {hpCurrent: 100, manaCurrent: 100, barrieraCurrent: 4});
 
-  const receipt = await applyDamage(combatId, {}, defender);
-  assert.deepEqual(receipt, {combatId, damageApplied: {amount: 7}});
+  // The owner confirms the hit's 9 damage.
+  const receipt = await applyDamage(combatId, {amount: 9}, defender);
+  assert.deepEqual(receipt, {combatId, damageApplied: {amount: 9}});
   assert.deepEqual(resources(defender), {
-    stats: {hpCurrent: 97, manaCurrent: 100, barrieraCurrent: 0},
+    stats: {hpCurrent: 95, manaCurrent: 100, barrieraCurrent: 0},
     schemaVersion: 2, revision: 1, updatedAt: 'now', updatedBy: defender,
   });
-  assert.deepEqual(journal(combatId).targets[0].damageApplied, {amount: 7});
+  assert.deepEqual(journal(combatId).targets[0].damageApplied, {amount: 9});
   // The map marker stays the only authority on who has fallen.
   assert.equal(db.read(`grigliata_token_placements/${place(defender)}`).isDead, undefined);
   const applied = structuredClone([journal(combatId), resources(defender), requestOf(combatId)]);
-  // First writer wins: the owner's retry and the DM both get the owner's receipt; others still get none.
+  // First writer wins: the owner's retry, even below the minimum, and the DM both get the owner's receipt; others
+  // still get none.
   assert.deepEqual(await applyDamage(combatId, {amount: 30}, defender), receipt);
+  assert.deepEqual(await applyDamage(combatId, {amount: 0}, defender), receipt);
   assert.deepEqual(await applyDamage(combatId, {amount: 2}), receipt);
   for (const uid of [attacker, 'stranger']) await assert.rejects(applyDamage(combatId, {}, uid), denied);
   assert.deepEqual([journal(combatId), resources(defender), requestOf(combatId)], applied);
+});
+
+test('an owner confirms at least the proposed damage and may raise it; only the DM lowers it', async () => {
+  damageFixture();
+  const combatId = await weaponHit();
+  const untouched = structuredClone([journal(combatId), resources(defender), requestOf(combatId)]);
+  const belowNine = {code: 'permission-denied', message: 'Il danno non può essere inferiore a 9: solo il DM può ridurlo.'};
+  for (const amount of [0, 8]) await assert.rejects(applyDamage(combatId, {amount}, defender), belowNine);
+  assert.deepEqual([journal(combatId), resources(defender), requestOf(combatId)], untouched);
+  assert.deepEqual(await applyDamage(combatId, {amount: 12}, defender), {combatId, damageApplied: {amount: 12}});
+  assert.equal(resources(defender).stats.hpCurrent, 88);
+  assert.deepEqual(requestOf(combatId).ownerDamage.target.damageApplied, {amount: 12});
+
+  // The DM keeps any whole amount from 0 up, and the owner's later confirmation gets that receipt.
+  const lowered = await weaponHit();
+  assert.deepEqual(await applyDamage(lowered, {amount: 2}), {combatId: lowered, damageApplied: {amount: 2}});
+  assert.deepEqual(await applyDamage(lowered, {amount: 0}, defender), {combatId: lowered, damageApplied: {amount: 2}});
+  assert.equal(resources(defender).stats.hpCurrent, 86);
+
+  // A rolled critical is the minimum, even when the owner sends the base the hit proposed before it.
+  const blow = await weaponHit();
+  const {critical} = await confirmCritical(blow, 13);
+  assert.equal(critical.total, 12);
+  await assert.rejects(applyDamage(blow, {amount: 9, criticalScore: 13}, defender), {
+    code: 'permission-denied', message: 'Il danno non può essere inferiore a 12: solo il DM può ridurlo.',
+  });
+  // A critical the owner did not see is reported before the minimum.
+  await assert.rejects(applyDamage(blow, {amount: 0}, defender), {code: 'failed-precondition', message: /critico è cambiato/});
+  assert.deepEqual(await applyDamage(blow, {amount: 12, criticalScore: 13}, defender),
+    {combatId: blow, damageApplied: {amount: 12}});
+});
+
+test('a critical left to the table is applied by the DM, never confirmed by the owner', async () => {
+  damageFixture();
+  const tableBlade = {...greatsword, Parametri: {Special: {Danno: {4: '2d4'}, 'Danno Critico': {4: '2d6 + Forza'}}}};
+  db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: tableBlade});
+  const combatId = await weaponHit();
+  const {critical} = await confirmCritical(combatId, 13);
+  assert.match(critical.tableRoll, /2d6 \+ Forza/);
+  assert.deepEqual(requestOf(combatId).ownerDamage.target.critical, critical);
+  const untouched = structuredClone([journal(combatId), resources(defender), requestOf(combatId)]);
+  for (const amount of [0, 9, 99]) {
+    await assert.rejects(applyDamage(combatId, {amount, criticalScore: 13}, defender), {
+      code: 'permission-denied', message: 'Il critico va calcolato al tavolo: il danno lo applica il DM.',
+    });
+  }
+  assert.deepEqual([journal(combatId), resources(defender), requestOf(combatId)], untouched);
+  const receipt = await applyDamage(combatId, {amount: 5, criticalScore: 13});
+  assert.deepEqual(receipt, {combatId, damageApplied: {amount: 5}});
+  assert.deepEqual(await applyDamage(combatId, {amount: 0, criticalScore: 13}, defender), receipt);
+  assert.deepEqual([requestOf(combatId).status, requestOf(combatId).ownerDamage.target.damageApplied], ['done', {amount: 5}]);
+});
+
+test('typed defense values are audited on their trial against the stored defaults; others stay clean', async () => {
+  fixture();
+  const trialsOf = combatId => journal(combatId).targets[0].trials;
+  const untouched = await launch('weapon', 'weaponMain');
+  assert.deepEqual([request(untouched.combatId).defense.value, request(untouched.combatId).defense.reduction,
+    request(untouched.combatId).defense.die], [2, 2, 12]);
+  // Sending the defaults themselves changes nothing either.
+  const reply = await defend(untouched.combatId, {defense: 2, reduction: 2, die: 12});
+  assert.equal(reply.outcome, 'hit');
+  assert.deepEqual(Object.keys(trialsOf(untouched.combatId)[0]), ['round', 'attack', 'defense', 'outcome', 'damage']);
+
+  // The server compares what it rolled with what it stored, and the defender's reply stays as it was.
+  const dodged = await launch('weapon', 'weaponMain');
+  const answer = await defend(dodged.combatId, {defense: 90, reduction: 0, die: 20});
+  assert.deepEqual([answer.outcome, answer.overrides], ['resisted', undefined]);
+  assert.deepEqual(trialsOf(dodged.combatId)[0].overrides, {
+    bonus: {value: 90, default: 2}, reduction: {value: 0, default: 2}, die: {value: 20, default: 12},
+  });
+  assert.deepEqual(await defend(dodged.combatId, {defense: 2}), answer);
+  assert.deepEqual(trialsOf(dodged.combatId).length, 1);
+
+  // Each round keeps its own: a tie forced with a typed bonus, then an untouched retry.
+  const tied = await launch('weapon', 'weaponMain');
+  assert.equal((await defend(tied.combatId, {defense: 4})).outcome, 'tie');
+  await call(attacker, {command: 'retry', combatId: tied.combatId, round: 1, targetPlacementId: place(defender)});
+  assert.equal((await defend(tied.combatId, {round: 2})).outcome, 'hit');
+  const [tie, decisive] = trialsOf(tied.combatId);
+  assert.deepEqual(tie.overrides, {bonus: {value: 4, default: 2}});
+  assert.equal('overrides' in decisive, false);
+
+  // A spell defense without RD audits only what it asked for; a consent has nothing to audit.
+  seedSpell('barrier', {
+    Nome: 'Barriera Cosmica (offensiva)', Costo: 19, Gittata: '30 ft',
+    'TPC Fisico': {Param1: 'Intelligenza', Param2: 'Saggezza', ParamTarget: 'Costituzione'},
+  });
+  const spell = await launch('spell', 'personal:barrier');
+  await defend(spell.combatId, {defense: 3, reduction: 50});
+  assert.deepEqual(trialsOf(spell.combatId)[0].overrides, {bonus: {value: 3, default: 2}});
+  seedSpell('pact', {Nome: 'Patto', Costo: 1, danni: '1d8', Cura: '1d4', combat: {targetConsent: true}});
+  for (const consent of [true, false]) {
+    const pact = await launch('spell', 'personal:pact');
+    await defend(pact.combatId, {consent, defense: 50});
+    assert.equal('overrides' in trialsOf(pact.combatId)[0], false);
+  }
 });
 
 test('a shared defense that lands damage settles with the damage its owner may apply, kept current', async () => {
@@ -1159,20 +1259,20 @@ test('an owner reaches their hidden pawn, and only while that very token is stil
   // Given away while hidden, or gone: the former owner gets the answer of an absent pawn either way.
   db.seed(placementPath, {...hidden, ownerUid: 'stranger'});
   db.seed(tokenPath, {...token, ownerUid: 'stranger'});
-  const transferred = await applyDamage(combatId, {}, defender).catch(error => error);
+  const transferred = await applyDamage(combatId, {amount: 9}, defender).catch(error => error);
   await assert.rejects(applyDamage(combatId, {}, 'stranger'), denied);
   db.remove(placementPath);
   db.seed(tokenPath, token);
-  const removed = await applyDamage(combatId, {}, defender).catch(error => error);
+  const removed = await applyDamage(combatId, {amount: 9}, defender).catch(error => error);
   for (const error of [transferred, removed]) {
     assert.deepEqual([error.code, error.message], [absentPawn.code, absentPawn.message]);
   }
   assert.deepEqual([resources(defender), journal(combatId), requestOf(combatId)], untouched);
 
   db.seed(placementPath, hidden);
-  assert.deepEqual(await applyDamage(combatId, {}, defender), {combatId, damageApplied: {amount: 7}});
-  assert.equal(resources(defender).stats.hpCurrent, 93);
-  assert.deepEqual(requestOf(combatId).ownerDamage.target.damageApplied, {amount: 7});
+  assert.deepEqual(await applyDamage(combatId, {amount: 9}, defender), {combatId, damageApplied: {amount: 9}});
+  assert.equal(resources(defender).stats.hpCurrent, 91);
+  assert.deepEqual(requestOf(combatId).ownerDamage.target.damageApplied, {amount: 9});
   assert.equal(db.read(placementPath).isDead, undefined);
 });
 
@@ -1209,7 +1309,7 @@ test('older journals stay applicable as they are, and malformed ones are refused
 
   // An older shared one is applied from the journal and no request appears.
   const shared = await bolt(event => event, noCopy);
-  assert.deepEqual(await applyDamage(shared, {amount: 1}, defender), {combatId: shared, damageApplied: {amount: 1}});
+  assert.deepEqual(await applyDamage(shared, {amount: 2}, defender), {combatId: shared, damageApplied: {amount: 2}});
   assert.equal(request(shared), undefined);
 
   // A defense answered before projections existed gains one when its damage is applied.
@@ -1217,8 +1317,8 @@ test('older journals stay applicable as they are, and malformed ones are refused
   const {ownerDamage, ownerDamageUpdatedAt, ...older} = requestOf(answered);
   assert.ok(ownerDamage && ownerDamageUpdatedAt);
   db.seed(`grigliata_combat_requests/${hashValue([answered, place(defender)])}`, older);
-  await applyDamage(answered, {}, defender);
-  assert.deepEqual(requestOf(answered), {...older, ...projection(answered, {damageApplied: {amount: 7}})});
+  await applyDamage(answered, {amount: 9}, defender);
+  assert.deepEqual(requestOf(answered), {...older, ...projection(answered, {damageApplied: {amount: 9}})});
 
   const broken = await bolt(event => ({...event, targets: null}));
   await assert.rejects(applyDamage(broken, {}, defender), denied);
@@ -1227,5 +1327,5 @@ test('older journals stay applicable as they are, and malformed ones are refused
   await assert.rejects(applyDamage(ownerless, {}, defender), denied);
   const effectless = await bolt(event => ({...event, effects: null}));
   await assert.rejects(applyDamage(effectless, {}, defender), {code: 'failed-precondition', message: /danno concreto/});
-  assert.equal(resources(defender).stats.hpCurrent, 100 - 2 - 2 - 1 - 7);
+  assert.equal(resources(defender).stats.hpCurrent, 100 - 2 - 2 - 2 - 9);
 });

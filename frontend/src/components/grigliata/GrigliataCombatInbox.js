@@ -18,7 +18,8 @@ const damageErrorText = error => (UNCONFIRMED.includes(errorCode(error))
 const unconfirmedDefense = () => Object.assign(new Error(DEFENSE_RETRY_SAFE), { unconfirmed: true });
 const NOTHING = { waiting: [], damage: [] };
 
-export default function GrigliataCombatInbox({ uid }) {
+// `isManager`: the signed-in account is the DM, from the profile the host already reads.
+export default function GrigliataCombatInbox({ uid, isManager = false }) {
   const [inbox, setInbox] = useState({ uid, ...NOTHING });
   const [connectionError, setConnectionError] = useState(false);
   const [damageMap, setDamageMap] = useState(null);
@@ -68,7 +69,7 @@ export default function GrigliataCombatInbox({ uid }) {
   // The popup sends one answer at a time and keeps a prompt whose reply was lost until a retry settles it.
   return <>
     {(connectionError || (hasPendingDamage && currentMap?.error)) && <button type="button" className="fixed bottom-4 right-4 z-50 rounded-xl border border-amber-700 bg-slate-950 p-2 text-xs text-amber-200" onClick={() => refresh(n => n+1)}>Combattimento scollegato · Riconnetti</button>}
-    <GrigliataDefensePopup currentUserId={uid} requests={waiting} damageRequests={damage} onRespond={sendDefense}
+    <GrigliataDefensePopup currentUserId={uid} isManager={isManager} requests={waiting} damageRequests={damage} onRespond={sendDefense}
       activeDamageBackgroundId={activeDamageBackgroundId} onWatchDamage={watchReceiptDamage} onApplyDamage={applyReceiptDamage}/>
   </>;
 }

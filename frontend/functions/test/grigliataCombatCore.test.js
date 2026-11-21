@@ -12,6 +12,8 @@ const {
   combatDamageEligible,
   combatDamageProposal,
   combatDamageSplit,
+  combatDefenseOverrides,
+  combatOwnerDamageFloor,
   compareCombatRolls,
   combatDistance,
   combatRelationAllows,
@@ -373,6 +375,47 @@ test('the base damage is the target roll, else the last concrete effect naming i
     assert.equal(combatDamageBase(target, malformed), null);
     assert.equal(combatDamageEligible(target, malformed), false);
   }
+});
+
+test('an owner confirms at least the shown proposal, and a critical left to the table is the DM’s', () => {
+  const target = {placementId: 'map__orc', status: 'done', outcome: 'hit', damage: 9, critical: null};
+  const critical = {score: 13, total: 14, tableRoll: ''};
+  assert.equal(combatOwnerDamageFloor(target, []), 9);
+  assert.equal(combatOwnerDamageFloor({...target, damage: 0}, []), 0);
+  assert.equal(combatOwnerDamageFloor({...target, damage: null}, [
+    {kind: 'damage', amount: 3, targetPlacementId: 'map__orc'},
+  ]), 3);
+  // The rolled critical replaces the base, even below it; one left to the table has no number the owner can meet.
+  assert.equal(combatOwnerDamageFloor({...target, critical}, []), 14);
+  assert.equal(combatOwnerDamageFloor({...target, critical: {...critical, total: 4}}, []), 4);
+  assert.equal(combatOwnerDamageFloor({...target, critical: {...critical, tableRoll: 'max(0, 9 + x2 (2d6 + Forza))'}}, []),
+    'table');
+  // An older or malformed critical without a usable total falls back to the base.
+  for (const total of [undefined, null, -1, 2.5, '14']) {
+    assert.equal(combatOwnerDamageFloor({...target, critical: {score: 13, total}}, []), 9);
+  }
+  // Nothing concrete to apply, nothing to meet.
+  assert.equal(combatOwnerDamageFloor({...target, outcome: 'resisted'}, []), null);
+  assert.equal(combatOwnerDamageFloor({...target, status: 'waiting', critical}, []), null);
+  assert.equal(combatOwnerDamageFloor({...target, damage: null}, null), null);
+});
+
+test('a defense records only the values typed instead of the stored defaults', () => {
+  const weapon = {value: 2, reduction: 3, die: 12, showReduction: true, showDie: true};
+  const used = {bonus: 2, reduction: 3, die: 12};
+  assert.equal(combatDefenseOverrides(weapon, used), null);
+  assert.deepEqual(combatDefenseOverrides(weapon, {bonus: 9, reduction: 0, die: 20}), {
+    bonus: {value: 9, default: 2}, reduction: {value: 0, default: 3}, die: {value: 20, default: 12},
+  });
+  assert.deepEqual(combatDefenseOverrides(weapon, {...used, bonus: -99}), {bonus: {value: -99, default: 2}});
+  // A value the sheet lacked is recorded as typed, against no default.
+  assert.deepEqual(combatDefenseOverrides({...weapon, value: null, reduction: undefined}, used), {
+    bonus: {value: 2, default: null}, reduction: {value: 3, default: null},
+  });
+  // Fields the request never showed are not audited; a stored die is read like the one the defense rolled.
+  const spell = {value: 2, reduction: null, die: null, showReduction: false, showDie: false};
+  assert.equal(combatDefenseOverrides(spell, {bonus: 2, reduction: 0, die: null}), null);
+  assert.equal(combatDefenseOverrides({...weapon, die: 'd12'}, used), null);
 });
 
 test('damage consumes the barrier first, then PF, never below zero', () => {

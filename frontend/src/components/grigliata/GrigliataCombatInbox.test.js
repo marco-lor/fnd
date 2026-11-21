@@ -333,13 +333,13 @@ test('a sent amount and its error survive the move too, and nothing is sent twic
   act(() => pending.next(docs([lia])));
   await screen.findByText('Colpito');
   act(() => listener(RECEIPT)[0].next(copyOf(ownerCopy())));
-  fireEvent.change(screen.getByLabelText('Danno finale'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Danno finale'), { target: { value: '11' } });
   mutate.mockRejectedValueOnce(lostReply());
   fireEvent.click(screen.getByRole('button', { name: 'Applica danno' }));
   expect(await screen.findByText(RETRY_SAFE)).toBeInTheDocument();
   act(() => pending.next(docs([])));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Danno finale')).toHaveValue('7');
+  expect(screen.getByLabelText('Danno finale')).toHaveValue('11');
   expect(screen.getByRole('alert')).toHaveTextContent(RETRY_SAFE);
   expect(mutate.mock.calls.filter(([payload]) => payload.command === 'applyDamage')).toHaveLength(1);
 });
@@ -434,6 +434,21 @@ test('immediate damage opens a corner receipt on Home without a prompt or focus,
   expect(screen.queryByRole('button', { name: MORE_DAMAGE })).not.toBeInTheDocument();
   expect(receipt.unsubscribe).not.toHaveBeenCalled();
   expect(mutate).toHaveBeenCalledTimes(1);
+});
+
+test('Home holds an owner to the proposed damage as the minimum, while the DM signed in sets any amount', async () => {
+  const { rerender } = render(<GrigliataCombatInbox uid={uid} />);
+  const bolt = immediate('req-9');
+  act(() => listener(PENDING)[0].next(server([bolt])));
+  act(() => listener(RECEIPT)[0].next(copyFor(bolt)));
+  expect(screen.getByLabelText('Danno finale')).toHaveAccessibleDescription('Minimo 9: puoi aumentarlo; per ridurlo chiedi al DM.');
+  rerender(<GrigliataCombatInbox uid={uid} isManager />);
+  expect(screen.getByLabelText('Danno finale')).toHaveAccessibleDescription('');
+  fireEvent.change(screen.getByLabelText('Danno finale'), { target: { value: '0' } });
+  mutate.mockResolvedValueOnce({ data: { combatId: 'combat-req-9', damageApplied: { amount: 0 } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Applica danno' }));
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'applyDamage', combatId: 'combat-req-9', targetPlacementId: 'map__bro', amount: 0, criticalScore: null });
+  expect(await screen.findByText('Danno applicato · 0')).toBeInTheDocument();
 });
 
 test('Home defers immediate damage from another map and restores the draft when its map is active again', () => {

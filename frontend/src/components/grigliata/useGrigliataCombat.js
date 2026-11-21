@@ -338,6 +338,9 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       onApplyDamage:suspended ? undefined : applyDamage,
       canApplyDamage:(event, target) => mayApplyDamage(target),
       damageState,
+      // The DM sets any amount and reads the defense audit; a player is held to each proposal. The narration overlay and
+      // the player preview show what a player sees.
+      isManager:Boolean(isManager) && !suspended,
       busy:!!attack.busy, arsenalSync, loading:!!catalogKey && !current.data && !current.error,
       error:attack.error || current.error || feed.error,
     },

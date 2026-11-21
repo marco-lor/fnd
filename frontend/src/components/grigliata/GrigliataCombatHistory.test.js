@@ -169,7 +169,7 @@ const applyButton = name => within(damageForm(name)).getByRole('button', { name:
 test('the DM gets one damage form per landed target, prefilled with the proposal, and may apply any whole number including 0', () => {
   const onApplyDamage = jest.fn();
   const event = volley([struck(), { ...lia, status: 'done', outcome: 'resisted', round: 1, damage: null }, { ...goblin, status: 'waiting', round: 1 }]);
-  const { rerender } = render(<GrigliataCombatHistory events={[event]} onApplyDamage={onApplyDamage} />);
+  const { rerender } = render(<GrigliataCombatHistory events={[event]} onApplyDamage={onApplyDamage} isManager />);
   openLog();
 
   expect(screen.getAllByRole('form', { name: /^Applica danno a / })).toHaveLength(1);
@@ -177,6 +177,8 @@ test('the DM gets one damage form per landed target, prefilled with the proposal
   expect(field).toHaveValue('7');
   expect(field).toBeRequired();
   expect(field).toHaveAttribute('inputmode', 'numeric');
+  // No minimum for the DM.
+  expect(field).toHaveAccessibleDescription('');
   fireEvent.change(field, { target: { value: '0' } });
   fireEvent.click(applyButton('bro'));
   expect(onApplyDamage).toHaveBeenCalledTimes(1);
@@ -187,6 +189,71 @@ test('the DM gets one damage form per landed target, prefilled with the proposal
   // Without the command (the narration overlay, the player preview) there is no form.
   rerender(<GrigliataCombatHistory events={[event]} />);
   expect(screen.queryByRole('form', { name: /Applica danno/ })).not.toBeInTheDocument();
+});
+
+test('a player’s own pawn keeps the proposal as the minimum, and a critical rolled at the table is left to the DM', () => {
+  const onApplyDamage = jest.fn();
+  const tableRoll = 'max(0, 6 + x1 (2d6 + Forza) − 1 RD)';
+  const view = critical => (
+    <GrigliataCombatHistory
+      events={[volley([struck({ ...lia, critical })])]} currentUserId="lia-user" onApplyDamage={onApplyDamage}
+      canApplyDamage={(event, target) => target.ownerUid === 'lia-user'}
+    />
+  );
+  const { rerender } = render(view(null));
+  openLog();
+  expect(damageField('Lia')).toHaveValue('7');
+  expect(damageField('Lia')).toHaveAccessibleDescription('Minimo 7: puoi aumentarlo; per ridurlo chiedi al DM.');
+  fireEvent.change(damageField('Lia'), { target: { value: '0' } });
+  fireEvent.click(applyButton('Lia'));
+  expect(onApplyDamage).not.toHaveBeenCalled();
+  expect(within(damageForm('Lia')).getByRole('alert')).toHaveTextContent('Il danno non può essere inferiore a 7: solo il DM può ridurlo.');
+  fireEvent.change(damageField('Lia'), { target: { value: '10' } });
+  fireEvent.click(applyButton('Lia'));
+  expect(onApplyDamage).toHaveBeenCalledWith(expect.objectContaining({ id: 'volley' }), expect.objectContaining({ placementId: lia.placementId }), 10);
+
+  // A rolled critical becomes the minimum; one rolled at the table offers no field to the owner at all.
+  rerender(view({ score: 13, multiplier: 'x1', effect: '–', total: 15, roll: 3, bonus: 0, reduction: 1, tableRoll: '' }));
+  fireEvent.click(within(damageForm('Lia')).getByRole('button', { name: 'Usa la proposta' }));
+  expect(damageField('Lia')).toHaveAccessibleDescription('Minimo 15: puoi aumentarlo; per ridurlo chiedi al DM.');
+  rerender(view({ score: 30, multiplier: 'x2', effect: '–', total: 9, roll: 4, bonus: 0, reduction: 1, tableRoll }));
+  expect(screen.queryByRole('form', { name: /Applica danno/ })).not.toBeInTheDocument();
+  expect(screen.getByText('Critico da calcolare al tavolo: il danno lo applica il DM.')).toBeInTheDocument();
+  expect(screen.getByText(tableRoll, { selector: '.gc-damage code' })).toBeInTheDocument();
+  expect(onApplyDamage).toHaveBeenCalledTimes(1);
+});
+
+test('the DM reads each defense value typed instead of the stored one, round by round; players and older rounds read none', () => {
+  const defense = value => ({ label: 'Difesa', total: value + 1, bonus: value, sides: 20, rolls: [1] });
+  const event = volley([
+    struck({ round: 2, trials: [
+      { round: 1, attack, defense: defense(4), outcome: 'tie', damage: null, overrides: { bonus: { value: 4, default: 2 } } },
+      { round: 2, attack, defense: defense(2), outcome: 'hit', damage: 7 },
+    ] }),
+    { ...lia, status: 'done', outcome: 'resisted', round: 1, damage: null, trials: [{
+      round: 1, attack, defense: defense(90), outcome: 'resisted', damage: null,
+      overrides: { bonus: { value: 90, default: 2 }, reduction: { value: 0, default: 2 }, die: { value: 20, default: 12 } },
+    }] },
+  ]);
+  const { rerender } = render(<GrigliataCombatHistory events={[event]} isManager />);
+  expect(screen.getByText('1 · Colpo a segno / 1 · Colpo evitato · valori di difesa modificati', { selector: '.gc-log-caption span' }))
+    .toBeInTheDocument();
+  openLog();
+  expect(screen.getAllByText('Valori modificati', { selector: '.gc-override dt' })).toHaveLength(2);
+  expect(screen.getByText('Difesa 4 invece di 2', { selector: '.gc-override dd' })).toBeInTheDocument();
+  expect(screen.getByText('Difesa 90 invece di 2 · RD 0 invece di 2 · Dado Anima d20 invece di d12', { selector: '.gc-override dd' }))
+    .toBeInTheDocument();
+
+  // Players see the rolls as before; untouched and older rounds read clean for the DM too.
+  rerender(<GrigliataCombatHistory events={[event]} />);
+  expect(screen.queryByText('Valori modificati')).not.toBeInTheDocument();
+  expect(screen.queryByText(/valori di difesa modificati/)).not.toBeInTheDocument();
+  const clean = volley(event.targets.map(({ trials, ...target }) => ({
+    ...target, trials: trials.map(({ overrides, ...trial }) => trial),
+  })));
+  rerender(<GrigliataCombatHistory events={[clean]} isManager />);
+  expect(screen.queryByText('Valori modificati')).not.toBeInTheDocument();
+  expect(screen.getByText('1 · Colpo a segno / 1 · Colpo evitato', { selector: '.gc-log-caption span' })).toBeInTheDocument();
 });
 
 test('a spell offers the damage it names for each pawn; healing and an area suggestion bound to no pawn offer nothing', () => {
@@ -209,7 +276,7 @@ test('a critical still to roll at the table leaves the field blank beside its fo
   const onApplyDamage = jest.fn();
   const tableRoll = 'max(0, 6 + x1 (2d6 + Forza) − 1 RD)';
   const critical = { score: 30, multiplier: 'x2', effect: 'Sanguinamento', total: 9, roll: 4, bonus: 0, reduction: 1, tableRoll };
-  render(<GrigliataCombatHistory events={[volley([struck({ critical })])]} onApplyDamage={onApplyDamage} />);
+  render(<GrigliataCombatHistory events={[volley([struck({ critical })])]} onApplyDamage={onApplyDamage} isManager />);
   openLog();
 
   const field = damageField('bro');
@@ -239,7 +306,7 @@ test('an application in flight is sent once and holds the critical still; a refu
   const event = volley([struck()]);
   const view = () => (
     <GrigliataCombatHistory
-      events={[event]} currentUserId="orc-user" onCritical={jest.fn()} onApplyDamage={onApplyDamage} damageState={() => state}
+      events={[event]} currentUserId="orc-user" onCritical={jest.fn()} onApplyDamage={onApplyDamage} damageState={() => state} isManager
     />
   );
   const { rerender } = render(view());
@@ -321,7 +388,7 @@ test('a DM working elsewhere hears the application instead of losing their place
 
 test('a critical that changes under the form updates an untouched amount and flags a typed one', () => {
   const onApplyDamage = jest.fn();
-  const view = critical => <GrigliataCombatHistory events={[volley([struck({ critical })])]} onApplyDamage={onApplyDamage} />;
+  const view = critical => <GrigliataCombatHistory events={[volley([struck({ critical })])]} onApplyDamage={onApplyDamage} isManager />;
   const { rerender } = render(view(null));
   openLog();
   expect(damageField('bro')).toHaveValue('7');

@@ -8,6 +8,8 @@ import './grigliataCombat.css';
 
 const IDLE = {};
 const INVALID_DAMAGE = 'Indica il danno finale: un numero intero da 0 in su.';
+const belowMinimum = minimum => 'Il danno non può essere inferiore a ' + minimum + ': solo il DM può ridurlo.';
+const TABLE_CRITICAL = 'Critico da calcolare al tavolo: il danno lo applica il DM.';
 
 export function AppliedDamage({ applied, focusRef }) {
   return (
@@ -19,8 +21,9 @@ export function AppliedDamage({ applied, focusRef }) {
 }
 
 // The final damage for one target, set by the DM or the target's owner: the proposal prefilled (blank when the critical is still to roll at the table,
-// its formula beside the field), any whole number from 0 up accepted.
-function DamageForm({ name, proposal, criticalScore, state, onApply, draft: heldDraft, onDraftChange }) {
+// its formula beside the field). The DM may send any whole number from 0 up; an owner's `floor.minimum` is the least
+// they may send, said beside the field.
+function DamageForm({ name, proposal, floor, criticalScore, state, onApply, draft: heldDraft, onDraftChange }) {
   const id = useId();
   const inputRef = useRef(null);
   // An untouched form can recover the last submitted value after the panel reopens. A caller that moves the form
@@ -30,33 +33,41 @@ function DamageForm({ name, proposal, criticalScore, state, onApply, draft: held
   const held = typeof onDraftChange === 'function';
   const draft = held ? heldDraft : ownDraft;
   const setDraft = held ? onDraftChange : setOwnDraft;
-  const [invalid, setInvalid] = useState('');
+  // Once a submit or a blur found a problem, it is shown against the current proposal until an edit fixes it.
+  const [checked, setChecked] = useState(false);
   const currentDraft = draft === undefined ? state.submitted : draft;
   const value = currentDraft ? currentDraft.value : proposal.amount == null ? '' : String(proposal.amount);
   const changed = Boolean(currentDraft) && currentDraft.criticalScore !== criticalScore;
+  const minimum = floor?.minimum > 0 ? floor.minimum : null;
+  const problem = text => {
+    const amount = parseCombatDamage(text);
+    if (amount == null) return INVALID_DAMAGE;
+    return minimum != null && amount < minimum ? belowMinimum(minimum) : '';
+  };
+  const invalid = checked ? problem(value) : '';
   const busy = Boolean(state.busy || state.criticalPending);
   const error = invalid || state.error;
-  const describedBy = [proposal.formula && id + '-formula', changed && id + '-changed', error && id + '-error']
-    .filter(Boolean).join(' ');
+  const describedBy = [
+    proposal.formula && id + '-formula', minimum != null && id + '-minimum', changed && id + '-changed', error && id + '-error',
+  ].filter(Boolean).join(' ');
 
   function submit(event) {
     event.preventDefault();
     if (busy || changed) return;
-    const amount = parseCombatDamage(value);
-    if (amount == null) {
-      setInvalid(INVALID_DAMAGE);
+    if (problem(value)) {
+      setChecked(true);
       inputRef.current?.focus();
       return;
     }
-    setInvalid('');
+    setChecked(false);
     // The amount sent stays in the field: a refused application is retried as it was.
     setDraft({ value, criticalScore });
-    onApply(amount);
+    onApply(parseCombatDamage(value));
   }
 
   function edit(next) {
     setDraft({ value: next, criticalScore });
-    if (invalid && parseCombatDamage(next) != null) setInvalid('');
+    if (checked && !problem(next)) setChecked(false);
   }
 
   return (
@@ -77,19 +88,22 @@ function DamageForm({ name, proposal, criticalScore, state, onApply, draft: held
           aria-invalid={invalid ? 'true' : undefined}
           aria-describedby={describedBy || undefined}
           onChange={event => edit(event.target.value)}
-          onBlur={() => { if (currentDraft && parseCombatDamage(value) == null) setInvalid(INVALID_DAMAGE); }}
+          onBlur={() => { if (currentDraft && problem(value)) setChecked(true); }}
         />
         {proposal.formula && <small id={id + '-formula'} className="gc-damage-formula"><code>{proposal.formula}</code></small>}
         <button type="submit" className="gc-secondary" aria-disabled={busy || changed || undefined}>
           {state.busy ? 'Applicazione…' : state.criticalPending ? 'Calcolo critico…' : 'Applica danno'}
         </button>
       </div>
+      {minimum != null && (
+        <p id={id + '-minimum'} className="gc-hint">{'Minimo ' + minimum + ': puoi aumentarlo; per ridurlo chiedi al DM.'}</p>
+      )}
       {changed && (
         <p id={id + '-changed'} className="gc-hint gc-damage-changed">
           {proposal.amount == null ? 'Il critico va ora calcolato al tavolo.' : 'Danno proposto aggiornato: ' + proposal.amount + '.'}
           <button type="button" className="gc-link" disabled={busy} onClick={() => {
             setDraft(null);
-            setInvalid('');
+            setChecked(false);
             inputRef.current?.focus();
           }}>
             Usa la proposta
@@ -101,8 +115,19 @@ function DamageForm({ name, proposal, criticalScore, state, onApply, draft: held
   );
 }
 
+// A critical rolled at the table leaves the owner no number to confirm: its formula stays in view, and the DM applies it.
+function TableCritical({ formula }) {
+  return (
+    <div className="gc-damage-form gc-damage-table">
+      <p className="gc-hint">{TABLE_CRITICAL}</p>
+      {formula && <small className="gc-damage-formula"><code>{formula}</code></small>}
+    </div>
+  );
+}
+
 // `draft` and `onDraftChange` are optional: without them the form keeps its own draft, as in the Registro.
-export function TargetDamage({ name, proposal, criticalScore, applied, state = IDLE, onApply, draft, onDraftChange }) {
+// `floor` comes from `combatDamageFloor`: null for the DM, `{ minimum }` or `{ table: true }` for the target's owner.
+export function TargetDamage({ name, proposal, floor = null, criticalScore, applied, state = IDLE, onApply, draft, onDraftChange }) {
   const wrapperRef = useRef(null);
   const doneRef = useRef(null);
   // Set on focus, cleared only when focus lands on another element: a removed form leaves focus nowhere, not elsewhere.
@@ -134,7 +159,9 @@ export function TargetDamage({ name, proposal, criticalScore, applied, state = I
     >
       {applied
         ? <AppliedDamage applied={applied} focusRef={doneRef} />
-        : <DamageForm {...{ name, proposal, criticalScore, state, onApply, draft, onDraftChange }} />}
+        : floor?.table
+          ? <TableCritical formula={proposal.formula} />
+          : <DamageForm {...{ name, proposal, floor, criticalScore, state, onApply, draft, onDraftChange }} />}
       <p role="status" className="gc-sr-only">{announcement}</p>
     </div>
   );

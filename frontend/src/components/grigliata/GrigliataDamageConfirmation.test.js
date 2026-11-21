@@ -52,6 +52,46 @@ test('TargetDamage can leave its draft to the caller, so a form mounted again ke
   expect(screen.getByLabelText('Danno finale')).toHaveValue('9');
 });
 
+test('an owner starts from the proposal as the minimum and may only raise it; a critical rolled at the table is left to the DM', () => {
+  const onApply = jest.fn();
+  const view = extra => (
+    <TargetDamage name="Lia" proposal={{ amount: 9, formula: '' }} floor={{ minimum: 9 }} criticalScore={null} onApply={onApply} {...extra} />
+  );
+  const { rerender } = render(view());
+  const form = screen.getByRole('form', { name: 'Applica danno a Lia' });
+  const field = within(form).getByLabelText('Danno finale');
+  expect(field).toHaveValue('9');
+  expect(field).toHaveAccessibleDescription('Minimo 9: puoi aumentarlo; per ridurlo chiedi al DM.');
+  fireEvent.change(field, { target: { value: '8' } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Applica danno' }));
+  expect(onApply).not.toHaveBeenCalled();
+  expect(within(form).getByRole('alert')).toHaveTextContent('Il danno non può essere inferiore a 9: solo il DM può ridurlo.');
+  expect(field).toHaveAttribute('aria-invalid', 'true');
+  expect(field).toHaveFocus();
+  fireEvent.change(field, { target: { value: '12' } });
+  expect(field).not.toHaveAttribute('aria-invalid');
+  fireEvent.click(within(form).getByRole('button', { name: 'Applica danno' }));
+  expect(onApply).toHaveBeenCalledWith(12);
+  // Leaving a lower amount in the field says so at once.
+  fireEvent.change(field, { target: { value: '3' } });
+  fireEvent.blur(field);
+  expect(within(form).getByRole('alert')).toHaveTextContent('Il danno non può essere inferiore a 9');
+
+  // A minimum of 0 restricts nothing and says nothing.
+  rerender(view({ proposal: { amount: 0, formula: '' }, floor: { minimum: 0 }, draft: null, onDraftChange: jest.fn() }));
+  expect(screen.getByLabelText('Danno finale')).toHaveAccessibleDescription('');
+
+  // No number the owner could meet: the formula stays in view and the DM applies the damage.
+  rerender(view({ proposal: { amount: null, formula: '2d6 + 4' }, floor: { table: true }, criticalScore: 30 }));
+  expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  expect(screen.getByText('Critico da calcolare al tavolo: il danno lo applica il DM.')).toBeInTheDocument();
+  expect(screen.getByText('2d6 + 4')).toBeInTheDocument();
+  expect(onApply).toHaveBeenCalledTimes(1);
+  rerender(view({ proposal: { amount: null, formula: '2d6 + 4' }, floor: { table: true }, criticalScore: 30, applied: { amount: 11 } }));
+  expect(screen.getByText('Danno applicato · 11')).toBeInTheDocument();
+  expect(screen.queryByText(/il danno lo applica il DM/)).not.toBeInTheDocument();
+});
+
 test('AppliedDamage reads the recorded amount, 0 included, and takes focus only through a focusRef', () => {
   const focusRef = createRef();
   const { rerender } = render(<AppliedDamage applied={{ amount: 0 }} />);

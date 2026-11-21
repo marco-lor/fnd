@@ -436,15 +436,19 @@ test('the DM may apply damage to every target and a player only to their own, no
   const { result, rerender } = renderHook(hookProps => useGrigliataCombat(hookProps), { initialProps: props() });
   expect(result.current.panel.onApplyDamage).toEqual(expect.any(Function));
   expect(allowed(result.current.panel)).toEqual([true, false]);
+  // The Registro holds a player to the proposed minimum and shows defense audits only to the DM.
+  expect(result.current.panel.isManager).toBe(false);
   rerender(props({ suspended: true }));
   expect(result.current.panel.onApplyDamage).toBeUndefined();
   expect(allowed(result.current.panel)).toEqual([false, false]);
   rerender(props({ isManager: true, suspended: true }));
   expect(result.current.panel.onApplyDamage).toBeUndefined();
   expect(allowed(result.current.panel)).toEqual([false, false]);
+  expect(result.current.panel.isManager).toBe(false);
   rerender(props({ isManager: true }));
   expect(result.current.panel.onApplyDamage).toEqual(expect.any(Function));
   expect(allowed(result.current.panel)).toEqual([true, true]);
+  expect(result.current.panel.isManager).toBe(true);
 });
 
 test('the DM applies damage once, retaining a submitted amount and its error across a closed panel', async () => {
@@ -596,11 +600,16 @@ test('a player applies damage only to their own pawn within one action, also whe
 
   const field = within(form).getByLabelText('Danno finale');
   expect(field).toHaveValue('7');
+  // The proposal is the player's minimum: less is refused in place, more is sent.
   fireEvent.change(field, { target: { value: '6' } });
-  mutate.mockResolvedValueOnce({ data: { combatId: 'volley', damageApplied: { amount: 6 } } });
   fireEvent.click(within(form).getByRole('button', { name: 'Applica danno' }));
-  expect(mutate).toHaveBeenCalledWith({ command: 'applyDamage', combatId: 'volley', targetPlacementId: id('lia'), amount: 6, criticalScore: null });
-  expect(await screen.findByText('Danno applicato · 6')).toBeInTheDocument();
+  expect(within(form).getByRole('alert')).toHaveTextContent('Il danno non può essere inferiore a 7: solo il DM può ridurlo.');
+  expect(mutate).not.toHaveBeenCalled();
+  fireEvent.change(field, { target: { value: '9' } });
+  mutate.mockResolvedValueOnce({ data: { combatId: 'volley', damageApplied: { amount: 9 } } });
+  fireEvent.click(within(form).getByRole('button', { name: 'Applica danno' }));
+  expect(mutate).toHaveBeenCalledWith({ command: 'applyDamage', combatId: 'volley', targetPlacementId: id('lia'), amount: 9, criticalScore: null });
+  expect(await screen.findByText('Danno applicato · 9')).toBeInTheDocument();
   expect(damageForms()).toHaveLength(0);
 
   // The other side is refused in the command itself too, not only by the missing form.

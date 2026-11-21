@@ -413,7 +413,7 @@ function Arsenal({
 export function GrigliataCombatPanel({
   actor, actions = [], equipped, targets = [], events = [], pending = [], turn, selection = {}, currentUserId,
   onSelectAction = () => {}, onBeginTargeting, onRemoveTarget, onLaunch, onRetry, onCritical, onApplyDamage, canApplyDamage, damageState,
-  busy = false, arsenalSync = 'ready', error, loading = false,
+  busy = false, arsenalSync = 'ready', error, loading = false, isManager = false,
 }) {
   const headingId = useId();
   return (
@@ -438,7 +438,7 @@ export function GrigliataCombatPanel({
         </div>
       </section>
       <GrigliataCombatHistory
-        {...{ events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState }}
+        {...{ events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager }}
       />
     </div>
   );

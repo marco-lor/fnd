@@ -132,12 +132,22 @@ export interface CombatRoll {
   rolls: number[];
 }
 
+// A defense value the defender typed instead of the one stored with the request.
+export interface CombatDefenseChange {
+  value: number;
+  default: number | null;
+}
+
+export type CombatDefenseOverrides = Partial<Record<"bonus" | "reduction" | "die", CombatDefenseChange>>;
+
 export interface CombatTrial {
   round: number;
   attack: CombatRoll | null;
   defense: CombatRoll | null;
   outcome: CombatOutcome;
   damage: number | null;
+  // Present only when the defender changed a stored default; never on a consent.
+  overrides?: CombatDefenseOverrides;
 }
 
 export interface CombatDamageDetails {
@@ -300,6 +310,21 @@ export const combatDamageEligible = (
   target: Pick<CombatTarget, "placementId" | "status" | "outcome" | "damage">,
   effects: Pick<CombatEffect, "kind" | "amount" | "targetPlacementId">[]
 ): boolean => combatDamageBase(target, effects) !== null;
+
+// The least a target's owner may confirm: the proposal Home and the Registro show,
+// that is the critical's total once the app could roll it, else the base. "table"
+// when the critical is left to the table: that amount is the DM's to settle. Null
+// with nothing concrete to apply. The DM may apply any amount.
+export const combatOwnerDamageFloor = (
+  target: Pick<CombatTarget, "placementId" | "status" | "outcome" | "damage" | "critical">,
+  effects: Pick<CombatEffect, "kind" | "amount" | "targetPlacementId">[]
+): number | "table" | null => {
+  const base = combatDamageBase(target, effects);
+  if (base === null) return null;
+  const critical = asRecord(target.critical);
+  if (critical.tableRoll) return "table";
+  return isDamageAmount(critical.total) ? critical.total : base;
+};
 
 export const combatCost = (
   action: Pick<CombatAction, "cost" | "extraResource"> & {variableCost?: string | null},
@@ -526,6 +551,27 @@ export const compareCombatRolls = (attack: number, defense: number): CombatOutco
 export const combatStatus = (targets: {status: CombatStatus}[]): CombatStatus => {
   if (targets.some(({status}) => status === "retry")) return "retry";
   return targets.some(({status}) => status === "waiting") ? "waiting" : "done";
+};
+
+// Situational values are allowed: the trial records each one that differs from the
+// default stored with the request, with both numbers, so the DM sees it. Fields the
+// request did not ask for are never audited. Null when the defaults stood.
+export const combatDefenseOverrides = (
+  defaults: Pick<CombatDefense, "value" | "reduction" | "die" | "showReduction" | "showDie">,
+  used: {bonus: number; reduction: number | null; die: number | null}
+): CombatDefenseOverrides | null => {
+  const stored = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const checked: [keyof CombatDefenseOverrides, number | null, number | null, boolean][] = [
+    ["bonus", used.bonus, stored(defaults.value), true],
+    ["reduction", used.reduction, stored(defaults.reduction), defaults.showReduction],
+    ["die", used.die, combatDie(defaults.die), defaults.showDie],
+  ];
+  const overrides: CombatDefenseOverrides = {};
+  checked.forEach(([key, value, standard, shown]) => {
+    if (shown && value !== null && value !== standard) overrides[key] = {value, default: standard};
+  });
+  return Object.keys(overrides).length ? overrides : null;
 };
 
 export const getCombatDefense = (action: CombatCheck & {kind: CombatKind}, profile: CombatProfile): CombatDefense => ({

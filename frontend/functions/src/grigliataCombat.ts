@@ -19,9 +19,11 @@ import {
   combatDamageEligible,
   combatDamageProposal,
   combatDamageSplit,
+  combatDefenseOverrides,
   combatDie,
   combatDistance,
   combatInRange,
+  combatOwnerDamageFloor,
   combatRelationAllows,
   combatResources,
   combatRoleRange,
@@ -808,10 +810,10 @@ const newDefenseTrial = (
 ): {trial: CombatTrial; damageDetails: CombatDamageDetails | null; proposed: CombatEffect[]} => {
   const {round, attack} = target;
   // An effect that lands without weapon damage proposes the card's own.
-  const landed = (outcome: "hit" | "accepted", defense: CombatRoll | null) => {
+  const landed = (outcome: "hit" | "accepted", defense: CombatRoll | null, audit = {}) => {
     const proposed = proposeDamage(action, actor, target);
     const damage = proposed.find(({kind}) => kind === "damage")?.amount ?? null;
-    return {trial: {round, attack, defense, outcome, damage}, damageDetails: null, proposed};
+    return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails: null, proposed};
   };
   if (defaults.consent) {
     if (typeof input.consent !== "boolean") {
@@ -830,15 +832,20 @@ const newDefenseTrial = (
   const die = defaults.showDie ? combatDie(input.die ?? defaults.die) : null;
   if (defaults.showDie && !die) return fail("invalid-argument", "Scegli un Dado Anima valido.");
   const defense = makeCombatRoll(defaults.label, value, die, roll);
+  // The defender may type situational values; the trial keeps each change for the DM.
+  const overrides = combatDefenseOverrides(defaults, {
+    bonus: value, reduction: defaults.showReduction ? reduction : null, die,
+  });
+  const audit = overrides ? {overrides} : {};
   const outcome = attack ? compareCombatRolls(attack.total, defense.total) : "hit";
   if (outcome !== "hit") {
-    return {trial: {round, attack, defense, outcome, damage: null}, damageDetails: null, proposed: []};
+    return {trial: {round, attack, defense, outcome, damage: null, ...audit}, damageDetails: null, proposed: []};
   }
-  if (!defaults.showReduction) return landed("hit", defense);
+  if (!defaults.showReduction) return landed("hit", defense, audit);
   const raw = rollCombatDamage(action.damageExpr, roll) ?? 0;
   const damageDetails = {raw, subtotal: action.attackStat + raw + action.damageBonus, reduction, hands: action.hands};
   const damage = combatWeaponDamage(damageDetails.subtotal, reduction, action.hands);
-  return {trial: {round, attack, defense, outcome, damage}, damageDetails, proposed: [{
+  return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails, proposed: [{
     kind: "damage", label: "Danno base", amount: damage,
     expr: action.damageExpr, targetPlacementId: target.placementId,
   }]};
@@ -1090,6 +1097,15 @@ const applyDamage = async (context: Context, input: Fields) => {
   }
   if ((target.critical?.score ?? null) !== criticalScore) {
     return fail("failed-precondition", "Il critico è cambiato: controlla il danno aggiornato.");
+  }
+  // The owner confirms the proposal they were shown, or raises it; only the DM lowers
+  // it or settles a critical left to the table.
+  const floor = manager ? null : combatOwnerDamageFloor(target, event.effects);
+  if (floor === "table") {
+    return fail("permission-denied", "Il critico va calcolato al tavolo: il danno lo applica il DM.");
+  }
+  if (floor !== null && amount < floor) {
+    return fail("permission-denied", `Il danno non può essere inferiore a ${floor}: solo il DM può ridurlo.`);
   }
   const current = await readDamageTarget(context, event.backgroundId, target);
   const request = await ownerDamageRequest(context, combatId, event, placementId);

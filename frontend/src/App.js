@@ -87,7 +87,7 @@ const CombatInbox = React.lazy(() => import('./components/grigliata/GrigliataCom
 
 export const AuthenticatedRoute = () => {
   const { user, authReady, authStatus, logout } = useAuthSession();
-  const { profileStatus, profileFresh, retryProfile } = useProfileState();
+  const { profileStatus, profileFresh, retryProfile, userData } = useProfileState();
 
   if (!authReady) {
     return <StatusPanel title="Checking your session" message="Confirming your authenticated session…" />;
@@ -101,7 +101,7 @@ export const AuthenticatedRoute = () => {
     return (
       <AuthenticatedLayout>
         {(process.env.REACT_APP_FND_FIREBASE_PROJECT_ID === 'fatin-test' || process.env.REACT_APP_FND_PERF === '1') &&
-          <React.Suspense fallback={null}><CombatInbox key={user.uid} uid={user.uid}/></React.Suspense>}
+          <React.Suspense fallback={null}><CombatInbox key={user.uid} uid={user.uid} isManager={userData?.role === 'dm'}/></React.Suspense>}
         <Outlet />
       </AuthenticatedLayout>
     );

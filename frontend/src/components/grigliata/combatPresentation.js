@@ -190,6 +190,34 @@ export function combatDamageProposal(event, target) {
   return { amount: critical && isDamageAmount(critical.total) ? critical.total : base, formula: '' };
 }
 
+// What a target's owner may confirm, by the rule the server enforces: at least the proposal (the critical's total once
+// the app could roll it, else the base), and nothing when the critical is rolled at the table, whose damage the DM
+// applies. Null for the DM, who sets any whole number from 0 up, and when nothing is proposed.
+export function combatDamageFloor(proposal, isManager) {
+  if (isManager || !proposal) return null;
+  return proposal.amount == null ? { table: true } : { minimum: proposal.amount };
+}
+
+const plainNumber = value => (value < 0 ? '−' + Math.abs(value) : String(value));
+const OVERRIDE_PARTS = [
+  ['bonus', trial => trial.defense?.label || 'Difesa', plainNumber],
+  ['reduction', () => 'RD', plainNumber],
+  ['die', () => 'Dado Anima', sides => 'd' + sides],
+];
+
+// The defense values a defender typed instead of the stored ones, as the server recorded them on the trial, each with
+// the stored value beside it. '' when the defaults stood, for a consent and for trials recorded before the audit.
+export function combatDefenseOverrideLabel(trial) {
+  const overrides = trial?.overrides;
+  if (!overrides || typeof overrides !== 'object') return '';
+  return OVERRIDE_PARTS.flatMap(([key, label, format]) => {
+    const change = overrides[key];
+    if (!Number.isFinite(change?.value)) return [];
+    const stored = Number.isFinite(change.default) ? 'invece di ' + format(change.default) : '(nessun valore in scheda)';
+    return [label(trial) + ' ' + format(change.value) + ' ' + stored];
+  }).join(' · ');
+}
+
 // The damage the server recorded for this target; `{ amount: 0 }` is an application too.
 export const combatAppliedDamage = target => (
   target?.damageApplied && typeof target.damageApplied === 'object' ? target.damageApplied : null

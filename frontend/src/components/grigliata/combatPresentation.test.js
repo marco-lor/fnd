@@ -1,6 +1,6 @@
 import {
   combatCostLabel, combatDefenderOutcomeLabel, combatProposalLabel, combatResourceConfirmLabel, combatSpentLabel, combatStepRange, combatStepRangeFt,
-  combatTime, combatDamageProposal, combatAppliedDamage, parseCombatDamage,
+  combatTime, combatDamageProposal, combatAppliedDamage, parseCombatDamage, combatDamageFloor, combatDefenseOverrideLabel,
 } from './combatPresentation';
 
 test('costs show only their non-zero parts and charges read as table-tracked', () => {
@@ -78,6 +78,29 @@ test('a completed critical proposes its total; one still to roll at the table pr
   expect(combatDamageProposal({}, { ...hit, critical: { score: 13, total: null } })).toEqual({ amount: 7, formula: '' });
   // A critical never makes a target without damage eligible.
   expect(combatDamageProposal({}, { ...hit, damage: null, critical: { score: 13, total: 15 } })).toBeNull();
+});
+
+test('an owner confirms at least the proposal and leaves a critical rolled at the table to the DM, who sets any amount', () => {
+  expect(combatDamageFloor({ amount: 9, formula: '' }, false)).toEqual({ minimum: 9 });
+  expect(combatDamageFloor({ amount: 0, formula: '' }, false)).toEqual({ minimum: 0 });
+  expect(combatDamageFloor({ amount: null, formula: 'max(0, 6 + 2d6 − 1 RD)' }, false)).toEqual({ table: true });
+  expect(combatDamageFloor({ amount: 9, formula: '' }, true)).toBeNull();
+  expect(combatDamageFloor({ amount: null, formula: 'max(0, 6 + 2d6 − 1 RD)' }, true)).toBeNull();
+  expect(combatDamageFloor(null, false)).toBeNull();
+});
+
+test('the DM reads each defense value typed instead of the stored one; consents and older trials read nothing', () => {
+  const defense = { label: 'Difesa', total: 91, bonus: 90, sides: 20, rolls: [1] };
+  expect(combatDefenseOverrideLabel({ defense, overrides: {
+    bonus: { value: 90, default: 2 }, reduction: { value: 0, default: 2 }, die: { value: 20, default: 12 },
+  } })).toBe('Difesa 90 invece di 2 · RD 0 invece di 2 · Dado Anima d20 invece di d12');
+  expect(combatDefenseOverrideLabel({ defense: { ...defense, label: 'Costituzione' }, overrides: { bonus: { value: -3, default: null } } }))
+    .toBe('Costituzione −3 (nessun valore in scheda)');
+  expect(combatDefenseOverrideLabel({ defense: null, overrides: { reduction: { value: 4, default: -1 } } })).toBe('RD 4 invece di −1');
+  expect(combatDefenseOverrideLabel({ defense })).toBe('');
+  expect(combatDefenseOverrideLabel({ defense: null, outcome: 'accepted' })).toBe('');
+  expect(combatDefenseOverrideLabel({ defense, overrides: { bonus: { value: '9', default: 2 } } })).toBe('');
+  expect(combatDefenseOverrideLabel(undefined)).toBe('');
 });
 
 test('applied damage includes 0, and a typed final damage is a whole number from 0 up', () => {

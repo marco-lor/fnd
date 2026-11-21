@@ -1,7 +1,8 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FaClock, FaHeartBroken, FaShieldAlt, FaTimes } from 'react-icons/fa';
 import {
-  combatAppliedDamage, combatCardText, combatDamageProposal, combatDefenderOutcomeLabel, combatProposalLabel, formatCombatRoll,
+  combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatDefenderOutcomeLabel, combatProposalLabel,
+  formatCombatRoll,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
 import './grigliataCombat.css';
@@ -315,7 +316,9 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
   );
 }
 
-function DefenseInbox({ uid, requests, damageRequests, activeDamageBackgroundId, onRespond, busy, error, onWatchDamage, onApplyDamage }) {
+function DefenseInbox({
+  uid, isManager, requests, damageRequests, activeDamageBackgroundId, onRespond, busy, error, onWatchDamage, onApplyDamage,
+}) {
   const [deferred, setDeferred] = useState(new Set());
   const [activeKey, setActiveKey] = useState('');
   const [receiptQueue, setReceiptQueue] = useState(() => ({ shown: [], waiting: [], parked: [], targets: new Map() }));
@@ -596,6 +599,7 @@ function DefenseInbox({ uid, requests, damageRequests, activeDamageBackgroundId,
         <TargetDamage
           name={name}
           proposal={proposal || NO_PROPOSAL}
+          floor={combatDamageFloor(proposal, isManager)}
           criticalScore={owner.critical?.score ?? null}
           applied={applied}
           state={damage[id]}
@@ -690,8 +694,10 @@ function DefenseInbox({ uid, requests, damageRequests, activeDamageBackgroundId,
 // a message to show. Without both, receipts read as before.
 // `damageRequests` lists the owner's `damagePending` requests from the server (never a cached copy): damage of actions
 // that asked no defense, each offered once as a receipt to confirm.
+// `isManager` is the signed-in DM, who may confirm any amount for a pawn of theirs; an owner is held to each proposal.
 export function GrigliataDefensePopup({
-  currentUserId, requests = NONE, damageRequests = NONE, activeDamageBackgroundId, onRespond, busy = false, error, onWatchDamage, onApplyDamage,
+  currentUserId, isManager = false, requests = NONE, damageRequests = NONE, activeDamageBackgroundId, onRespond, busy = false, error,
+  onWatchDamage, onApplyDamage,
 }) {
   if (!currentUserId || !onRespond) return null;
   const pending = requests.filter(request => request.ownerUid === currentUserId && request.status === 'waiting');
@@ -699,6 +705,7 @@ export function GrigliataDefensePopup({
     <DefenseInbox
       key={currentUserId}
       uid={currentUserId}
+      isManager={Boolean(isManager)}
       requests={pending}
       damageRequests={damageRequests}
       activeDamageBackgroundId={activeDamageBackgroundId}

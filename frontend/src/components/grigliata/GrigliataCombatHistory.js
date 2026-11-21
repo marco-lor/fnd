@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { FaArrowRight, FaClock, FaDiceD20, FaHistory } from 'react-icons/fa';
 import {
-  combatAppliedDamage, combatCardText, combatDamageProposal, combatOutcomeLabel, combatPointLabel, combatSpentLabel, combatTargetName,
-  combatTime, formatCombatRoll, signedCombatModifier,
+  combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatDefenseOverrideLabel, combatOutcomeLabel,
+  combatPointLabel, combatSpentLabel, combatTargetName, combatTime, formatCombatRoll, signedCombatModifier,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
 
@@ -46,10 +46,10 @@ function eventResult(event) {
   return outcomes[0] || event.effects?.[0]?.label || 'Azione risolta';
 }
 
-function DetailRow({ label, children }) {
+function DetailRow({ label, children, className = '' }) {
   if (children === '' || children == null) return null;
   return (
-    <div className="gc-rule-row">
+    <div className={['gc-rule-row', className].filter(Boolean).join(' ')}>
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
@@ -102,7 +102,7 @@ function CriticalResult({ critical }) {
   );
 }
 
-function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal, damage = IDLE, onApplyDamage }) {
+function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal, damage = IDLE, onApplyDamage, isManager }) {
   const name = combatTargetName(target, targets);
   // What the server recorded wins; the reply to this viewer's own request covers the moments before its snapshot arrives.
   const applied = combatAppliedDamage(target) || damage.applied || null;
@@ -119,6 +119,8 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal,
           <DetailRow label={'Prova ' + (trial.round ?? index + 1)}>{combatOutcomeLabel(trial.outcome, kind, hands)}</DetailRow>
           <LoggedRoll roll={trial.attack} />
           <LoggedRoll roll={trial.defense} />
+          {/* The values the defender typed instead of the stored ones, for the DM only. */}
+          {isManager && <DetailRow label="Valori modificati" className="gc-override">{combatDefenseOverrideLabel(trial)}</DetailRow>}
           <DetailRow label="Danno proposto">{trial.damage}</DetailRow>
         </dl>
       ))}
@@ -129,8 +131,8 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, proposal,
         <CriticalInput critical={target.critical} onCritical={onCritical} busy={busy || Boolean(damage.busy)} />
       )}
       {onApplyDamage && (applied || (proposal && (!damage.unavailable || damage.busy)))
-        ? <TargetDamage name={name} proposal={proposal} criticalScore={target.critical?.score ?? null}
-            applied={applied} state={damage} onApply={onApplyDamage} />
+        ? <TargetDamage name={name} proposal={proposal} floor={combatDamageFloor(proposal, isManager)}
+            criticalScore={target.critical?.score ?? null} applied={applied} state={damage} onApply={onApplyDamage} />
         : applied && <AppliedDamage applied={applied} />}
       {onApplyDamage && proposal && !applied && damage.unavailable && !damage.busy && (
         <p className="gc-hint">Bersaglio non più sulla mappa.</p>
@@ -158,9 +160,11 @@ function EffectValue({ effect, recipient }) {
   return summary || effect.description || 'Da applicare al tavolo';
 }
 
-function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDamage, damageState }) {
+function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager }) {
   const { actor, action, targets = [], affected = [], cost, effects = [] } = event;
   const destination = eventDestinations(event);
+  // The DM spots typed defense values without opening every entry.
+  const overridden = isManager && targets.some(target => (target.trials || []).some(trial => combatDefenseOverrideLabel(trial)));
   // Per target: the DM answers for every pawn, a player only for their own.
   const damageCommand = target => (onApplyDamage && event.id && (!canApplyDamage || canApplyDamage(event, target))
     ? amount => onApplyDamage(event, target, amount)
@@ -176,7 +180,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
         <span className="gc-log-caption">
           <small>{actor?.name || 'Attaccante'}{destination && <><FaArrowRight aria-hidden="true" />{destination}</>}</small>
           <strong>{action?.name || 'Azione'}</strong>
-          <span>{eventResult(event)}</span>
+          <span>{eventResult(event) + (overridden ? ' · valori di difesa modificati' : '')}</span>
         </span>
       </summary>
       <div className="gc-log-detail">
@@ -185,7 +189,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
         {targets.map(target => (
           <TargetRolls
             key={target.placementId}
-            {...{ target, targets, busy }}
+            {...{ target, targets, busy, isManager }}
             kind={event.kind}
             hands={action?.hands}
             onCritical={onCritical && action?.hands > 0 ? score => onCritical(event, target, score) : undefined}
@@ -218,8 +222,9 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, canApplyDa
   );
 }
 
+// `isManager` is the signed-in DM: free damage amounts and the defense audit. Anyone else is held to each proposal.
 export function GrigliataCombatHistory({
-  events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState,
+  events, actor, currentUserId, busy, onCritical, onApplyDamage, canApplyDamage, damageState, isManager = false,
 }) {
   const isOwner = event => currentUserId
     ? (event.actorUid || event.actor?.ownerUid) === currentUserId
@@ -233,7 +238,7 @@ export function GrigliataCombatHistory({
             <CombatHistoryEntry
               key={event.id || event.combatId}
               event={event}
-              {...{ busy, onApplyDamage, canApplyDamage, damageState }}
+              {...{ busy, onApplyDamage, canApplyDamage, damageState, isManager }}
               onCritical={isOwner(event) ? onCritical : undefined}
             />
           ))}

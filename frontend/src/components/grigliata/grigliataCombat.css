@@ -438,6 +438,9 @@ button.gc-hand:hover,
 }
 
 .gc-rule-row dt { color: var(--gc-muted); }
+/* A defense value typed instead of the stored one: the DM's eye goes to it. */
+.gc-rule-row.gc-override dt,
+.gc-rule-row.gc-override dd { color: var(--gc-gold); }
 .gc-rule-row dd { text-align: end; font-variant-numeric: tabular-nums; }
 .gc-rule-row code,
 .gc-defense-roll code { color: var(--gc-teal); }

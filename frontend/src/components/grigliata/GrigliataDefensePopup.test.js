@@ -143,22 +143,29 @@ test('a copy for someone else never fills the receipt', async () => {
   expect(screen.queryByText('Recupero il danno da confermare…')).not.toBeInTheDocument();
 });
 
-test('the live critical sets the proposal, a table roll leaves the field blank with its formula, and a changed critical holds a refused amount', async () => {
+test('the live critical sets the minimum, a table roll is left to the DM with its formula, and a changed critical holds a refused amount', async () => {
   const request = defenseRequest('req-a');
   const onApplyDamage = jest.fn().mockRejectedValueOnce(new Error('Il critico è cambiato: controlla il danno aggiornato.'));
   const { answer } = setup([request], { onApplyDamage });
   await answer(request, []);
 
+  // The owner has no number to confirm for a critical rolled at the table.
   emit(request, ownerCopy(request, { critical: { score: 20, tableRoll: '2d6 + 3', total: 4 } }));
-  expect(amountOf('Bro')).toHaveValue('');
-  expect(within(damageForm('Bro')).getByText('2d6 + 3')).toBeInTheDocument();
+  expect(damageForm('Bro')).not.toBeInTheDocument();
+  expect(screen.getByText('Critico da calcolare al tavolo: il danno lo applica il DM.')).toBeInTheDocument();
+  expect(screen.getByText('2d6 + 3')).toBeInTheDocument();
 
   emit(request, ownerCopy(request));
+  expect(amountOf('Bro')).toHaveAccessibleDescription('Minimo 9: puoi aumentarlo; per ridurlo chiedi al DM.');
   fireEvent.change(amountOf('Bro'), { target: { value: '6' } });
   fireEvent.click(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' }));
-  expect(onApplyDamage).toHaveBeenLastCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 6, criticalScore: null });
+  expect(onApplyDamage).not.toHaveBeenCalled();
+  expect(within(damageForm('Bro')).getByRole('alert')).toHaveTextContent('Il danno non può essere inferiore a 9: solo il DM può ridurlo.');
+  fireEvent.change(amountOf('Bro'), { target: { value: '10' } });
+  fireEvent.click(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' }));
+  expect(onApplyDamage).toHaveBeenLastCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 10, criticalScore: null });
   expect(await within(damageForm('Bro')).findByRole('alert')).toHaveTextContent('Il critico è cambiato: controlla il danno aggiornato.');
-  expect(amountOf('Bro')).toHaveValue('6');
+  expect(amountOf('Bro')).toHaveValue('10');
 
   // The attacker confirms a critical: the refused amount stays, flagged, until the new proposal is taken.
   emit(request, ownerCopy(request, { critical: { score: 13, total: 14, tableRoll: '' } }));
@@ -174,6 +181,25 @@ test('the live critical sets the proposal, a table roll leaves the field blank w
   expect(onApplyDamage).toHaveBeenLastCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 14, criticalScore: 13 });
   expect(await screen.findByText('Danno applicato · 14')).toBeInTheDocument();
   expect(damageForm('Bro')).not.toBeInTheDocument();
+});
+
+test('the DM confirming a pawn of theirs from Home sets any amount, a critical rolled at the table included', async () => {
+  const request = defenseRequest('req-a');
+  const onApplyDamage = jest.fn().mockResolvedValueOnce({ amount: 0 });
+  const { answer, show } = setup([request], { onApplyDamage });
+  await answer(request, []);
+  show([], { isManager: true });
+  emit(request, ownerCopy(request, { critical: { score: 20, tableRoll: '2d6 + 3', total: 4 } }));
+  expect(amountOf('Bro')).toHaveValue('');
+  expect(amountOf('Bro')).toHaveAccessibleDescription('2d6 + 3');
+  expect(screen.queryByText(/il danno lo applica il DM/)).not.toBeInTheDocument();
+
+  emit(request, ownerCopy(request));
+  expect(amountOf('Bro')).toHaveAccessibleDescription('');
+  fireEvent.change(amountOf('Bro'), { target: { value: '0' } });
+  fireEvent.click(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' }));
+  expect(onApplyDamage).toHaveBeenLastCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 0, criticalScore: null });
+  expect(await screen.findByText('Danno applicato · 0')).toBeInTheDocument();
 });
 
 test('same-name pawns have distinct Home receipt and confirmation labels', async () => {
@@ -257,14 +283,14 @@ test('a queue keeps the prompt focused and each receipt keeps its sent amount an
   expect(within(dialog).getByRole('spinbutton', { name: 'Difesa' })).toHaveFocus();
   expect(within(dialog).getByText('Nyx → Kai')).toBeInTheDocument();
 
-  fireEvent.change(amountOf('Bro'), { target: { value: '6' } });
+  fireEvent.change(amountOf('Bro'), { target: { value: '10' } });
   fireEvent.click(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' }));
-  expect(onApplyDamage).toHaveBeenCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 6, criticalScore: null });
+  expect(onApplyDamage).toHaveBeenCalledWith({ combatId: 'combat-req-a', targetPlacementId: 'map__bro', amount: 10, criticalScore: null });
 
   // The last answer empties the queue: the receipt moves to the corner still sending, still refusing a second send.
   await answer(third, []);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(amountOf('Bro')).toHaveValue('6');
+  expect(amountOf('Bro')).toHaveValue('10');
   expect(amountOf('Bro')).toHaveAttribute('readonly');
   fireEvent.submit(damageForm('Bro'));
   expect(onApplyDamage).toHaveBeenCalledTimes(1);
@@ -275,7 +301,7 @@ test('a queue keeps the prompt focused and each receipt keeps its sent amount an
   show([fourth]);
   const reopened = screen.getByRole('dialog', { name: 'Difesa' });
   expect(within(reopened).getByRole('form', { name: 'Applica danno a Bro' })).toBeInTheDocument();
-  expect(amountOf('Bro')).toHaveValue('6');
+  expect(amountOf('Bro')).toHaveValue('10');
   expect(within(damageForm('Bro')).getByRole('alert')).toHaveTextContent('Conferma non ricevuta.');
   expect(within(reopened).getByRole('spinbutton', { name: 'Difesa' })).toHaveFocus();
   expect(onWatchDamage).toHaveBeenCalledTimes(1);
