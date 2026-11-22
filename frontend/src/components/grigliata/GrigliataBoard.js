@@ -6524,7 +6524,7 @@ export default function GrigliataBoard({
         : combatNextDamage && <div className="gc-dice-tray" data-kind="damage"><CombatMapDamage nextDamage={combatNextDamage} /></div>}
       <div
         ref={containerRef}
-        className={`relative w-full flex-1 min-h-[480px] transition-colors ${
+        className={`relative w-full flex-1 min-h-[480px] xl:min-h-0 transition-colors ${
           isDropActive ? 'bg-amber-500/10' : 'bg-slate-950/40'
         }`}
         onDrop={handleDrop}

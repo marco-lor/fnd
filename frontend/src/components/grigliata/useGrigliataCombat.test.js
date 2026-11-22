@@ -125,6 +125,40 @@ test('an armed attack waits for the map throw before spending and shows the repl
   expect(result.current.tray).toMatchObject({ phase: 'result', rolls: [{ sides: 12, value: 7 }] });
 });
 
+test.each([
+  [null, '2d12'],
+  [['Bersaglio dell’attacco', 'Te o un alleato da curare'], 'd12'],
+])('the declared targets determine the attack pool for roles %j', async (targetRoles, notation) => {
+  const action = { ...sword, id: 'multi', kind: 'spell', mode: 'multiple', minTargets: 2, maxTargets: 2,
+    rangeFt: 15, allowSelf: true, targetRoles, roleRangesFt: [15, 15], attackDie: true, die: 12 };
+  const { result } = await mount([action], [pawn('nyx', 0), pawn('foe', 1), pawn('ally', 2)]);
+  act(() => result.current.panel.onBeginTargeting(action));
+  act(() => result.current.overlay.pickToken(id('foe')));
+  act(() => result.current.overlay.pickToken(id('ally')));
+  expect(result.current.panel.selection.targetIds).toEqual([id('foe'), id('ally')]);
+  act(() => result.current.panel.onPrepareLaunch(action, { channel: 'TPC' }));
+  expect(result.current.tray.notation).toBe(notation);
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+test('a tied melee attack keeps its recorded advantage for the next throw', async () => {
+  const { result } = await mount([sword], [pawn('nyx', 0), pawn('foe', 1)]);
+  const event = { id: 'tie', actorUid: uid };
+  const target = { placementId: id('foe'), name: 'foe', round: 1, advantage: true, attack: { sides: 20 } };
+  act(() => result.current.panel.onRetry(event, target));
+  expect(result.current.tray.notation).toBe('2d20');
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+test('the result strip shows an extra attack die disclosed by the server', async () => {
+  mutate.mockResolvedValueOnce({ data: { combatId: 'advantage', rolls: [{ sides: 12, value: 8 }, { sides: 12, value: 3 }] } });
+  renderSwordBattle();
+  await aimSword();
+  expect(screen.getByText('d12', { selector: '.gc-dice-head code' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  expect(await screen.findByText('2d12', { selector: '.gc-dice-head code' })).toBeVisible();
+});
+
 test('clicking Spada’s map target opens the ready tray before mutation and a hit leads to its own map throw', async () => {
   mutate.mockResolvedValueOnce({ data: { combatId: 'hit', rolls: [{ sides: 12, value: 9 }] } })
     .mockResolvedValueOnce({ data: { combatId: 'hit', damage: 5, rolls: [{ sides: 4, value: 3 }, { sides: 4, value: 2 }] } });

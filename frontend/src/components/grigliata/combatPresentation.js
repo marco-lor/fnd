@@ -3,6 +3,11 @@ import { combatDamageBand, combatRoleRange, picksGround } from './combatTargetin
 // Firestore Timestamp in ms; a server timestamp not committed yet reads null and counts as the newest.
 export const combatTime = stamp => stamp?.toMillis?.() ?? Number.MAX_SAFE_INTEGER;
 
+export function attackDiceNotation(sides, count) {
+  if (!sides) return 'Dado Anima';
+  return count === 1 ? `d${sides}` : `${count}d${sides}`;
+}
+
 export function formatCombatRoll(roll) {
   if (!roll || roll.total == null) return '';
   if (!roll.rolls?.length) return String(roll.total);

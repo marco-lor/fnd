@@ -4,7 +4,7 @@ import { db } from '../firebaseConfig';
 import { getCallable } from '../../data/functions/callableRegistry';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
 import { buildPlacementDocId } from './boardUtils';
-import { combatOutcomeLabel, combatTargetName, combatTime } from './combatPresentation';
+import { attackDiceNotation, combatOutcomeLabel, combatTargetName, combatTime } from './combatPresentation';
 import { canTargetToken, combatAllies, combatArea, combatDistance, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
 import useCombatRollTray from './useCombatRollTray';
 
@@ -313,8 +313,10 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     const payload = launchPayload(used, options);
     const check = action?.checks?.find(choice => choice.channel === options.channel) || action;
     if (!payload || !check?.attackDie || attack.busy) return undefined;
+    // An ordered attack/assist has a single attack roll. Other targets roll independently.
+    const attackCount = action.targetRoles ? 1 : Math.max(1, payload.targetPlacementIds.length);
     return prepareRoll({
-      kind: 'attack', title: action.name, notation: action.die ? 'd' + action.die : 'Dado Anima',
+      kind: 'attack', title: action.name, notation: attackDiceNotation(action.die, attackCount),
       anchor: { backgroundId, targetIds: payload.targetPlacementIds, point: payload.point },
       send: () => launch(payload),
     }, trigger);
@@ -323,7 +325,8 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     if (suspended || event.actorUid !== uid || attack.busy || tray?.phase === 'sending') return;
     const send = () => mutate({command:'retry',combatId:event.id,targetPlacementId:target.placementId,round:target.round});
     if (!target.attack?.sides) return run('attack', send);
-    return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + target.name, notation: 'd' + target.attack.sides,
+    return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + target.name,
+      notation: attackDiceNotation(target.attack.sides, target.advantage ? 2 : 1),
       combatId: event.id, targetPlacementId: target.placementId, anchor: { backgroundId, targetIds: [target.placementId] }, send });
   };
   const onRollDamage = (event, target) => {

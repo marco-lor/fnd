@@ -40,6 +40,71 @@ async function login(browser, player, mobile = false) {
   return page;
 }
 
+// Silhouettes show rotation even on unnumbered dice. Position and color also
+// have to stay still once the dice land.
+async function readDiceFrame(projection) {
+  return projection.evaluate(canvas => {
+    const {width, height} = canvas;
+    if (!width || !height) return {dice: []};
+    const pixels = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+    const dice = [];
+    let body;
+    for (let x = 0; x < width; x += 2) {
+      let top = height, bottom = -1, signature = 0;
+      for (let y = 0; y < height; y += 2) {
+        const p = (y * width + x) * 4;
+        if (pixels[p + 3] < 210 || pixels[p] + pixels[p + 1] + pixels[p + 2] < 60) continue;
+        top = Math.min(top, y);
+        bottom = y;
+        signature = Math.imul(signature ^ (pixels[p] + (pixels[p + 1] << 8)), 16777619);
+      }
+      if (bottom < 0) {
+        body = undefined;
+        continue;
+      }
+      if (!body) {
+        body = {left: x, right: x, top, bottom, signature: 0, columns: []};
+        dice.push(body);
+      }
+      body.right = x;
+      body.top = Math.min(body.top, top);
+      body.bottom = Math.max(body.bottom, bottom);
+      body.signature = Math.imul(body.signature ^ signature, 16777619);
+      body.columns.push([top, bottom]);
+    }
+    const rect = canvas.getBoundingClientRect();
+    const stageElement = canvas.closest('.gc-map-dice').parentElement;
+    const stage = stageElement.getBoundingClientRect();
+    const board = stageElement.parentElement.getBoundingClientRect();
+    const visibleCenterX = (Math.max(stage.left, board.left, 0) + Math.min(stage.right, board.right, window.innerWidth)) / 2;
+    const visibleCenterY = (Math.max(stage.top, board.top, 0) + Math.min(stage.bottom, board.bottom, window.innerHeight)) / 2;
+    const bodies = dice.filter(die => die.right - die.left >= 4);
+    if (!bodies.length) return {dice: []};
+    const centerX = (bodies[0].left + bodies[bodies.length - 1].right) / 2;
+    const centerY = (Math.min(...bodies.map(die => die.top)) + Math.max(...bodies.map(die => die.bottom))) / 2;
+    return {
+      dice: bodies.map(die => ({
+        outline: die.columns.map(([top, bottom]) => [top - die.top, bottom - die.top].join('/')).join(','),
+        signature: die.signature,
+        x: rect.left - stage.left + (die.left + die.right) * rect.width / (2 * width),
+        y: rect.top - stage.top + (die.top + die.bottom) * rect.height / (2 * height),
+      })),
+      offsetX: rect.left + centerX * rect.width / width - visibleCenterX,
+      offsetY: rect.top + centerY * rect.height / height - visibleCenterY,
+    };
+  });
+}
+
+async function expectMovingDice(projection, count) {
+  let first;
+  await expect.poll(async () => {
+    const {dice} = await readDiceFrame(projection);
+    if (dice.length !== count) return dice.length + ' visible';
+    if (!first) first = dice;
+    return dice.filter((die, index) => die.outline !== first[index].outline).length + ' moving';
+  }, {message: 'Every die in the pool must be separately visible and tumbling', intervals: [50, 80, 100]}).toBe(count + ' moving');
+}
+
 test('two players throw on the fatin-test map, resume damage, and use weapon and ground spells', {timeout: 150_000}, async t => {
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8080');
   assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:9099');
@@ -88,6 +153,7 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
     if (player === attacker) {
       slots.weaponOff = 'chain';
       seed(p + '/inventory/chain', {currentSnapshot: loadout('Catena del Predatore')});
+      seed(p + '/inventory/globes', {currentSnapshot: loadout('Triplice Globo Fluttuante')});
       seed(p + '/spells/bomb', bomb);
     }
     seed(p + '/state/equipment', {slots});
@@ -112,7 +178,9 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   };
   const journal = db.collection('grigliata_combat_actions').where('backgroundId', '==', board);
   await tab.click();
-  await map.getByRole('button', {name: /Mano principale.*Spada/}).click();
+  const sword = map.getByRole('button', {name: /Mano principale.*Spada/});
+  await expect(sword).toBeVisible({timeout: 60_000}); // First callable starts the local Functions worker.
+  await sword.click();
   await aimAtReceiver();
   const drag = tray.locator('.gc-dice-drag');
   await expect(drag.locator('canvas')).toBeVisible();
@@ -183,4 +251,75 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   assert.equal(granted.action.id, 'item:weaponOff:Afferra');
   assert.equal(granted.targets[0].outcome, 'resisted');
   assert.ok(!granted.targets[0].pendingDamage);
+
+  await t.test('all three Triplice Globo dice tumble before the reply and settle at the map center', async () => {
+    await Promise.all([
+      db.doc('users/' + attacker.uid + '/state/equipment').set({slots: {weaponMain: 'globes'}}),
+      db.doc('users/' + defender.uid + '/state/equipment').set({slots: {}}),
+    ]);
+    await map.setViewportSize({width: 1920, height: 1080});
+    await map.bringToFront();
+    await map.reload();
+    await tab.click();
+    await map.getByRole('button', {name: /Mano principale.*Triplice Globo Fluttuante/}).click();
+    await aimAtReceiver();
+    await tray.getByRole('button', {name: 'Tira i dadi'}).click();
+    // Melee advantage against the unequipped defender is first disclosed by the server.
+    await expectMovingDice(projection, 2);
+    await expect(tray.locator('.gc-dice-faces li')).toHaveCount(2);
+    await expect(tray.getByText('2d20', {exact: true})).toBeVisible();
+    await dialog.getByLabel('Difesa', {exact: true}).fill('-99');
+    await dialog.getByRole('button', {name: 'Tira Difesa'}).click();
+    await map.bringToFront();
+    await map.getByRole('button', {name: /Tiro di danno · QA Combat Receiver/}).click();
+    await expect(tray.getByText('3d4', {exact: true})).toBeVisible();
+
+    const endpoint = '**/mutateGrigliataCombat';
+    let allowDamage;
+    const gate = new Promise(resolve => { allowDamage = resolve; });
+    await map.route(endpoint, async route => {
+      if (route.request().method() === 'POST' && route.request().postDataJSON()?.data?.command === 'rollDamage') await gate;
+      await route.continue();
+    });
+    try {
+      await tray.getByRole('button', {name: 'Tira i dadi'}).click();
+      await expect(projection).toBeVisible();
+      await expectMovingDice(projection, 3);
+      await expect.poll(async () => {
+        const {dice, offsetX} = await readDiceFrame(projection);
+        return dice.length === 3 && Math.abs(offsetX) > 25
+          && Math.max(...dice.map(die => die.y)) - Math.min(...dice.map(die => die.y)) > 20;
+      }, {message: 'The d4 must travel across the map before gathering into their final row'}).toBe(true);
+    } finally {
+      allowDamage();
+    }
+    await expect(tray.locator('.gc-dice-faces li')).toHaveCount(3);
+    await map.unroute(endpoint);
+    const event = (await journal.get()).docs.map(doc => doc.data()).find(entry => entry.action.name === 'Triplice Globo Fluttuante');
+    const recorded = event.targets[0];
+    assert.deepEqual(await tray.locator('.gc-dice-faces strong').allTextContents(), recorded.damageRoll.rolls.map(die => String(die.value)));
+    await expect(tray.getByText(new RegExp(recorded.damage + ' danni proposti', 'i'))).toBeVisible();
+    await expect(tray.getByText(/Colpo a segno/)).toBeVisible();
+    const strip = await tray.boundingBox();
+    assert.ok(strip.height <= 64, 'A single-target desktop result should fit in a compact strip, got ' + strip.height + 'px');
+    let previous;
+    await expect.poll(async () => {
+      const {dice, offsetX, offsetY} = await readDiceFrame(projection);
+      const still = dice.length === 3 && dice.every((die, index) => {
+        const last = previous?.[index];
+        return last && die.x === last.x && die.y === last.y && die.outline === last.outline && die.signature === last.signature;
+      });
+      previous = dice;
+      if (!still || Math.abs(offsetX) > 12 || Math.abs(offsetY) > 12) return false;
+      const [left, middle, right] = dice;
+      return Math.max(...dice.map(die => die.y)) - Math.min(...dice.map(die => die.y)) <= 10
+        && Math.abs(middle.x - (left.x + right.x) / 2) <= 8;
+    }, {message: 'The three settled d4 must be stable in the center of the board viewport'}).toBe(true);
+    t.diagnostic('Desktop result ' + strip.width + ' × ' + strip.height + ' CSS px');
+    await map.setViewportSize({width: 1366, height: 600});
+    await expect.poll(async () => {
+      const {dice, offsetX, offsetY} = await readDiceFrame(projection);
+      return dice.length === 3 && Math.abs(offsetX) <= 12 && Math.abs(offsetY) <= 12;
+    }, {message: 'The settled row must remain centered in the visible map on a short desktop'}).toBe(true);
+  });
 });
