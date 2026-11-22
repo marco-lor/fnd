@@ -13,7 +13,7 @@ import {
   buildContentAction,
   buildWeaponActions,
   combatCost,
-  combatCritical,
+  combatCriticalThrow,
   combatDamageBalances,
   combatDamageBase,
   combatDamageEligible,
@@ -22,24 +22,34 @@ import {
   combatDefenseAdjusted,
   combatDie,
   combatDistance,
+  combatEffectsWithDamage,
+  combatHasDice,
   combatInRange,
+  combatLaunchRolls,
   combatOwnerDamageFloor,
+  combatPendingDamage,
   combatRelationAllows,
   combatResources,
   combatRoleRange,
+  combatRollFaces,
+  combatRoundAttack,
   combatStatus,
-  combatWeaponDamage,
+  combatWeaponHit,
   compareCombatRolls,
   equippedCombatItem,
   equippedItemSpells,
   getCombatDefense,
   makeCombatRoll,
+  resolveCombatDamage,
   rollCombatDamage,
   CombatAction,
   CombatCell,
+  CombatCritical,
+  CombatDamageRoll,
   CombatDefense,
   CombatDamageDetails,
   CombatEffect,
+  CombatPendingDamage,
   CombatPawn,
   CombatProblem,
   CombatProfile,
@@ -96,8 +106,14 @@ type CombatEvent = {
   action: CombatAction;
   targets: CombatTarget[];
   effects: CombatEffect[];
+  attack?: CombatRoll | null;
   // Players read the journal only when this is true; older events may lack it.
   shared?: unknown;
+  // "guided": damage with dice waits for the actor's rollDamage. Absent on immediate events.
+  rollMode?: unknown;
+  // A targetless guided action keeps its damage here, cleared to null once thrown.
+  pendingDamage?: CombatPendingDamage | null;
+  damageRoll?: CombatDamageRoll;
 };
 
 const fail = (code: ConstructorParameters<typeof HttpsError>[0], message: string): never => {
@@ -419,8 +435,9 @@ const publicAction = (action: CombatAction): CombatAction => ({...action, art: "
 
 const COMBAT_KINDS: ReadonlySet<unknown> = new Set(["weapon", "spell", "tecnica"]);
 const OWNER_DAMAGE_FIELDS = ["ownerUid", "backgroundId", "combatId", "ownerDamageUpdatedAt", "ownerDamage"];
-// A request with this status is no defense: it is damage that landed at once, shown
-// in its owner's Home until the first application settles it as done.
+// A request with this status is damage awaiting its owner, shown in their Home until the
+// first application settles it as done: damage that landed at once (no defense), or a
+// guided throw on an answered defense.
 const DAMAGE_PENDING = "damagePending";
 type OwnerDamageSource = Pick<CombatEvent, "backgroundId" | "kind" | "action" | "effects" | "shared">;
 type OwnerDamageRequest = {ref: DocumentReference; pending: boolean};
@@ -580,9 +597,18 @@ const effect = (
   targetPlacementId,
 });
 
-const proposeDamage = (action: CombatAction, actor: CombatCell, target: CombatPawn): CombatEffect[] => {
+// The damage an action proposes to a target, rolled now, or left to the actor's throw
+// when guided mode meets a formula with dice.
+const proposeDamage = (
+  action: CombatAction, actor: CombatCell, target: CombatPawn, guided: boolean, round: number
+): {proposed: CombatEffect[]; pendingDamage: CombatPendingDamage | null} => {
   const proposal = combatDamageProposal(action, combatDistance(actor, target));
-  return proposal ? [effect(proposal.kind, proposal.label, proposal.expr, target.placementId)] : [];
+  const pendingDamage = guided ? combatPendingDamage(proposal, round) : null;
+  return {
+    pendingDamage,
+    proposed: proposal && !pendingDamage
+      ? [effect(proposal.kind, proposal.label, proposal.expr, target.placementId)] : [],
+  };
 };
 
 const attackRoll = (action: CombatAction, advantage: boolean): CombatRoll | null => {
@@ -643,6 +669,10 @@ const launchCombat = async (context: Context, input: Fields) => {
     !Array.isArray(input.targetPlacementIds) || input.targetPlacementIds.length > MAX_COMBAT_TARGETS) {
     return fail("invalid-argument", "L'azione dichiarata non è valida.");
   }
+  if (input.rollMode !== undefined && input.rollMode !== "guided") {
+    return fail("invalid-argument", "La modalità di tiro non è valida.");
+  }
+  const guided = input.rollMode === "guided";
   const ids = input.targetPlacementIds.map((value) => docId(value, "Bersaglio"));
   if (new Set(ids).size !== ids.length) {
     return fail("invalid-argument", "Scegli bersagli diversi.");
@@ -656,6 +686,7 @@ const launchCombat = async (context: Context, input: Fields) => {
   const combatId = operationReceiptId(uid, operationId);
   const actionRef = db.doc(`${ACTIONS}/${combatId}`);
   // Without a version the hash keeps its earlier shape, so a retry from an older client still matches.
+  // The roll mode is no part of it: the first committed event decides how its damage resolves.
   const requested = hashValue({
     backgroundId, actorPlacementId, actionId, kind, channel, point, ids, approval,
     ...(actionVersion !== null && {actionVersion}),
@@ -665,7 +696,8 @@ const launchCombat = async (context: Context, input: Fields) => {
     if (existing.get("actorUid") !== uid || existing.get("requestHash") !== requested) {
       return fail("already-exists", "Questo identificativo appartiene a un'altra azione.");
     }
-    return {combatId};
+    const stored = existing.data() as CombatEvent;
+    return {combatId, rolls: combatLaunchRolls(Array.isArray(stored.targets) ? stored.targets : [], stored.attack)};
   }
   const board = await readActiveBoard(context, backgroundId);
   const [actor, ...otherPawns] = await readPawns(context, backgroundId, [
@@ -740,7 +772,9 @@ const launchCombat = async (context: Context, input: Fields) => {
       outcome: opposed || !primaryRole ? null : action.consent ? "accepted" : action.mode === "manual" ? "manual" : "applied",
     };
     if (!opposed && !action.targetRoles) {
-      effects.push(...proposeDamage(action, actor.pawn, targetPawn.pawn));
+      const {proposed, pendingDamage} = proposeDamage(action, actor.pawn, targetPawn.pawn, guided, 1);
+      effects.push(...proposed);
+      if (pendingDamage) target.pendingDamage = pendingDamage;
       if (action.healExpr) effects.push(effect("heal", "Cura proposta", action.healExpr, targetId));
     }
     attacks.push({
@@ -748,10 +782,14 @@ const launchCombat = async (context: Context, input: Fields) => {
       defense: opposed ? getCombatDefense({...action, kind: action.hands > 0 ? "weapon" : kind}, targetState.profile) : null,
     });
   }
-  if (!attacks.length) {
-    if (action.damageExpr) effects.push(effect("damage", "Danno proposto", action.damageExpr, null));
-    if (action.healExpr) effects.push(effect("heal", "Cura proposta", action.healExpr, null));
+  // Damage without a target lands on the ground; guided mode leaves its dice to the actor as well.
+  const groundDamage = !attacks.length && action.damageExpr
+    ? {kind: "damage" as const, label: "Danno proposto", expr: action.damageExpr} : null;
+  const pendingDamage = guided ? combatPendingDamage(groundDamage, 1) : null;
+  if (groundDamage && !pendingDamage) {
+    effects.push(effect(groundDamage.kind, groundDamage.label, groundDamage.expr, null));
   }
+  if (!attacks.length && action.healExpr) effects.push(effect("heal", "Cura proposta", action.healExpr, null));
   const pairedRecipient = action.targetRoles && attacks[1]?.target;
   if (pairedRecipient && action.healExpr && attacks[0]?.target.outcome) {
     effects.push(effect("heal", "Cura proposta", action.healExpr, pairedRecipient.placementId));
@@ -762,7 +800,7 @@ const launchCombat = async (context: Context, input: Fields) => {
   }
   const attack = attacks[0]?.target.attack ?? (attacks.length ? null : attackRoll(action, false));
   const targets = attacks.map(({target}) => target);
-  const status = combatStatus(targets);
+  const status = combatStatus(targets, pendingDamage);
   const areaTargets = await readAffectedPawns(
     context, backgroundId, actor, action, point, targetPawns.map(({pawn}) => pawn),
     board.get("fogOfWarEnabled") !== false
@@ -772,10 +810,14 @@ const launchCombat = async (context: Context, input: Fields) => {
   const shared = actor.visible && areaTargets.visible && targetPawns.every((pawn) => pawn.visible);
   storeCost(context, actorState, cost);
   transaction.create(actionRef, {
-    schemaVersion: 1, backgroundId, actorUid: uid, actor: actor.pawn, kind, action, point, targets, status,
+    schemaVersion: 1, backgroundId, actorUid: uid, actor: actor.pawn, kind, point, targets, status,
+    // The tray of a guided journal knows beforehand whether a critical has dice to throw.
+    action: guided ? {...action, criticalHasDice: combatHasDice(action.criticalExpr)} : action,
     attack, cost: {...cost, extra: action.extraResource}, effects, requestHash: requested,
     affected: areaTargets.affected,
     shared,
+    ...(guided && {rollMode: "guided"}),
+    ...(pendingDamage && {pendingDamage}),
     createdAt: now, updatedAt: now,
     resolvedAt: status === "done" ? now : null,
   });
@@ -797,7 +839,7 @@ const launchCombat = async (context: Context, input: Fields) => {
       createdAt: now, updatedAt: now,
     });
   }
-  return {combatId, resources: {
+  return {combatId, rolls: combatLaunchRolls(targets, attack), resources: {
     hp: actorSummary.hp === null ? null : actorSummary.hp - cost.hp,
     mana: actorSummary.mana === null ? null : actorSummary.mana - cost.mana,
     essenza: actorSummary.essenza === null ? null : actorSummary.essenza - cost.essenza,
@@ -818,19 +860,24 @@ const readDefenseNumber = (
   return candidate;
 };
 
-// One answered round: the trial, plus the damage a hit proposes to this target.
+// One answered round: the trial, plus the damage a hit proposes to this target, or the
+// damage it leaves to the actor's throw in guided mode.
 const newDefenseTrial = (
-  {action, actor}: CombatEvent,
+  {action, actor, rollMode}: CombatEvent,
   target: CombatTarget,
   defaults: CombatDefense,
   input: Fields
-): {trial: CombatTrial; damageDetails: CombatDamageDetails | null; proposed: CombatEffect[]} => {
+): {
+  trial: CombatTrial; damageDetails: CombatDamageDetails | null; proposed: CombatEffect[];
+  pendingDamage: CombatPendingDamage | null;
+} => {
   const {round, attack} = target;
+  const guided = rollMode === "guided";
   // An effect that lands without weapon damage proposes the card's own.
   const landed = (outcome: "hit" | "accepted", defense: CombatRoll | null, audit: Pick<CombatTrial, "defenseAdjusted"> = {}) => {
-    const proposed = proposeDamage(action, actor, target);
+    const {proposed, pendingDamage} = proposeDamage(action, actor, target, guided, round);
     const damage = proposed.find(({kind}) => kind === "damage")?.amount ?? null;
-    return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails: null, proposed};
+    return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails: null, proposed, pendingDamage};
   };
   if (defaults.consent) {
     if (typeof input.consent !== "boolean") {
@@ -840,6 +887,7 @@ const newDefenseTrial = (
       trial: {round, attack, defense: null, outcome: "declined", damage: null},
       damageDetails: null,
       proposed: [],
+      pendingDamage: null,
     };
   }
   const value = readDefenseNumber(input.defense, defaults.value, -99, defaults.label);
@@ -856,22 +904,29 @@ const newDefenseTrial = (
   const audit = defenseAdjusted ? {defenseAdjusted} : {};
   const outcome = attack ? compareCombatRolls(attack.total, defense.total) : "hit";
   if (outcome !== "hit") {
-    return {trial: {round, attack, defense, outcome, damage: null, ...audit}, damageDetails: null, proposed: []};
+    return {
+      trial: {round, attack, defense, outcome, damage: null, ...audit}, damageDetails: null, proposed: [], pendingDamage: null,
+    };
   }
   if (!defaults.showReduction) return landed("hit", defense, audit);
-  const raw = rollCombatDamage(action.damageExpr, roll) ?? 0;
-  const damageDetails = {raw, subtotal: action.attackStat + raw + action.damageBonus, reduction, hands: action.hands};
-  const damage = combatWeaponDamage(damageDetails.subtotal, reduction, action.hands);
+  // A weapon hit waits whole for the throw: its dice, then the RD answered here and the hands.
+  const pendingDamage = guided
+    ? combatPendingDamage({kind: "damage", label: "Danno base", expr: action.damageExpr}, round, reduction) : null;
+  if (pendingDamage) {
+    return {trial: {round, attack, defense, outcome, damage: null, ...audit}, damageDetails: null, proposed: [], pendingDamage};
+  }
+  const {damage, damageDetails} = combatWeaponHit(action, rollCombatDamage(action.damageExpr, roll) ?? 0, reduction);
   return {trial: {round, attack, defense, outcome, damage, ...audit}, damageDetails, proposed: [{
     kind: "damage", label: "Danno base", amount: damage,
     expr: action.damageExpr, targetPlacementId: target.placementId,
-  }]};
+  }], pendingDamage: null};
 };
 
 // What the defender gets back: rebuilt from the stored trial and journal, so a
-// retried answer returns the same payload as the first one.
+// retried answer returns the same payload as the first one, or the damage the
+// actor has thrown since.
 const defenseReply = (
-  combatId: string, placementId: string, trial: CombatTrial, effects: CombatEffect[]
+  combatId: string, target: CombatTarget, trial: CombatTrial, effects: CombatEffect[]
 ) => ({
   combatId,
   round: trial.round,
@@ -880,7 +935,8 @@ const defenseReply = (
   attack: trial.attack,
   defense: trial.defense,
   effects: trial.outcome === "tie" ? []
-    : effects.filter((item) => item.targetPlacementId === placementId),
+    : effects.filter((item) => item.targetPlacementId === target.placementId),
+  ...(target.pendingDamage?.round === trial.round && {damagePending: true}),
 });
 
 const targetCombat = async (context: Context, input: Fields, command: "defend" | "retry") => {
@@ -913,10 +969,10 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
   }
   const previousTrial = target.trials.find((item) => item.round === round);
   if (command === "defend" && previousTrial) {
-    return defenseReply(combatId, placementId, previousTrial, event.effects);
+    return defenseReply(combatId, target, previousTrial, event.effects);
   }
   if (command === "retry" && target.round > round && previousTrial?.outcome === "tie") {
-    return {combatId};
+    return {combatId, rolls: combatRollFaces(combatRoundAttack(target, round + 1))};
   }
   const expectedState = command === "defend" ? "waiting" : "retry";
   if (target.round !== round || target.status !== expectedState ||
@@ -935,7 +991,7 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
     next.defense = null;
   } else {
     const defaults = request.get("defense") as CombatDefense;
-    const {trial, damageDetails, proposed} = newDefenseTrial(event, target, defaults, input);
+    const {trial, damageDetails, proposed, pendingDamage} = newDefenseTrial(event, target, defaults, input);
     reply = trial;
     next.trials = [...target.trials.slice(-49), trial];
     next.defense = trial.defense;
@@ -943,6 +999,7 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
     next.outcome = trial.outcome === "tie" ? null : trial.outcome;
     next.damage = trial.damage;
     next.damageDetails = damageDetails;
+    if (pendingDamage) next.pendingDamage = pendingDamage;
     effects.push(...proposed);
     const healsAfterResistance = trial.outcome === "resisted" && event.action.healOnResist;
     if (event.action.healExpr && (trial.outcome === "hit" || trial.outcome === "accepted" || healsAfterResistance)) {
@@ -969,8 +1026,11 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
     updatedAt: now,
     // An answer that lands concrete damage settles together with the damage its owner may apply.
     ...ownerDamageFields(combatId, {...event, effects}, next),
+    // The attacker's throw is still owed (boolean; the "damagePending" status is the owner's confirmation).
+    ...(next.pendingDamage && {damagePending: true}),
   });
-  return reply ? defenseReply(combatId, placementId, reply, effects) : {combatId};
+  return reply ? defenseReply(combatId, next, reply, effects)
+    : {combatId, rolls: combatRollFaces(combatRoundAttack(next, round + 1))};
 };
 
 const confirmCritical = async (context: Context, input: Fields) => {
@@ -992,14 +1052,21 @@ const confirmCritical = async (context: Context, input: Fields) => {
   }
   const event = snapshot.data() as CombatEvent;
   const target = event.targets.find((value) => value.placementId === placementId);
+  if (target?.pendingDamage?.kind === "weapon") {
+    return fail("failed-precondition", "Tira prima il danno dell'arma, poi conferma il critico.");
+  }
   if (target?.outcome !== "hit" || !target.damageDetails || event.action.hands < 1) {
     return fail("failed-precondition", "Il critico richiede un colpo d'arma riuscito.");
   }
-  if (target.critical?.score === score) return {combatId, critical: target.critical};
+  // A guided journal also returns the faces of the critical dice, kept since its first roll.
+  const guided = event.rollMode === "guided";
+  const reply = (critical: CombatCritical) => ({combatId, critical, ...(guided && {rolls: critical.rolls ?? []})});
+  if (target.critical?.score === score) return reply(target.critical);
   if (target.damageApplied) {
     return fail("failed-precondition", "Il danno è già stato applicato: il critico non si può più cambiare.");
   }
-  const critical = combatCritical(score, target.damageDetails, event.action, target.critical, roll);
+  const thrown = combatCriticalThrow(score, target.damageDetails, event.action, target.critical, roll);
+  const critical = guided ? {...thrown.critical, rolls: thrown.rolls} : thrown.critical;
   const request = await ownerDamageRequest(context, combatId, event, placementId);
   const next = {...target, critical};
   transaction.update(eventRef, {
@@ -1007,7 +1074,99 @@ const confirmCritical = async (context: Context, input: Fields) => {
     updatedAt: FieldValue.serverTimestamp(),
   });
   projectOwnerDamage(context, request, combatId, event, next);
-  return {combatId, critical};
+  return reply(critical);
+};
+
+// What the actor gets back: rebuilt from the stored throw and journal, so a repeat
+// returns the first reply.
+const damageReply = (
+  combatId: string, placementId: string | null, damageRoll: CombatDamageRoll,
+  effects: CombatEffect[], target: CombatTarget | null
+) => ({
+  combatId,
+  targetPlacementId: placementId,
+  round: damageRoll.round,
+  damage: damageRoll.total,
+  rolls: damageRoll.rolls,
+  effects: effects.filter((item) => item.targetPlacementId === placementId),
+  damageDetails: target?.damageDetails ?? null,
+});
+
+// The actor, or the DM when the actor is gone, throws a damage guided mode left pending.
+// The journal then holds what an immediate roll of the same faces would have written, so
+// applying, criticals and the owner's copy follow as usual. No board read: an action stays
+// resolvable after its map is put away.
+const rollDamage = async (context: Context, input: Fields) => {
+  const {db, transaction, uid, manager} = context;
+  const combatId = docId(input.combatId, "Combattimento");
+  const placementId = input.targetPlacementId === null ? null : docId(input.targetPlacementId, "Bersaglio");
+  const round = input.round;
+  if (typeof round !== "number" || !Number.isSafeInteger(round) || round < 1) {
+    return fail("invalid-argument", "Il numero della prova non è valido.");
+  }
+  const eventRef = db.doc(`${ACTIONS}/${combatId}`);
+  const requestRef = placementId === null ? null : db.doc(`${REQUESTS}/${defenseRequestId(combatId, placementId)}`);
+  const [snapshot, request] = await transaction.getAll(eventRef, ...(requestRef ? [requestRef] : []));
+  const canThrow = snapshot.get("actorUid") === uid || manager;
+  if (!snapshot.exists || (!canThrow && snapshot.get("shared") !== true)) {
+    return fail("not-found", "Combattimento non disponibile.");
+  }
+  if (!canThrow) {
+    return fail("permission-denied", "Può tirare il danno solo chi controlla l'attore, o il DM.");
+  }
+  const event = snapshot.data() as CombatEvent;
+  const {targets, effects} = event;
+  // A journal this server did not write whole answers with a code, never an internal error.
+  if (!Array.isArray(targets) || !Array.isArray(effects) ||
+    targets.some((item) => !Array.isArray(asRecord(item).trials))) {
+    return fail("failed-precondition", "Il registro dell'azione non è valido.");
+  }
+  const target = placementId === null ? null : targets.find((value) => value.placementId === placementId);
+  if (target === undefined) return fail("failed-precondition", "Il bersaglio non fa parte di questa azione.");
+  const holder = target ?? event;
+  if (holder.damageRoll?.round === round) {
+    return damageReply(combatId, placementId, holder.damageRoll, effects, target);
+  }
+  const pending = holder.pendingDamage;
+  if (!pending || pending.round !== round) {
+    return fail("failed-precondition", "Non c'è un danno da tirare per questa prova.");
+  }
+  const {damageRoll, damageDetails} = resolveCombatDamage(pending, event.action, roll);
+  const damage = damageRoll.total;
+  const nextEffects = combatEffectsWithDamage(effects, {
+    kind: "damage", label: pending.label, expr: pending.expr, amount: damage, targetPlacementId: placementId,
+  });
+  // A damage that landed through a defense is also the trial's and the target's, as an answer writes it.
+  const defended = Boolean(target?.trials.some((trial) => trial.round === round));
+  let next: CombatTarget | null = null;
+  if (target) {
+    next = {...target, damageRoll, ...(defended && {
+      damage, damageDetails,
+      trials: target.trials.map((trial) => trial.round === round ? {...trial, damage} : trial),
+    })};
+    delete next.pendingDamage;
+  }
+  const nextTargets = targets.map((value) => value === target && next ? next : value);
+  // A targetless action has no target left to wait for once its own damage is thrown.
+  const status = combatStatus(nextTargets);
+  const now = FieldValue.serverTimestamp();
+  transaction.update(eventRef, {
+    targets: nextTargets, effects: nextEffects, status,
+    updatedAt: now, resolvedAt: status === "done" ? now : null,
+    ...(!target && {pendingDamage: null, damageRoll}),
+  });
+  // Concrete damage waits for its owner's confirmation in Home, shared or not: on the answered
+  // defense, reopened, or on a new copy listed at the launch, as an immediate roll's. A negative
+  // total asks for none.
+  const fields = next && request && ownerDamageFields(combatId, {...event, effects: nextEffects}, next);
+  if (defended && request?.exists) {
+    // Whatever the total, the defender's receipt stops waiting for the throw.
+    const settled = {...(fields && {...fields, status: DAMAGE_PENDING}), damagePending: false, updatedAt: now};
+    transaction.set(request.ref, settled, {mergeFields: Object.keys(settled)});
+  } else if (fields && request && !request.exists) {
+    transaction.create(request.ref, {...fields, status: DAMAGE_PENDING, createdAt: snapshot.get("createdAt") ?? now});
+  }
+  return damageReply(combatId, placementId, damageRoll, nextEffects, next);
 };
 
 const ABSENT_PAWN = "Una pedina non è più piazzata sulla mappa.";
@@ -1146,7 +1305,7 @@ export const mutateGrigliataCombat = onCall(
   async (request) => {
     const uid = requiredUid(request.auth?.uid);
     const input = asRecord(request.data);
-    return withCaller(uid, (context) => {
+    return withCaller<unknown>(uid, (context) => {
       const command = input.command;
       switch (command) {
       case "launch":
@@ -1156,6 +1315,8 @@ export const mutateGrigliataCombat = onCall(
         return targetCombat(context, input, command);
       case "critical":
         return confirmCritical(context, input);
+      case "rollDamage":
+        return rollDamage(context, input);
       case "applyDamage":
         return applyDamage(context, input);
       default:

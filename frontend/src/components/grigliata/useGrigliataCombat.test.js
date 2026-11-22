@@ -2,6 +2,8 @@ import React from 'react';
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import useGrigliataCombat from './useGrigliataCombat';
 import { GrigliataCombatPanel } from './GrigliataCombatPanel';
+import GrigliataCombatAim from './GrigliataCombatAim';
+import GrigliataCombatDiceTray from './GrigliataCombatDice';
 import * as firestore from '../../performance/firestore';
 import { getCallable } from '../../data/functions/callableRegistry';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
@@ -24,6 +26,7 @@ const uid = 'nyx-user';
 const JOURNAL = 'grigliata.combat-actions.public.subscribe.v1';
 const OWNED = 'grigliata.combat-actions.actor.subscribe.v1';
 const SCENE = 'grigliata.combat-actions.manager.subscribe.v1';
+const MANAGER_PENDING = 'grigliata.combat-actions.manager-pending.subscribe.v1';
 const PENDING = 'grigliata.combat-actions.actor-pending.subscribe.v1';
 const OWNER_DAMAGE = 'grigliata.combat-requests.owner-damage.subscribe.v1';
 const pawn = (tokenId, col, extra) => ({ tokenId, label: tokenId, ownerUid: tokenId === 'nyx' ? uid : 'other', col, row: 0, sizeSquares: 1, ...extra });
@@ -39,6 +42,28 @@ let mutate;
 const props = (extra) => ({ uid, backgroundId: 'map', enabled: true, open: true, isManager: false, tokens: [], ...extra });
 const emit = (label, entries) => act(() => listeners.get(label).next({ docs: entries.map(({ id: key, ...data }) => ({ id: key, data: () => data })) }));
 const ids = list => list.map(item => item.placementId || item.id);
+const readySword = { ...sword, name: 'Spada', attackDie: true, die: 12 };
+const aimSword = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: /Scegli bersaglio sulla mappa/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Bersaglio foe' }));
+};
+const renderSwordBattle = ({ weapon = readySword, mana = 5 } = {}) => {
+  const tokens = [pawn('nyx', 0), pawn('foe', 1)].map((token, i) => ({
+    ...token, renderPosition: { x: 100 + 40 * i, y: 100, size: 35 },
+  }));
+  arsenal.mockResolvedValue({ data: { actor: { placementId: id('nyx'), hp: 10, mana }, actions: [weapon] } });
+  function Battle() {
+    const combat = useGrigliataCombat(props({ tokens }));
+    return <>
+      {combat.overlay && <GrigliataCombatAim aim={combat.overlay} tokens={tokens} grid={{ cellSizePx: 35 }}
+        stageSize={{ width: 400, height: 500 }} viewport={{ x: 0, y: 0, scale: 1 }} />}
+      {combat.tray && <GrigliataCombatDiceTray tray={combat.tray} nextDamage={combat.nextDamage}
+        resultStatus={combat.resultStatus} resultOutcomes={combat.resultOutcomes} />}
+      <GrigliataCombatPanel {...combat.panel} />
+    </>;
+  }
+  return render(<Battle />);
+};
 const mount = async (actions, tokens) => {
   arsenal.mockResolvedValue({ data: { actor: { placementId: id('nyx'), hp: 10, mana: 5 }, actions } });
   const view = renderHook(hookProps => useGrigliataCombat(hookProps), { initialProps: props({ tokens }) });
@@ -78,10 +103,155 @@ test('other people’s traffic never displaces an own action from pending or fro
   expect(ids(result.current.panel.events).slice(-3)).toEqual(['tie', 'mine', 'old']);
 });
 
-test('players and managers both keep their own last-changed window and their unresolved actions without a window', () => {
+test('an armed attack waits for the map throw before spending and shows the reply faces', async () => {
+  const weapon = { ...sword, name: 'Spada', attackDie: true, die: 12 };
+  const { result } = await mount([weapon], [pawn('nyx', 0), pawn('foe', 1)]);
+  mutate.mockResolvedValue({ data: { combatId: 'attack', rolls: [{ sides: 12, value: 7 }] } });
+  act(() => result.current.panel.onBeginTargeting(weapon));
+  act(() => result.current.overlay.pickToken(id('foe')));
+  act(() => result.current.panel.onPrepareLaunch(weapon, { channel: 'TPC' }));
+  expect(mutate).not.toHaveBeenCalled();
+  expect(result.current.tray).toMatchObject({ phase: 'ready', notation: 'd12' });
+  await act(() => result.current.tray.throwDice());
+  // Older clients retained exactly this intent when a paid launch lost its reply.
+  expect(runWithDurableOperationIntent.mock.calls[0][0].intent).toEqual({
+    command: 'launch', backgroundId: 'map', actorPlacementId: id('nyx'), kind: 'weapon',
+    actionId: 'weaponMain', targetPlacementIds: [id('foe')], channel: 'TPC',
+  });
+  expect(mutate).toHaveBeenCalledWith(expect.objectContaining({
+    command: 'launch', operationId: 'operation-1', rollMode: 'guided',
+    targetPlacementIds: [id('foe')], channel: 'TPC',
+  }));
+  expect(result.current.tray).toMatchObject({ phase: 'result', rolls: [{ sides: 12, value: 7 }] });
+});
+
+test.each([
+  [null, '2d12'],
+  [['Bersaglio dell’attacco', 'Te o un alleato da curare'], 'd12'],
+])('the declared targets determine the attack pool for roles %j', async (targetRoles, notation) => {
+  const action = { ...sword, id: 'multi', kind: 'spell', mode: 'multiple', minTargets: 2, maxTargets: 2,
+    rangeFt: 15, allowSelf: true, targetRoles, roleRangesFt: [15, 15], attackDie: true, die: 12 };
+  const { result } = await mount([action], [pawn('nyx', 0), pawn('foe', 1), pawn('ally', 2)]);
+  act(() => result.current.panel.onBeginTargeting(action));
+  act(() => result.current.overlay.pickToken(id('foe')));
+  act(() => result.current.overlay.pickToken(id('ally')));
+  expect(result.current.panel.selection.targetIds).toEqual([id('foe'), id('ally')]);
+  act(() => result.current.panel.onPrepareLaunch(action, { channel: 'TPC' }));
+  expect(result.current.tray.notation).toBe(notation);
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+test('a tied melee attack keeps its recorded advantage for the next throw', async () => {
+  const { result } = await mount([sword], [pawn('nyx', 0), pawn('foe', 1)]);
+  const event = { id: 'tie', actorUid: uid };
+  const target = { placementId: id('foe'), name: 'foe', round: 1, advantage: true, attack: { sides: 20 } };
+  act(() => result.current.panel.onRetry(event, target));
+  expect(result.current.tray.notation).toBe('2d20');
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+test('the result strip shows an extra attack die disclosed by the server', async () => {
+  mutate.mockResolvedValueOnce({ data: { combatId: 'advantage', rolls: [{ sides: 12, value: 8 }, { sides: 12, value: 3 }] } });
+  renderSwordBattle();
+  await aimSword();
+  expect(screen.getByText('d12', { selector: '.gc-dice-head code' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  expect(await screen.findByText('2d12', { selector: '.gc-dice-head code' })).toBeVisible();
+});
+
+test('clicking Spada’s map target opens the ready tray before mutation and a hit leads to its own map throw', async () => {
+  mutate.mockResolvedValueOnce({ data: { combatId: 'hit', rolls: [{ sides: 12, value: 9 }] } })
+    .mockResolvedValueOnce({ data: { combatId: 'hit', damage: 5, rolls: [{ sides: 4, value: 3 }, { sides: 4, value: 2 }] } });
+  renderSwordBattle();
+  await aimSword();
+  const throwButton = screen.getByRole('button', { name: 'Tira i dadi' });
+  expect(throwButton).toHaveFocus();
+  expect(mutate).not.toHaveBeenCalled();
+  fireEvent.click(throwButton);
+  expect(await screen.findByRole('list', { name: 'Risultati dei dadi' })).toHaveTextContent('d12 9');
+  emit(PENDING, [{ ...entry('hit', 1, 'awaitingDamage'), action: readySword, targets: [{
+    placementId: id('foe'), name: 'foe', status: 'done', outcome: 'hit', round: 1, pendingDamage: { round: 1, expr: '2d4' },
+  }] }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Tiro di danno · foe' }));
+  expect(mutate).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  expect(await screen.findByText('5 danni proposti')).toBeVisible();
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'rollDamage', combatId: 'hit', targetPlacementId: id('foe'), round: 1 });
+});
+
+test.each(['Rimuovi foe', 'Spendi 2 PF'])('changing %s retires an uncertain map retry with the old declaration', async control => {
+  renderSwordBattle({ weapon: { ...readySword, cost: 2 }, mana: 0 });
+  await aimSword();
+  expect(screen.queryByRole('button', { name: 'Tira i dadi' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('Spendi 2 PF'));
+  fireEvent.click(screen.getByRole('button', { name: 'Vai al tiro sulla mappa' }));
+  mutate.mockRejectedValueOnce(Object.assign(new Error('link down'), { code: 'functions/unavailable' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  expect(await screen.findByRole('button', { name: 'Riprova il tiro' })).toBeVisible();
+  const change = control === 'Spendi 2 PF' ? screen.getByLabelText(control) : screen.getByRole('button', { name: control });
+  fireEvent.click(change);
+  expect(screen.queryByRole('button', { name: 'Riprova il tiro' })).not.toBeInTheDocument();
+  expect(mutate).toHaveBeenCalledTimes(1);
+});
+
+test('the map shows an evaded Spada and can still lead to a different action’s pending damage', async () => {
+  renderSwordBattle();
+  await aimSword();
+  mutate.mockResolvedValueOnce({ data: { combatId: 'evaded', rolls: [{ sides: 12, value: 4 }] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  await screen.findByRole('list', { name: 'Risultati dei dadi' });
+  emit(OWNED, [{ ...entry('evaded', 2), kind: 'weapon', action: readySword,
+    targets: [{ placementId: id('foe'), name: 'foe', outcome: 'resisted', status: 'done' }] }]);
+  const outcomes = screen.getByRole('list', { name: 'Esiti dei bersagli' });
+  expect(outcomes).toHaveTextContent('foe');
+  expect(outcomes).toHaveTextContent(/evitato/i);
+  emit(PENDING, [{ ...entry('other', 1, 'awaitingDamage'), kind: 'spell', action: { name: 'Singolarità' },
+    targets: [{ placementId: id('foe'), name: 'foe', status: 'done', outcome: 'hit', round: 2,
+      pendingDamage: { round: 2, kind: 'effect', label: 'Danno proposto', expr: 'd20' } }] }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Tiro di danno · foe · Singolarità' }));
+  expect(screen.getByRole('region', { name: 'Singolarità · Danno contro foe' })).toBeVisible();
+  expect(mutate).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'rollDamage', combatId: 'other', targetPlacementId: id('foe'), round: 2 });
+  await screen.findByText('Azione registrata.');
+});
+
+test('a pending targetless damage after refresh is an independent round-one throw', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const event = { ...entry('spell', 1, 'awaitingDamage'), pendingDamage: { round: 1, expr: '1d100' } };
+  emit(PENDING, [event]);
+  expect(result.current.panel.pending).toEqual([event]);
+  expect(result.current.nextDamage).toMatchObject({ label: 'Tiro di danno · Azione' });
+  mutate.mockResolvedValue({ data: { damage: 100, rolls: [{ sides: 100, value: 100 }] } });
+  act(() => result.current.panel.onRollDamage(event, null));
+  expect(mutate).not.toHaveBeenCalled();
+  expect(result.current.tray).toMatchObject({ phase: 'ready', notation: '1d100' });
+  await act(() => result.current.tray.throwDice());
+  expect(mutate).toHaveBeenCalledWith({
+    command: 'rollDamage', combatId: 'spell', targetPlacementId: null, round: 1,
+  });
+  expect(result.current.tray).toMatchObject({ phase: 'result', rolls: [{ sides: 100, value: 100 }] });
+});
+
+test('the first guided critical uses the chosen score in the tray and a score edit sends directly', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const event = { ...entry('critical', 1), action: { criticalHasDice: true, criticalExpr: '2d4' } };
+  const hit = { placementId: id('foe'), name: 'foe', round: 2 };
+  mutate.mockResolvedValue({ data: { combatId: 'critical', rolls: [{ sides: 4, value: 2 }, { sides: 4, value: 3 }] } });
+  act(() => { result.current.panel.onCritical(event, hit, 1); });
+  expect(mutate).not.toHaveBeenCalled();
+  expect(result.current.tray).toMatchObject({ phase: 'ready', notation: '2d4' });
+  await act(() => result.current.tray.throwDice());
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'critical', combatId: 'critical', targetPlacementId: id('foe'), round: 2, score: 1 });
+  await act(() => result.current.panel.onCritical(event, { ...hit, critical: { score: 1 } }, 2));
+  expect(mutate).toHaveBeenLastCalledWith(expect.objectContaining({ score: 2 }));
+  expect(result.current.tray.phase).toBe('result');
+});
+
+test('player pending is actor-scoped and manager pending covers only unresolved actions on the selected map', () => {
   const pendingQuery = {
     source: 'grigliata_combat_actions', label: PENDING,
-    constraints: [['backgroundId', '==', 'map'], ['actorUid', '==', uid], ['status', 'in', ['waiting', 'retry']]],
+    constraints: [['backgroundId', '==', 'map'], ['actorUid', '==', uid], ['status', 'in', ['waiting', 'retry', 'awaitingDamage']]],
   };
   const ownQuery = {
     source: 'grigliata_combat_actions', label: OWNED,
@@ -91,6 +261,9 @@ test('players and managers both keep their own last-changed window and their unr
   expect([...listeners.keys()]).toEqual([JOURNAL, OWNED, PENDING, OWNER_DAMAGE]);
   expect(listeners.get(PENDING).target).toEqual(pendingQuery);
   expect(listeners.get(OWNED).target).toEqual(ownQuery);
+  expect(listeners.get(JOURNAL).target.constraints).toEqual([
+    ['backgroundId', '==', 'map'], ['shared', '==', true], ['orderBy', 'createdAt', 'desc'], ['limit', 40],
+  ]);
   // A player also reads the redacted outcomes on their own pawns of the actions not shared with the table.
   expect(listeners.get(OWNER_DAMAGE).target).toEqual({
     source: 'grigliata_combat_requests', label: OWNER_DAMAGE,
@@ -100,8 +273,11 @@ test('players and managers both keep their own last-changed window and their unr
 
   listeners.clear();
   renderHook(() => useGrigliataCombat(props({ isManager: true })));
-  expect([...listeners.keys()]).toEqual([SCENE, OWNED, PENDING]);
-  expect(listeners.get(PENDING).target).toEqual(pendingQuery);
+  expect([...listeners.keys()]).toEqual([SCENE, OWNED, MANAGER_PENDING]);
+  expect(listeners.get(MANAGER_PENDING).target).toEqual({
+    source: 'grigliata_combat_actions', label: MANAGER_PENDING,
+    constraints: [['backgroundId', '==', 'map'], ['status', 'in', ['waiting', 'retry', 'awaitingDamage']]],
+  });
   expect(listeners.get(OWNED).target).toEqual(ownQuery);
   expect(listeners.get(SCENE).target.constraints).toEqual([['backgroundId', '==', 'map'], ['orderBy', 'createdAt', 'desc'], ['limit', 40]]);
 });
@@ -222,7 +398,7 @@ test('a launch never carries a map cell kept from an action that left the repert
   act(() => result.current.overlay.pickToken(id('foe')));
   await act(() => result.current.panel.onLaunch(sword, {}));
   expect(mutate).toHaveBeenCalledWith({
-    command: 'launch', backgroundId: 'map', actorPlacementId: id('nyx'), kind: 'weapon', actionId: 'weaponMain',
+    command: 'launch', rollMode: 'guided', backgroundId: 'map', actorPlacementId: id('nyx'), kind: 'weapon', actionId: 'weaponMain',
     targetPlacementIds: [id('foe')], operationId: 'operation-1',
   });
 });
@@ -405,6 +581,33 @@ const serve = documents => listeners.forEach(({ target, next }) => {
   act(() => next({ docs: docs.map(({ id: key, ...data }) => ({ id: key, data: () => data })) }));
 });
 
+test.each(['awaitingDamage', 'waiting', 'retry'])('the DM can roll older player damage from Registro when the event is %s', async status => {
+  const current = {};
+  render(<Harness {...props({ isManager: true })} onView={view => { current.view = view; }} />);
+  const hit = { placementId: id('bro'), name: 'Bro', status: 'done', outcome: 'hit', round: 2,
+    pendingDamage: { round: 2, kind: 'effect', expr: '1d4' } };
+  const playerAction = {
+    ...entry('old-player', 1, status), actorUid: 'absent-player', shared: false, backgroundId: 'map',
+    actor: { placementId: id('absent'), name: 'Assente' }, kind: 'spell', action: { name: 'Singolarità' }, updatedAt: at(3),
+    targets: status === 'awaitingDamage' ? [hit] : [hit, { placementId: id('lia'), name: 'Lia', status, round: 1 }],
+  };
+  const otherMap = { ...playerAction, id: 'other-map', backgroundId: 'cave', action: { name: 'Fuori scena' } };
+  const own = { ...entry('dm-action', 2, 'waiting'), backgroundId: 'map', actor: nyx, action: { name: 'Azione del master' }, updatedAt: at(2) };
+  serve([playerAction, otherMap, own, ...others(40, 100).map(event => ({ ...event, backgroundId: 'map' }))]);
+
+  expect(ids(current.view.panel.events)).toContain('old-player');
+  expect(ids(current.view.panel.events)).not.toContain('other-map');
+  expect(ids(current.view.panel.pending)).toEqual(['dm-action']);
+  expect(statusCards().map(card => card.textContent)).toEqual([expect.stringContaining('Azione del master')]);
+  fireEvent.click(screen.getByText('Registro'));
+  fireEvent.click(screen.getByText('Singolarità'));
+  fireEvent.click(screen.getByRole('button', { name: 'Danno contro Bro · vai al tiro sulla mappa' }));
+  expect(current.view.tray).toMatchObject({ phase: 'ready', title: 'Singolarità · Danno contro Bro' });
+  expect(mutate).not.toHaveBeenCalled();
+  await act(() => current.view.tray.throwDice());
+  expect(mutate).toHaveBeenCalledWith({ command: 'rollDamage', combatId: 'old-player', targetPlacementId: id('bro'), round: 2 });
+});
+
 test('an own action answered after 40 newer own launches stays in the journal and is the pawn’s latest result', async () => {
   const strike = { ...sword, name: 'Spada', hands: 1 };
   const current = await show([strike], [pawn('nyx', 0)]);
@@ -517,7 +720,7 @@ test('damage waits for its critical calculation and is unavailable when the targ
   const { result, rerender } = renderHook(hookProps => useGrigliataCombat(hookProps), {
     initialProps: props({ tokens, isManager: true }),
   });
-  const event = { id: 'blow' };
+  const event = { id: 'blow', actorUid: uid };
   const target = { placementId: id('bro'), ownerUid: 'other', round: 1 };
   let confirm;
   mutate.mockReturnValueOnce(new Promise(resolve => { confirm = resolve; }));

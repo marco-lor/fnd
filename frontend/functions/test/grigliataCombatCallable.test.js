@@ -43,6 +43,8 @@ const memoryFirestore = () => {
   // Every read, tagged with how it was made: `transaction` documents and queries join the
   // transaction's read set; a `query` runs outside it.
   const reads = [];
+  // The path of every write that lands.
+  const writes = [];
   let aborts = 0;
   let afterQuery = null;
   const doc = path => ({id: path.split('/').at(-1), path});
@@ -66,6 +68,7 @@ const memoryFirestore = () => {
       return refs.map(snapshot);
     },
     set: (ref, data, options) => {
+      writes.push(ref.path);
       const value = storable(data);
       if (options?.mergeFields) {
         // Top-level field paths only: each named field is replaced whole, the rest is kept.
@@ -77,9 +80,13 @@ const memoryFirestore = () => {
     },
     create: (ref, data) => {
       assert.equal(documents.has(ref.path), false);
+      writes.push(ref.path);
       documents.set(ref.path, storable(data));
     },
-    update: (ref, data) => documents.set(ref.path, {...documents.get(ref.path), ...storable(data)}),
+    update: (ref, data) => {
+      writes.push(ref.path);
+      documents.set(ref.path, {...documents.get(ref.path), ...storable(data)});
+    },
   };
   const query = (path, match) => ({
     path, collection: true, match,
@@ -109,6 +116,7 @@ const memoryFirestore = () => {
     abortNext: (count = 1) => { aborts = count; },
     onNextQuery: change => { afterQuery = change; },
     reads,
+    writes,
     seed: (path, data) => documents.set(path, structuredClone(data)),
     remove: path => documents.delete(path),
     read: path => documents.get(path),
@@ -1348,4 +1356,816 @@ test('older journals stay applicable as they are, and malformed ones are refused
   const effectless = await bolt(event => ({...event, effects: null}));
   await assert.rejects(applyDamage(effectless, {}, defender), {code: 'failed-precondition', message: /danno concreto/});
   assert.equal(resources(defender).stats.hpCurrent, 100 - 2 - 2 - 2 - 9);
+});
+
+// Guided mode: damage with dice waits for the actor's throw (rollDamage).
+// Each roll takes the next face; a roll beyond them fails the test, so a replay that rolls is caught.
+// The fixture's defender is unarmed, so a greatsword attack rolls twice (advantage).
+const faces = (...values) => {
+  dice = () => (values.length ? values.shift() : assert.fail('unexpected roll'));
+};
+const guided = (kind, actionId, options = {}) => launch(kind, actionId, {rollMode: 'guided', ...options});
+const rollDamage = (combatId, options = {}, uid = attacker) => call(uid, {
+  command: 'rollDamage', combatId, targetPlacementId: place(defender), round: 1, ...options,
+});
+const die = (sides, value) => ({sides, value});
+const seedElf = () => {
+  seedPawn('elf', 2);
+  db.seed('users/elf', {role: 'player'});
+  seedStats('elf', {});
+};
+// Answers the same as before, and writes nothing.
+const replays = async (command, expected) => {
+  faces();
+  const before = structuredClone([db.writes.length, journal(expected.combatId)]);
+  assert.deepEqual(await command(), expected);
+  assert.deepEqual([db.writes.length, journal(expected.combatId)], before);
+};
+// A guided journal once thrown, read as the journal an immediate launch of the same faces writes.
+const asImmediate = combatId => {
+  const {rollMode, requestHash, pendingDamage, damageRoll, action: {criticalHasDice, ...action}, targets, ...entry} =
+    journal(combatId);
+  assert.deepEqual([rollMode, typeof criticalHasDice, pendingDamage ?? null], ['guided', 'boolean', null]);
+  return {...entry, action, targets: targets.map(({damageRoll: _thrown, ...target}) => target)};
+};
+const immediateEntry = combatId => {
+  const {requestHash, ...entry} = journal(combatId);
+  return entry;
+};
+// The owner's copy of a guided throw, as the immediate one. An answered defense also says the throw is no
+// longer owed, and reopens for confirmation.
+const sameRequest = (guidedId, immediateId, token = defender) => {
+  const {damagePending, ...copy} = requestOf(guidedId, token);
+  const answered = Boolean(requestOf(immediateId, token).defense);
+  assert.equal(damagePending, answered ? false : undefined);
+  assert.deepEqual({...copy, combatId: immediateId, ...(answered && {status: 'done'})}, requestOf(immediateId, token));
+};
+
+test('without a roll mode a launch journals as before; its replies gain only the faces it rolled', async () => {
+  damageFixture();
+  faces(7, 2);
+  const legacy = await launch('weapon', 'weaponMain');
+  const operationId = `combat-test-${operations}`;
+  // Both faces of the advantage, in the order rolled.
+  assert.deepEqual(legacy, {
+    combatId: legacy.combatId, rolls: [die(12, 7), die(12, 2)], resources: {hp: 100, mana: 100, essenza: null},
+  });
+  const entry = journal(legacy.combatId);
+  for (const key of ['rollMode', 'pendingDamage', 'damageRoll']) assert.equal(key in entry, false, key);
+  assert.equal('criticalHasDice' in entry.action, false);
+  assert.equal('pendingDamage' in entry.targets[0], false);
+  assert.equal((await arsenal()).actions.some(action => 'criticalHasDice' in action), false);
+  // A retry answers from the receipt with the same faces.
+  await replays(() => launch('weapon', 'weaponMain', {operationId}), {combatId: legacy.combatId, rolls: [die(12, 7), die(12, 2)]});
+  const writes = db.writes.length;
+  for (const rollMode of ['auto', 'GUIDED', '', null, true, 1]) {
+    await assert.rejects(launch('weapon', 'weaponMain', {rollMode}), {
+      code: 'invalid-argument', message: 'La modalità di tiro non è valida.',
+    });
+  }
+  assert.equal(db.writes.length, writes);
+
+  // The hit rolls its damage inside the answer as before; nothing waits, and there is nothing to throw.
+  faces(1, 4, 3);
+  const hit = await defend(legacy.combatId);
+  assert.deepEqual([hit.damage, 'damagePending' in hit], [17, false]);
+  assert.deepEqual([requestOf(legacy.combatId).status, 'damagePending' in requestOf(legacy.combatId)], ['done', false]);
+  await assert.rejects(rollDamage(legacy.combatId), {code: 'failed-precondition', message: /Non c'è un danno da tirare/});
+  // Its critical keeps the earlier shape: no faces stored, none returned.
+  faces(5, 2);
+  const critical = await confirmCritical(legacy.combatId, 13);
+  assert.deepEqual(Object.keys(critical), ['combatId', 'critical']);
+  assert.equal('rolls' in journal(legacy.combatId).targets[0].critical, false);
+  assert.equal('rolls' in requestOf(legacy.combatId).ownerDamage.target.critical, false);
+
+  // The roll mode is no part of the launch identity: a guided launch stores the hash of the same fields without it.
+  faces(1, 1);
+  const thrown = await guided('weapon', 'weaponMain');
+  assert.equal(journal(thrown.combatId).requestHash, hashValue({
+    backgroundId: board, actorPlacementId: place(attacker), actionId: 'weaponMain', kind: 'weapon',
+    channel: '', point: null, ids: [place(defender)],
+    approval: {confirmHp: false, maxHpCost: undefined, confirmExtra: false, variableCost: undefined},
+  }));
+  assert.equal(journal(thrown.combatId).rollMode, 'guided');
+});
+
+test('the first committed launch decides the roll mode: a retry with the other mode replays it, paid once', async () => {
+  damageFixture();
+  seedSpell('bolt', {Nome: 'Saetta', Costo: 3, combat: {damageExpr: '2d4', attackDie: true}});
+  // Paid and resolved before the upgrade: its attack, then its damage, at launch.
+  faces(9, 2, 3);
+  const paid = await launch('spell', 'personal:bolt');
+  const operationId = `combat-test-${operations}`;
+  assert.deepEqual(paid, {combatId: paid.combatId, rolls: [die(12, 9)], resources: {hp: 100, mana: 97, essenza: null}});
+  const untouched = structuredClone([journal(paid.combatId), resources(attacker), db.writes.length]);
+  // Retried by a client that now asks for guided mode: the original faces, no cost, no write, still immediate.
+  faces();
+  assert.deepEqual(await guided('spell', 'personal:bolt', {operationId}), {combatId: paid.combatId, rolls: [die(12, 9)]});
+  assert.deepEqual([journal(paid.combatId), resources(attacker), db.writes.length], untouched);
+  const [entry] = untouched;
+  assert.deepEqual(['rollMode' in entry, 'pendingDamage' in entry.targets[0], entry.effects.map(({kind, amount}) => [kind, amount])],
+    [false, false, [['damage', 5]]]);
+
+  // The reverse: a guided launch retried without the mode keeps its mode and its waiting damage.
+  faces(4);
+  const thrown = await guided('spell', 'personal:bolt');
+  const guidedOperation = `combat-test-${operations}`;
+  assert.deepEqual([thrown.rolls, thrown.resources.mana], [[die(12, 4)], 94]);
+  const waiting = structuredClone([journal(thrown.combatId), resources(attacker), db.writes.length]);
+  faces();
+  assert.deepEqual(await launch('spell', 'personal:bolt', {operationId: guidedOperation}), {
+    combatId: thrown.combatId, rolls: [die(12, 4)],
+  });
+  assert.deepEqual([journal(thrown.combatId), resources(attacker), db.writes.length], waiting);
+  assert.deepEqual([waiting[0].rollMode, waiting[0].targets[0].pendingDamage.expr], ['guided', '2d4']);
+
+  // Any substantive difference is another action, whatever the mode.
+  for (const id of [operationId, guidedOperation]) {
+    for (const mode of [{}, {rollMode: 'guided'}]) {
+      for (const change of [{targetPlacementIds: [place(attacker)]}, {channel: 'Mentale'}, {confirmHp: true},
+        {actionVersion: 'other'}]) {
+        await assert.rejects(launch('spell', 'personal:bolt', {operationId: id, ...mode, ...change}), {code: 'already-exists'});
+      }
+    }
+  }
+  assert.deepEqual([resources(attacker), db.writes.length], [waiting[1], waiting[2]]);
+});
+
+test('a guided immediate action waits for one throw per target; each lands as an immediate roll would', async () => {
+  damageFixture();
+  seedElf();
+  seedStats(defender, {barrieraCurrent: 3});
+  seedSpell('volley', {
+    Nome: 'Raffica', Costo: 1, Cura: '1d4', combat: {mode: 'multiple', targetCount: 2, damageExpr: '2d4'},
+  });
+  const both = {targetPlacementIds: [place(defender), place('elf')]};
+  // Immediate: each target's damage, then its cure, all at launch.
+  faces(4, 1, 2, 2, 2, 3);
+  const immediate = await launch('spell', 'personal:volley', both);
+  // Guided: the cures at once, and no attack die means no faces.
+  faces(2, 3);
+  const launched = await guided('spell', 'personal:volley', both);
+  const {combatId} = launched;
+  assert.deepEqual(launched, {combatId, rolls: [], resources: {hp: 100, mana: 98, essenza: null}});
+  const cure = (amount, token) => ({
+    kind: 'heal', label: 'Cura proposta', expr: '1d4', amount, targetPlacementId: place(token),
+  });
+  const pendingDamage = {round: 1, kind: 'effect', label: 'Danno proposto', expr: '2d4'};
+  const launchedEntry = journal(combatId);
+  assert.deepEqual([launchedEntry.status, launchedEntry.resolvedAt, launchedEntry.action.criticalHasDice],
+    ['awaitingDamage', null, false]);
+  assert.deepEqual(launchedEntry.effects, [cure(2, defender), cure(3, 'elf')]);
+  for (const target of launchedEntry.targets) {
+    assert.deepEqual([target.status, target.outcome, target.damage, target.pendingDamage],
+      ['done', 'applied', null, pendingDamage]);
+  }
+  // Nothing to confirm yet: no copy for either owner, and nothing to apply.
+  assert.equal(request(combatId), undefined);
+  await assert.rejects(applyDamage(combatId), {code: 'failed-precondition', message: /danno concreto/});
+  await assert.rejects(applyDamage(combatId, {amount: 9}, defender), {code: 'failed-precondition', message: /danno concreto/});
+
+  // The throw needs no active map and reads no board, placement or token.
+  db.seed('grigliata_state/current', {activeBackgroundId: 'elsewhere'});
+  const readsBefore = db.reads.length;
+  faces(4, 1);
+  const thrown = await rollDamage(combatId);
+  const landed = (amount, token) => ({
+    kind: 'damage', label: 'Danno proposto', expr: '2d4', amount, targetPlacementId: place(token),
+  });
+  // The damage takes its immediate place, before the target's cure.
+  assert.deepEqual(thrown, {
+    combatId, targetPlacementId: place(defender), round: 1, damage: 5, rolls: [die(4, 4), die(4, 1)],
+    effects: [landed(5, defender), cure(2, defender)], damageDetails: null,
+  });
+  assert.deepEqual(db.reads.slice(readsBefore).map(({path}) => path.split('/')[0]),
+    ['users', 'user_deletion_jobs', 'grigliata_combat_actions', 'grigliata_combat_requests']);
+  const thrownEntry = journal(combatId);
+  // The other target still waits for its own throw.
+  assert.deepEqual([thrownEntry.status, thrownEntry.resolvedAt], ['awaitingDamage', null]);
+  const {pendingDamage: _waited, ...settled} = launchedEntry.targets[0];
+  assert.deepEqual(thrownEntry.targets, [{...settled, damageRoll: {
+    ...pendingDamage, rolls: thrown.rolls, raw: 5, total: 5,
+  }}, launchedEntry.targets[1]]);
+  const spell = {kind: 'spell', action: {name: 'Raffica', hands: 0}, outcome: 'applied'};
+  assert.deepEqual(requestOf(combatId), {
+    ...projection(combatId, {...spell, damage: 5}), status: 'damagePending', createdAt: 'now',
+  });
+  assert.equal(requestOf(combatId, 'elf'), undefined);
+  await replays(() => rollDamage(combatId), thrown);
+  await assert.rejects(applyDamage(combatId, {targetPlacementId: place('elf')}), {
+    code: 'failed-precondition', message: /danno concreto/,
+  });
+
+  faces(2, 2);
+  const elf = await rollDamage(combatId, {targetPlacementId: place('elf')});
+  assert.deepEqual([elf.damage, elf.effects], [4, [landed(4, 'elf'), cure(3, 'elf')]]);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  // Journal and owners' copies are those of the immediate launch with the same faces.
+  assert.deepEqual(asImmediate(combatId), immediateEntry(immediate.combatId));
+  sameRequest(combatId, immediate.combatId);
+  sameRequest(combatId, immediate.combatId, 'elf');
+  // Each owner's copy names their own pawn only.
+  assert.doesNotMatch(JSON.stringify(requestOf(combatId, 'elf')), /defender|attacker/);
+
+  // The owner confirms at least the thrown damage; the barrier takes it first.
+  db.seed('grigliata_state/current', {activeBackgroundId: board});
+  await assert.rejects(applyDamage(combatId, {amount: 4}, defender), {code: 'permission-denied'});
+  assert.deepEqual(await applyDamage(combatId, {amount: 5}, defender), {combatId, damageApplied: {amount: 5}});
+  assert.deepEqual(resources(defender).stats, {hpCurrent: 98, manaCurrent: 100, barrieraCurrent: 0});
+  assert.equal(requestOf(combatId).status, 'done');
+});
+
+test('the actor or the DM throws; others get the answer critical gives them, and nothing is written', async () => {
+  damageFixture();
+  db.seed('users/stranger', {role: 'player'});
+  seedSpell('dart', {Nome: 'Dardo', Costo: 1, combat: {damageExpr: '2d4'}});
+  const shared = await guided('spell', 'personal:dart');
+  assert.equal(journal(shared.combatId).shared, true);
+  const untouched = structuredClone([db.writes.length, journal(shared.combatId)]);
+  faces();
+  const refused = {code: 'permission-denied', message: 'Può tirare il danno solo chi controlla l\'attore, o il DM.'};
+  // Authority comes first: a valid and an invalid target or round get the same answer.
+  for (const uid of ['stranger', defender]) {
+    await assert.rejects(rollDamage(shared.combatId, {}, uid), refused);
+    await assert.rejects(rollDamage(shared.combatId, {targetPlacementId: place('nobody'), round: 7}, uid), refused);
+  }
+  const missing = {code: 'not-found', message: 'Combattimento non disponibile.'};
+  for (const uid of [attacker, dm, 'stranger']) await assert.rejects(rollDamage('missing', {}, uid), missing);
+  for (const options of [{round: 0}, {round: '1'}, {round: 1.5}, {targetPlacementId: undefined},
+    {targetPlacementId: 'not/an/id'}]) {
+    await assert.rejects(rollDamage(shared.combatId, options), {code: 'invalid-argument'});
+  }
+  const nothing = {code: 'failed-precondition', message: 'Non c\'è un danno da tirare per questa prova.'};
+  await assert.rejects(rollDamage(shared.combatId, {round: 2}), nothing);
+  await assert.rejects(rollDamage(shared.combatId, {targetPlacementId: null}), nothing);
+  await assert.rejects(rollDamage(shared.combatId, {targetPlacementId: place('nobody')}), {
+    code: 'failed-precondition', message: /non fa parte/,
+  });
+  assert.deepEqual([db.writes.length, journal(shared.combatId)], untouched);
+
+  // The DM may throw for an actor who left: same dice, same stored throw, same replay for the actor.
+  faces(2, 4);
+  const byDm = await rollDamage(shared.combatId, {}, dm);
+  assert.deepEqual([byDm.damage, byDm.rolls], [6, [die(4, 2), die(4, 4)]]);
+  assert.deepEqual(journal(shared.combatId).targets[0].damageRoll.rolls, byDm.rolls);
+  await replays(() => rollDamage(shared.combatId), byDm);
+
+  // A journal hidden from the others is not even found by them; the DM still throws.
+  hideAttacker();
+  const hidden = await guided('spell', 'personal:dart');
+  assert.equal(journal(hidden.combatId).shared, false);
+  faces();
+  for (const uid of ['stranger', defender]) {
+    await assert.rejects(rollDamage(hidden.combatId, {}, uid), missing);
+    await assert.rejects(rollDamage(hidden.combatId, {targetPlacementId: place('nobody'), round: 7}, uid), missing);
+  }
+  // An attempt that aborts rolls dice nobody sees: what is stored is what the reply shows.
+  db.abortNext();
+  faces(1, 1, 3, 3);
+  const thrown = await rollDamage(hidden.combatId);
+  assert.deepEqual([thrown.damage, thrown.rolls], [6, [die(4, 3), die(4, 3)]]);
+  assert.deepEqual(journal(hidden.combatId).targets[0].damageRoll.rolls, thrown.rolls);
+  assert.equal(journal(hidden.combatId).effects.length, 1);
+  // The owner gets the same private copy an immediate roll gives: no actor, no other target.
+  assert.deepEqual(requestOf(hidden.combatId), {
+    ...projection(hidden.combatId, {kind: 'spell', action: {name: 'Dardo', hands: 0}, outcome: 'applied', damage: 6}),
+    status: 'damagePending', createdAt: 'now',
+  });
+  assert.deepEqual(await applyDamage(hidden.combatId, {amount: 6}, defender), {
+    combatId: hidden.combatId, damageApplied: {amount: 6},
+  });
+  // A thrown damage is not thrown again, whoever asks.
+  await assert.rejects(rollDamage(hidden.combatId, {round: 2}, dm), nothing);
+
+  // A legacy journal has nothing to throw.
+  faces(1, 1);
+  const legacy = await launch('spell', 'personal:dart');
+  const writes = db.writes.length;
+  await assert.rejects(rollDamage(legacy.combatId), nothing);
+  assert.equal(db.writes.length, writes);
+});
+
+test('a malformed guided journal is refused with a code, never an internal error', async () => {
+  damageFixture();
+  seedSpell('dart', {Nome: 'Dardo', Costo: 1, combat: {damageExpr: '2d4'}});
+  const broken = async change => {
+    const {combatId} = await guided('spell', 'personal:dart');
+    const path = `grigliata_combat_actions/${combatId}`;
+    db.seed(path, change(structuredClone(db.read(path))));
+    return combatId;
+  };
+  for (const change of [
+    event => ({...event, targets: null}),
+    event => ({...event, effects: null}),
+    event => ({...event, targets: event.targets.map(({trials, ...target}) => target)}),
+    event => ({...event, targets: [null, ...event.targets]}),
+  ]) {
+    const combatId = await broken(change);
+    const before = structuredClone([db.writes.length, journal(combatId)]);
+    await assert.rejects(rollDamage(combatId), {code: 'failed-precondition'});
+    assert.deepEqual([db.writes.length, journal(combatId)], before);
+  }
+});
+
+test('a guided opposed spell hit answers without damage until the actor throws it', async () => {
+  damageFixture();
+  seedSpell('barrier', {
+    Nome: 'Barriera Cosmica (offensiva)', Costo: 19, Gittata: '30 ft',
+    'TPC Fisico': {Param1: 'Intelligenza', Param2: 'Saggezza', ParamTarget: 'Costituzione'},
+  });
+  // Immediate: attack, defense, then the damage dice inside the answer.
+  faces(1, 1, 10, 5, 1);
+  const immediate = await launch('spell', 'personal:barrier');
+  await defend(immediate.combatId);
+  faces(1);
+  const {combatId, rolls} = await guided('spell', 'personal:barrier');
+  assert.deepEqual([rolls, journal(combatId).status], [[die(12, 1)], 'waiting']);
+  const waiting = structuredClone(requestOf(combatId));
+  faces(1);
+  const reply = await defend(combatId);
+  assert.deepEqual(reply, {
+    combatId, round: 1, outcome: 'hit', damage: null,
+    attack: roll('max(Intelligenza, Saggezza)', 7), defense: roll('Costituzione', 2),
+    effects: [], damagePending: true,
+  });
+  const answered = journal(combatId);
+  assert.deepEqual([answered.status, answered.resolvedAt, answered.effects], ['awaitingDamage', null, []]);
+  const [target] = answered.targets;
+  assert.deepEqual([target.status, target.outcome, target.damage, target.damageDetails, target.trials[0].damage],
+    ['done', 'hit', null, null, null]);
+  assert.deepEqual(target.pendingDamage, {round: 1, kind: 'effect', label: 'Danno proposto', expr: '3d10'});
+  // The answer settles the defense and marks the throw as owed; no damage reaches the owner's copy yet.
+  assert.deepEqual(requestOf(combatId), {...waiting, status: 'done', damagePending: true});
+  await replays(() => defend(combatId), reply);
+  await assert.rejects(applyDamage(combatId), {code: 'failed-precondition', message: /danno concreto/});
+
+  faces(10, 5, 1);
+  const thrown = await rollDamage(combatId);
+  const landed = {kind: 'damage', label: 'Danno proposto', expr: '3d10', amount: 16, targetPlacementId: place(defender)};
+  assert.deepEqual(thrown, {
+    combatId, targetPlacementId: place(defender), round: 1, damage: 16,
+    rolls: [die(10, 10), die(10, 5), die(10, 1)], effects: [landed], damageDetails: null,
+  });
+  const resolved = journal(combatId);
+  assert.deepEqual([resolved.status, resolved.resolvedAt], ['done', 'now']);
+  // As an immediate answer writes it: the target's damage and its trial's.
+  const {pendingDamage, ...settled} = target;
+  assert.deepEqual(resolved.targets[0], {
+    ...settled, damage: 16, trials: [{...target.trials[0], damage: 16}],
+    damageRoll: {...pendingDamage, rolls: thrown.rolls, raw: 16, total: 16},
+  });
+  assert.deepEqual(asImmediate(combatId), immediateEntry(immediate.combatId));
+  // The throw is no longer owed, and the answered defense reopens for the owner's confirmation;
+  // defense, round and attack stay as they were.
+  assert.deepEqual(requestOf(combatId), {
+    ...waiting, ...projection(combatId, {kind: 'spell', action: {name: 'Barriera Cosmica (offensiva)', hands: 0},
+      damage: 16}), status: 'damagePending', damagePending: false,
+  });
+  sameRequest(combatId, immediate.combatId);
+  // The defender's replay now carries the damage, with the shape of an immediate answer; a re-roll is refused as ever.
+  const {damagePending: _waited, ...answer} = reply;
+  await replays(() => defend(combatId), {...answer, damage: 16, effects: [landed]});
+  await assert.rejects(call(attacker, {command: 'retry', combatId, round: 1, targetPlacementId: place(defender)}), {
+    code: 'failed-precondition',
+  });
+  // The first application settles the copy.
+  assert.deepEqual(await applyDamage(combatId, {amount: 16}, defender), {combatId, damageApplied: {amount: 16}});
+  assert.equal(requestOf(combatId).status, 'done');
+});
+
+test('a guided weapon hit throws its dice, then RD and hands, and journals what an immediate hit would', async () => {
+  damageFixture();
+  // Immediate: two attack faces, the defense, then the weapon dice 4 and 3 inside the answer.
+  faces(1, 1, 1, 4, 3);
+  const immediate = await weaponHit();
+  faces(1, 1);
+  const {combatId} = await guided('weapon', 'weaponMain');
+  assert.equal(journal(combatId).action.criticalHasDice, true);
+  faces(1);
+  const reply = await defend(combatId);
+  assert.deepEqual([reply.outcome, reply.damage, reply.effects, reply.damagePending], ['hit', null, [], true]);
+  assert.deepEqual(journal(combatId).targets[0].pendingDamage, {
+    round: 1, kind: 'weapon', label: 'Danno base', expr: '2d4', reduction: 2,
+  });
+  assert.deepEqual([requestOf(combatId).status, requestOf(combatId).damagePending], ['done', true]);
+  // Neither the critical nor the application comes before the weapon's damage.
+  await assert.rejects(confirmCritical(combatId, 13), {
+    code: 'failed-precondition', message: 'Tira prima il danno dell\'arma, poi conferma il critico.',
+  });
+  await assert.rejects(applyDamage(combatId), {code: 'failed-precondition', message: /danno concreto/});
+
+  faces(4, 3);
+  const thrown = await rollDamage(combatId);
+  assert.deepEqual(thrown, {
+    combatId, targetPlacementId: place(defender), round: 1, damage: 17, rolls: [die(4, 4), die(4, 3)],
+    effects: [{kind: 'damage', label: 'Danno base', expr: '2d4', amount: 17, targetPlacementId: place(defender)}],
+    damageDetails: {raw: 7, subtotal: 13, reduction: 2, hands: 2},
+  });
+  assert.deepEqual(journal(combatId).targets[0].damageRoll, {
+    round: 1, kind: 'weapon', label: 'Danno base', expr: '2d4', rolls: thrown.rolls, raw: 7, total: 17,
+  });
+  assert.deepEqual(asImmediate(combatId), immediateEntry(immediate));
+  sameRequest(combatId, immediate);
+  await replays(() => rollDamage(combatId), thrown);
+
+  // The critical rolls once with the server's dice and keeps those faces through every correction.
+  faces(5, 2);
+  const first = await confirmCritical(combatId, 13);
+  assert.deepEqual(Object.keys(first), ['combatId', 'critical', 'rolls']);
+  assert.deepEqual([first.rolls, first.critical.rolls, first.critical.roll, first.critical.total],
+    [[die(6, 5), die(6, 2)], [die(6, 5), die(6, 2)], 7, 27]);
+  assert.deepEqual(journal(combatId).targets[0].critical, first.critical);
+  // The same critical on the immediate hit: equal but for the faces.
+  faces(5, 2);
+  const {rolls: _faces, ...legacyCritical} = first.critical;
+  assert.deepEqual((await confirmCritical(immediate, 13)).critical, legacyCritical);
+  faces();
+  const corrected = await confirmCritical(combatId, 41);
+  assert.deepEqual([corrected.rolls, corrected.critical.rolls, corrected.critical.roll, corrected.critical.total],
+    [first.rolls, first.rolls, 7, 93]);
+  await replays(() => confirmCritical(combatId, 41), corrected);
+  // The owner's private copy carries the critical as stored, faces included, and still awaits confirmation.
+  assert.deepEqual(requestOf(combatId).ownerDamage, projection(combatId, {damage: 17, critical: corrected.critical}).ownerDamage);
+  assert.equal(requestOf(combatId).status, 'damagePending');
+  await assert.rejects(applyDamage(combatId, {amount: 92, criticalScore: 41}, defender), {code: 'permission-denied'});
+  assert.deepEqual(await applyDamage(combatId, {amount: 93, criticalScore: 41}, defender), {combatId, damageApplied: {amount: 93}});
+  assert.deepEqual([resources(defender).stats.hpCurrent, requestOf(combatId).status], [7, 'done']);
+  // After the application the stored critical still answers, faces included; another row is refused.
+  await replays(() => confirmCritical(combatId, 41), corrected);
+  await assert.rejects(confirmCritical(combatId, 13), {code: 'failed-precondition', message: /già stato applicato/});
+  assert.deepEqual(journal(combatId).targets[0].critical, corrected.critical);
+});
+
+test('a guided critical stores the faces of its first confirmation, whatever the row, or none for the table', async () => {
+  damageFixture();
+  const hit = async () => {
+    faces(1, 1, 1, 1, 1);
+    const {combatId} = await guided('weapon', 'weaponMain');
+    await defend(combatId);
+    assert.equal((await rollDamage(combatId)).damage, 9);
+    return combatId;
+  };
+  // A ×0 row rolls the formula already; the ×1 row after it keeps those faces.
+  const zero = await hit();
+  faces(3, 4);
+  const plain = await confirmCritical(zero, 1);
+  assert.deepEqual([plain.critical.factor, plain.critical.total, plain.rolls], [0, 9, [die(6, 3), die(6, 4)]]);
+  faces();
+  const one = await confirmCritical(zero, 7);
+  assert.deepEqual([one.critical.factor, one.critical.roll, one.rolls, one.critical.total], [1, 7, plain.rolls, 20]);
+
+  // No critical at all: the thrown damage applies as it is.
+  const bare = await hit();
+  assert.deepEqual(await applyDamage(bare, {amount: 9}, defender), {combatId: bare, damageApplied: {amount: 9}});
+
+  // A formula left to the table has no dice: no faces, and the DM settles the amount.
+  const tableBlade = {...greatsword, Parametri: {Special: {Danno: {4: '2d4'}, 'Danno Critico': {4: '2d6 + Forza'}}}};
+  db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: tableBlade});
+  const table = await hit();
+  assert.equal(journal(table).action.criticalHasDice, false);
+  faces();
+  const left = await confirmCritical(table, 13);
+  assert.deepEqual([left.rolls, left.critical.rolls, left.critical.roll], [[], [], null]);
+  assert.match(left.critical.tableRoll, /2d6 \+ Forza/);
+  assert.deepEqual(await applyDamage(table, {amount: 20, criticalScore: 13}), {combatId: table, damageApplied: {amount: 20}});
+});
+
+test('a guided weapon spell waits with the RD the defender typed and keeps its table effect', async () => {
+  damageFixture();
+  seedSpell('investment', {
+    Nome: 'INVESTIMENTO', Costo: 5, Gittata: '10 m', ...physicalCheck, 'Effetti Positivi': 'Effettua un attacco fisico.',
+  });
+  const {combatId} = await guided('spell', 'personal:investment');
+  assert.deepEqual(journal(combatId).effects.map(({kind}) => kind), ['manual']);
+  assert.equal((await defend(combatId, {reduction: 5})).damagePending, true);
+  assert.deepEqual(journal(combatId).targets[0].pendingDamage, {
+    round: 1, kind: 'weapon', label: 'Danno base', expr: '2d4', reduction: 5,
+  });
+  faces(4, 4);
+  const thrown = await rollDamage(combatId);
+  assert.deepEqual([thrown.damage, thrown.damageDetails], [14, {raw: 8, subtotal: 14, reduction: 5, hands: 2}]);
+  assert.deepEqual(journal(combatId).effects.map(({kind, amount}) => [kind, amount]), [['manual', null], ['damage', 14]]);
+  assert.equal(journal(combatId).targets[0].trials[0].defenseAdjusted, true);
+});
+
+test('an accepted guided effect waits only for its damage: the cure is rolled with the answer', async () => {
+  damageFixture();
+  seedSpell('pact', {Nome: 'Patto', Costo: 1, danni: '1d8', Cura: '1d4', combat: {targetConsent: true, allowSelf: true}});
+  // Immediate: the damage, then the cure, inside the answer.
+  const immediate = await launch('spell', 'personal:pact');
+  faces(6, 3);
+  await defend(immediate.combatId, {consent: true});
+  const accepted = await guided('spell', 'personal:pact');
+  assert.deepEqual([accepted.rolls, journal(accepted.combatId).status], [[], 'waiting']);
+  faces(3);
+  const reply = await defend(accepted.combatId, {consent: true});
+  const cure = {kind: 'heal', label: 'Cura proposta', expr: '1d4', amount: 3, targetPlacementId: place(defender)};
+  assert.deepEqual(reply, {
+    combatId: accepted.combatId, round: 1, outcome: 'accepted', damage: null, attack: null, defense: null,
+    effects: [cure], damagePending: true,
+  });
+  assert.deepEqual(journal(accepted.combatId).targets[0].pendingDamage, {
+    round: 1, kind: 'effect', label: 'Danno proposto', expr: '1d8',
+  });
+  assert.equal(journal(accepted.combatId).status, 'awaitingDamage');
+  assert.equal(requestOf(accepted.combatId).damagePending, true);
+  faces(6);
+  const landed = {kind: 'damage', label: 'Danno proposto', expr: '1d8', amount: 6, targetPlacementId: place(defender)};
+  // The damage keeps its immediate place before the cure, so the Registro's line reads the same.
+  assert.deepEqual((await rollDamage(accepted.combatId)).effects, [landed, cure]);
+  const [target] = journal(accepted.combatId).targets;
+  assert.deepEqual([target.damage, target.trials[0].damage, target.outcome], [6, 6, 'accepted']);
+  assert.deepEqual(asImmediate(accepted.combatId), immediateEntry(immediate.combatId));
+  sameRequest(accepted.combatId, immediate.combatId);
+  const {damagePending: _waited, ...answer} = reply;
+  await replays(() => defend(accepted.combatId, {consent: true}), {...answer, damage: 6, effects: [landed, cure]});
+
+  // A refusal lands nothing and leaves nothing to throw.
+  const declined = await guided('spell', 'personal:pact');
+  assert.equal((await defend(declined.combatId, {consent: false})).damagePending, undefined);
+  assert.deepEqual([journal(declined.combatId).status, 'pendingDamage' in journal(declined.combatId).targets[0]],
+    ['done', false]);
+  await assert.rejects(rollDamage(declined.combatId), {code: 'failed-precondition'});
+
+  // On oneself the card needs no consent: its damage waits at launch, its cure does not, and the throw opens the
+  // actor's own confirmation.
+  faces(2);
+  const own = await guided('spell', 'personal:pact', {targetPlacementIds: [place(attacker)]});
+  const ownEntry = journal(own.combatId);
+  assert.deepEqual([ownEntry.status, ownEntry.targets[0].outcome, ownEntry.effects.map(({kind, amount}) => [kind, amount])],
+    ['awaitingDamage', 'accepted', [['heal', 2]]]);
+  faces(5);
+  assert.equal((await rollDamage(own.combatId, {targetPlacementId: place(attacker)})).damage, 5);
+  assert.deepEqual(requestOf(own.combatId, attacker), {
+    ...projection(own.combatId, {token: attacker, kind: 'spell', action: {name: 'Patto', hands: 0}, outcome: 'accepted',
+      damage: 5}), status: 'damagePending', createdAt: 'now',
+  });
+});
+
+test('ties and re-rolls keep their faces round by round; only the decisive round has damage to throw', async () => {
+  damageFixture();
+  const {combatId} = await guided('weapon', 'weaponMain');
+  const operationId = `combat-test-${operations}`;
+  const retry = round => call(attacker, {command: 'retry', combatId, round, targetPlacementId: place(defender)});
+  assert.equal((await defend(combatId, {defense: 4})).outcome, 'tie');
+  // Each re-roll keeps the advantage: two faces.
+  faces(6, 2);
+  assert.deepEqual(await retry(1), {combatId, rolls: [die(12, 6), die(12, 2)]});
+  faces(1);
+  assert.equal((await defend(combatId, {round: 2, defense: 9})).outcome, 'tie');
+  faces(8, 3);
+  assert.deepEqual(await retry(2), {combatId, rolls: [die(12, 8), die(12, 3)]});
+  faces(1);
+  const hit = await defend(combatId, {round: 3});
+  assert.deepEqual([hit.outcome, hit.damage, hit.damagePending], ['hit', null, true]);
+  assert.deepEqual(journal(combatId).targets[0].pendingDamage, {
+    round: 3, kind: 'weapon', label: 'Danno base', expr: '2d4', reduction: 2,
+  });
+  // Each retry answers with the attack of the round it opened, the launch with the first one.
+  await replays(() => retry(1), {combatId, rolls: [die(12, 6), die(12, 2)]});
+  await replays(() => retry(2), {combatId, rolls: [die(12, 8), die(12, 3)]});
+  await replays(() => guided('weapon', 'weaponMain', {operationId}), {combatId, rolls: [die(12, 1), die(12, 1)]});
+  for (const round of [1, 2, 4]) {
+    await assert.rejects(rollDamage(combatId, {round}), {code: 'failed-precondition', message: /Non c'è un danno/});
+  }
+  faces(2, 2);
+  const thrown = await rollDamage(combatId, {round: 3});
+  assert.deepEqual([thrown.round, thrown.damage], [3, 12]);
+  const [target] = journal(combatId).targets;
+  assert.deepEqual([target.damage, target.trials.map(trial => trial.damage)], [12, [null, null, 12]]);
+  assert.deepEqual(requestOf(combatId).ownerDamage.target, projection(combatId, {round: 3, damage: 12}).ownerDamage.target);
+});
+
+test('guided mode waits for any formula with dice, of a band or on the ground, never for a constant', async () => {
+  damageFixture();
+  seedSpell('mixed', {Nome: 'Morso composto', Costo: 1, combat: {damageExpr: '2d6 + 1d4 - 2'}});
+  seedSpell('drain', {Nome: 'Risucchio', Costo: 1, combat: {damageExpr: '1d8 - 1d4'}});
+  seedSpell('flat', {Nome: 'Puntura', Costo: 1, combat: {damageExpr: '3'}});
+  seedSpell('thorn', {Nome: 'Spina', Costo: 1, combat: {damageExpr: '1d4 - 3'}});
+  const pendingOf = combatId => journal(combatId).targets[0].pendingDamage;
+  const mixed = await guided('spell', 'personal:mixed');
+  assert.equal(pendingOf(mixed.combatId).expr, '2d6 + 1d4 - 2');
+  faces(6, 5, 4);
+  assert.deepEqual(await rollDamage(mixed.combatId).then(({rolls, damage}) => [rolls, damage]),
+    [[die(6, 6), die(6, 5), die(4, 4)], 13]);
+  const drain = await guided('spell', 'personal:drain');
+  faces(7, 3);
+  assert.deepEqual(await rollDamage(drain.combatId).then(({rolls, damage}) => [rolls, damage]),
+    [[die(8, 7), {sides: 4, value: 3, sign: -1}], 4]);
+  assert.deepEqual(journal(drain.combatId).targets[0].damageRoll.rolls, [die(8, 7), {sides: 4, value: 3, sign: -1}]);
+  // A negative total lands as the immediate roll's would: nothing for the owner to confirm, nothing to apply.
+  const thorn = await guided('spell', 'personal:thorn');
+  faces(1);
+  assert.equal((await rollDamage(thorn.combatId)).damage, -2);
+  assert.deepEqual([journal(thorn.combatId).status, request(thorn.combatId)], ['done', undefined]);
+  await assert.rejects(applyDamage(thorn.combatId), {code: 'failed-precondition', message: /danno concreto/});
+  // A constant lands at once, with the owner's confirmation, as without a roll mode.
+  const flat = await guided('spell', 'personal:flat');
+  assert.deepEqual([journal(flat.combatId).status, pendingOf(flat.combatId)], ['done', undefined]);
+  assert.deepEqual(journal(flat.combatId).effects.map(({kind, amount}) => [kind, amount]), [['damage', 3]]);
+  assert.equal(requestOf(flat.combatId).status, 'damagePending');
+  await assert.rejects(rollDamage(flat.combatId), {code: 'failed-precondition'});
+
+  // Singolarità waits with the band of the distance at launch; outside every band, or on a constant band,
+  // nothing waits.
+  seedSpell('singularity', {Nome: 'Singolarità', Costo: 1, Gittata: '50 ft'});
+  const moveDefender = col => db.seed(`grigliata_token_placements/${place(defender)}`, {
+    tokenId: defender, backgroundId: board, ownerUid: defender, col, row: 0,
+  });
+  const at = async col => {
+    moveDefender(col);
+    const {combatId} = await guided('spell', 'personal:singularity');
+    return [journal(combatId), combatId];
+  };
+  const [near, nearId] = await at(2);
+  assert.deepEqual([near.status, near.effects, near.targets[0].pendingDamage],
+    ['awaitingDamage', [], {round: 1, kind: 'effect', label: 'Danno proposto · 10 ft', expr: '3d10'}]);
+  // The stored band is thrown, wherever the target has moved since.
+  moveDefender(1);
+  faces(10, 9, 8);
+  assert.deepEqual((await rollDamage(nearId)).effects, [{
+    kind: 'damage', label: 'Danno proposto · 10 ft', expr: '3d10', amount: 27, targetPlacementId: place(defender),
+  }]);
+  const [between] = await at(3);
+  assert.deepEqual([between.status, 'pendingDamage' in between.targets[0], between.effects],
+    ['done', false, [{kind: 'manual', label: 'Fascia di danno da concordare al tavolo · 15 ft', expr: '', amount: null,
+      targetPlacementId: place(defender)}]]);
+  const [far] = await at(8);
+  assert.deepEqual([far.status, 'pendingDamage' in far.targets[0], far.effects.map(({expr, amount}) => [expr, amount])],
+    ['done', false, [['1', 1]]]);
+
+  // Damage on the ground waits on the event, for a throw with no target.
+  moveDefender(1);
+  seedSpell('blast', {Nome: 'Esplosione', Costo: 1, Cura: '1d4', combat: {mode: 'ground', damageExpr: '2d6'}});
+  const ground = {targetPlacementIds: [], point: {col: 1, row: 0}};
+  faces(2, 5, 3);
+  const immediate = await launch('spell', 'personal:blast', ground);
+  faces(3);
+  const thrownGround = await guided('spell', 'personal:blast', ground);
+  assert.deepEqual(thrownGround.rolls, []);
+  const groundEntry = journal(thrownGround.combatId);
+  const cure = {kind: 'heal', label: 'Cura proposta', expr: '1d4', amount: 3, targetPlacementId: null};
+  assert.deepEqual([groundEntry.status, groundEntry.resolvedAt, groundEntry.effects, groundEntry.pendingDamage],
+    ['awaitingDamage', null, [cure], {round: 1, kind: 'effect', label: 'Danno proposto', expr: '2d6'}]);
+  await assert.rejects(rollDamage(thrownGround.combatId), {code: 'failed-precondition', message: /non fa parte/});
+  await assert.rejects(rollDamage(thrownGround.combatId, {targetPlacementId: null, round: 2}), {code: 'failed-precondition'});
+  faces(2, 5);
+  const thrown = await rollDamage(thrownGround.combatId, {targetPlacementId: null});
+  const landed = {kind: 'damage', label: 'Danno proposto', expr: '2d6', amount: 7, targetPlacementId: null};
+  assert.deepEqual(thrown, {
+    combatId: thrownGround.combatId, targetPlacementId: null, round: 1, damage: 7, rolls: [die(6, 2), die(6, 5)],
+    effects: [landed, cure], damageDetails: null,
+  });
+  assert.deepEqual(journal(thrownGround.combatId), {
+    ...groundEntry, status: 'done', resolvedAt: 'now', updatedAt: 'now', effects: [landed, cure], pendingDamage: null,
+    damageRoll: {round: 1, kind: 'effect', label: 'Danno proposto', expr: '2d6', rolls: thrown.rolls, raw: 7, total: 7},
+  });
+  assert.deepEqual(asImmediate(thrownGround.combatId), immediateEntry(immediate.combatId));
+  assert.equal(request(thrownGround.combatId), undefined);
+  await replays(() => rollDamage(thrownGround.combatId, {targetPlacementId: null}), thrown);
+
+  // A targetless attack shows its own faces.
+  seedSpell('flare', {Nome: 'Bagliore', Costo: 1, combat: {mode: 'ground', damageExpr: '1d6', attackDie: true}});
+  faces(9);
+  assert.deepEqual((await guided('spell', 'personal:flare', ground)).rolls, [die(12, 9)]);
+  faces(4, 9);
+  assert.deepEqual((await launch('spell', 'personal:flare', ground)).rolls, [die(12, 9)]);
+});
+
+test('guided mode adds no step to table effects, cures, constant weapons or actions without damage', async () => {
+  damageFixture();
+  seedSpell('veil', {Nome: 'Velo', Costo: 1, Descrizione: 'Nasconde il bersaglio.'});
+  seedSpell('venom', {Nome: 'Morso velenoso', Costo: 1, danni: '2d6 + veleno'});
+  seedSpell('cure', {Nome: 'Inversione Cellulare', Costo: 1});
+  seedSpell('spark', {Nome: 'Scintilla', Costo: 1});
+  seedSpell('rift', {Nome: 'Varco', Costo: 1, combat: {mode: 'manual', damageExpr: '1'}});
+  // The same journal as without a roll mode, but for the mode itself.
+  for (const [id, kinds, options] of [['veil', ['manual']], ['venom', ['manual']], ['cure', ['heal']], ['spark', []],
+    ['rift', ['damage', 'manual'], {targetPlacementIds: []}]]) {
+    const thrown = await guided('spell', `personal:${id}`, options);
+    const immediate = await launch('spell', `personal:${id}`, options);
+    assert.deepEqual(thrown.rolls, [], id);
+    const entry = journal(thrown.combatId);
+    assert.deepEqual([entry.status, entry.resolvedAt, entry.effects.map(({kind}) => kind)], ['done', 'now', kinds], id);
+    assert.deepEqual(asImmediate(thrown.combatId), immediateEntry(immediate.combatId), id);
+    await assert.rejects(rollDamage(thrown.combatId, options && {targetPlacementId: null}), {code: 'failed-precondition'});
+  }
+  assert.equal(journal((await guided('spell', 'personal:cure')).combatId).effects[0].amount, 2);
+
+  // A weapon whose damage is a constant hits at once, with its damage in the answer.
+  const club = {...greatsword, Parametri: {Special: {Danno: {4: '5'}, 'Danno Critico': {4: '2d6'}}}};
+  db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: club});
+  const blunt = await guided('weapon', 'weaponMain');
+  const blow = await defend(blunt.combatId);
+  assert.deepEqual([blow.damage, 'damagePending' in blow, journal(blunt.combatId).status], [14, false, 'done']);
+  const control = await weaponHit();
+  assert.deepEqual(asImmediate(blunt.combatId), immediateEntry(control));
+  db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: greatsword});
+
+  // Parte del Leone: the cure reaches the second target at once, hit or resisted; only the blow's damage waits.
+  seedSpell('lion', {Nome: 'PARTE DEL LEONE', Costo: 0, ...physicalCheck});
+  seedPawn('ally', 6, {tokenType: 'custom', Parametri: parametri, stats, dadoAnima: 'd12'}, attacker);
+  const lion = () => guided('spell', 'personal:lion', {targetPlacementIds: [place(defender), place('ally')], confirmExtra: true});
+  const cure = {kind: 'heal', label: 'Cura proposta', expr: '1d10', amount: 1, targetPlacementId: place('ally')};
+  const heals = combatId => journal(combatId).effects.filter(({kind}) => kind === 'heal');
+  const missed = await lion();
+  assert.equal((await defend(missed.combatId, {defense: 90})).outcome, 'resisted');
+  assert.deepEqual([journal(missed.combatId).status, heals(missed.combatId)], ['done', [cure]]);
+  const struck = await lion();
+  const reply = await defend(struck.combatId);
+  assert.deepEqual([reply.outcome, reply.effects, reply.damagePending], ['hit', [], true]);
+  const [attacked, recipient] = journal(struck.combatId).targets;
+  assert.deepEqual([journal(struck.combatId).status, heals(struck.combatId)], ['awaitingDamage', [cure]]);
+  assert.equal(attacked.pendingDamage.kind, 'weapon');
+  assert.deepEqual([recipient.outcome, 'pendingDamage' in recipient], ['applied', false]);
+  await assert.rejects(rollDamage(struck.combatId, {targetPlacementId: place('ally')}), {code: 'failed-precondition'});
+  assert.equal((await rollDamage(struck.combatId)).damage, 24);
+  assert.equal(journal(struck.combatId).status, 'done');
+});
+
+test('each target throws its own damage while another still answers; no one sees another target’s damage', async () => {
+  damageFixture();
+  seedElf();
+  seedSpell('storm', {
+    Nome: 'Tempesta', Costo: 1, Gittata: '30 ft', combat: {mode: 'multiple', targetCount: 2, damageExpr: '2d6'},
+    'TPC Fisico': {Param1: 'Intelligenza', Param2: '---', ParamTarget: 'Costituzione'},
+  });
+  // Both attacks at launch, then the first defense.
+  faces(1, 2, 1);
+  const {combatId, rolls} = await guided('spell', 'personal:storm', {targetPlacementIds: [place(defender), place('elf')]});
+  assert.deepEqual(rolls, [die(12, 1), die(12, 2)]);
+  const elfWaiting = structuredClone(requestOf(combatId, 'elf'));
+  assert.equal((await defend(combatId)).damagePending, true);
+  assert.equal(journal(combatId).status, 'waiting');
+  const answered = structuredClone(requestOf(combatId));
+  faces(3, 4);
+  const thrown = await rollDamage(combatId);
+  assert.deepEqual(thrown.effects.map(({targetPlacementId}) => targetPlacementId), [place(defender)]);
+  // The other defense still waits: so does the event.
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['waiting', null]);
+  assert.deepEqual(requestOf(combatId, 'elf'), elfWaiting);
+  assert.equal(answered.damagePending, true);
+  assert.deepEqual(requestOf(combatId), {
+    ...answered, ...projection(combatId, {kind: 'spell', action: {name: 'Tempesta', hands: 0}, damage: 7}),
+    status: 'damagePending', damagePending: false,
+  });
+  assert.doesNotMatch(JSON.stringify(requestOf(combatId).ownerDamage), /elf/);
+
+  // The other target ties: the re-roll comes before the waiting damage.
+  faces(1);
+  assert.equal((await call('elf', {command: 'defend', combatId, round: 1, targetPlacementId: place('elf'), defense: 7})).outcome,
+    'tie');
+  assert.equal(journal(combatId).status, 'retry');
+  faces(5);
+  assert.deepEqual(await call(attacker, {command: 'retry', combatId, round: 1, targetPlacementId: place('elf')}),
+    {combatId, rolls: [die(12, 5)]});
+  assert.equal(journal(combatId).status, 'waiting');
+  // It lands and waits for its own throw; its owner's reply holds nothing of the first target.
+  faces(1);
+  const elfAnswer = await call('elf', {command: 'defend', combatId, round: 2, targetPlacementId: place('elf'), defense: 0});
+  assert.deepEqual([elfAnswer.outcome, elfAnswer.damagePending, elfAnswer.effects], ['hit', true, []]);
+  assert.equal(journal(combatId).status, 'awaitingDamage');
+  assert.deepEqual([requestOf(combatId, 'elf').ownerDamage, requestOf(combatId, 'elf').damagePending], [undefined, true]);
+  faces(6, 6);
+  assert.equal((await rollDamage(combatId, {targetPlacementId: place('elf'), round: 2})).damage, 12);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  assert.deepEqual([requestOf(combatId, 'elf').ownerDamage.target.damage, requestOf(combatId, 'elf').status,
+    requestOf(combatId, 'elf').damagePending], [12, 'damagePending', false]);
+  assert.equal(requestOf(combatId).ownerDamage.target.damage, 7);
+  // The first defender's replay still shows only their own damage.
+  assert.deepEqual((await defend(combatId)).effects.map(({amount}) => amount), [7]);
+});
+
+test('an opposed guided hit whose throw totals below zero ends the defender\u2019s wait with nothing to confirm', async () => {
+  damageFixture();
+  seedSpell('sting', {
+    Nome: 'Puntura maligna', Costo: 1, Gittata: '30 ft', combat: {damageExpr: '1d4 - 3'},
+    'TPC Fisico': {Param1: 'Intelligenza', Param2: '---', ParamTarget: 'Costituzione'},
+  });
+  // Immediate, for the same faces: attack, defense, then the damage inside the answer.
+  faces(1, 1, 1);
+  const immediate = await launch('spell', 'personal:sting');
+  await defend(immediate.combatId);
+  faces(1, 1);
+  const {combatId} = await guided('spell', 'personal:sting');
+  const waiting = structuredClone(requestOf(combatId));
+  const reply = await defend(combatId);
+  assert.deepEqual([reply.outcome, reply.damage, reply.damagePending], ['hit', null, true]);
+  assert.deepEqual(requestOf(combatId), {...waiting, status: 'done', damagePending: true});
+  faces(1);
+  const thrown = await rollDamage(combatId);
+  const landed = {kind: 'damage', label: 'Danno proposto', expr: '1d4 - 3', amount: -2, targetPlacementId: place(defender)};
+  assert.deepEqual([thrown.damage, thrown.effects], [-2, [landed]]);
+  // The journal holds the negative amount as an immediate answer does.
+  const [target] = journal(combatId).targets;
+  assert.deepEqual([target.damage, target.trials[0].damage], [-2, -2]);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  assert.deepEqual(asImmediate(combatId), immediateEntry(immediate.combatId));
+  // The throw is over, with no damage to confirm: no projection, the request stays settled.
+  assert.deepEqual(requestOf(combatId), {...waiting, status: 'done', damagePending: false});
+  for (const uid of [defender, dm]) {
+    await assert.rejects(applyDamage(combatId, {amount: 0}, uid), {code: 'failed-precondition', message: /danno concreto/});
+  }
+  const {damagePending: _waited, ...answer} = reply;
+  await replays(() => defend(combatId), {...answer, damage: -2, effects: [landed]});
 });

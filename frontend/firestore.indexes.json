@@ -110,6 +110,14 @@
       ]
     },
     {
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "grigliata_combat_requests",
       "queryScope": "COLLECTION",
       "fields": [

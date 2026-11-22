@@ -4,12 +4,13 @@ import { db } from '../firebaseConfig';
 import { getCallable } from '../../data/functions/callableRegistry';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
 import { buildPlacementDocId } from './boardUtils';
-import { combatTime } from './combatPresentation';
+import { attackDiceNotation, combatOutcomeLabel, combatTargetName, combatTime } from './combatPresentation';
 import { canTargetToken, combatAllies, combatArea, combatDistance, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
+import useCombatRollTray from './useCombatRollTray';
 
 const EMPTY = [];
-const UNRESOLVED = ['waiting', 'retry'];
-const initialSelection = { actionId: '', actionKind: '', targetIds: [], point: null, picking: false };
+const UNRESOLVED = ['waiting', 'retry', 'awaitingDamage'];
+const initialSelection = { actionId: '', actionKind: '', targetIds: [], point: null, picking: false, aimCompletion: null };
 const records = (snap) => snap.docs.map(entry => ({ ...entry.data(), id: entry.id }));
 const byCreation = (a, b) => combatTime(a.createdAt) - combatTime(b.createdAt) || a.id.localeCompare(b.id);
 const errorText = (error) => error?.message || 'Connessione interrotta. Riprova.';
@@ -77,10 +78,10 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
     const bySource = {};
     const errors = {};
     const publish = () => {
-      // Other people's actions stay bounded by the scene window; the caller's own are never displaced by them.
+      const unresolved = bySource.pending || EMPTY;
       // One copy per action: the newest write, whichever listener delivered it (a tie keeps the later source).
       const unique = new Map();
-      for (const e of [...(bySource.scene || EMPTY), ...(bySource.owned || EMPTY), ...(bySource.pending || EMPTY)]) {
+      for (const e of [...(bySource.scene || EMPTY), ...(bySource.owned || EMPTY), ...unresolved]) {
         if (!unique.has(e.id) || combatTime(e.updatedAt) >= combatTime(unique.get(e.id).updatedAt)) unique.set(e.id, e);
       }
       // The full journal provides the display context. A fresher owner copy can advance that target's outcome
@@ -89,8 +90,9 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
         const full = unique.get(projected.id);
         unique.set(projected.id, full ? mergeOwnerDamage(full, projected) : projected);
       }
-      // A card lasts while the newest copy still awaits an answer: a stale pending snapshot never hides a result.
-      const pending = (bySource.pending || EMPTY).map(e => unique.get(e.id)).filter(e => UNRESOLVED.includes(e.status)).sort(byCreation);
+      // Only the actor gets a status card. For the DM, older unresolved actions from other actors stay in the journal.
+      const pending = unresolved.map(e => unique.get(e.id))
+        .filter(e => e.actorUid === uid && UNRESOLVED.includes(e.status)).sort(byCreation);
       setFeed({ key, events: [...unique.values()].sort((a, b) => byCreation(b, a)), pending, error: Object.values(errors)[0] });
     };
     const actions = (...filters) => query(collection(db, 'grigliata_combat_actions'), where('backgroundId', '==', backgroundId), ...filters);
@@ -108,6 +110,7 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
         publish();
       });
     const own = where('actorUid', '==', uid);
+    const unresolved = where('status', 'in', UNRESOLVED);
     const newest = [orderBy('createdAt', 'desc'), limit(40)];
     const unsubs = [
       isManager
@@ -116,8 +119,10 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
       // Last changed, not last launched: an own action just answered, rerolled or given a critical is always in this
       // window, however many launches followed it, so its result never vanishes when it leaves the pending listener.
       subscribe('owned','grigliata.combat-actions.actor.subscribe.v1',actions(own,orderBy('updatedAt','desc'),limit(40))),
-      // Never windowed: an action that still awaits an answer keeps its card however many actions follow it.
-      subscribe('pending','grigliata.combat-actions.actor-pending.subscribe.v1',actions(own,where('status','in',UNRESOLVED))),
+      // Unwindowed so a pending damage throw remains reachable in Registro even if its actor leaves.
+      isManager
+        ? subscribe('pending','grigliata.combat-actions.manager-pending.subscribe.v1',actions(unresolved))
+        : subscribe('pending','grigliata.combat-actions.actor-pending.subscribe.v1',actions(own,unresolved)),
     ];
     // A player also reads the redacted outcome on each of their pawns of the actions they cannot read in full; the DM
     // reads the whole scene.
@@ -143,6 +148,8 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   const [damage, setDamage] = useState({});
   const locks = useRef(new Set());
   const aimTrigger = useRef(null);
+  const [tray, prepareRoll] = useCombatRollTray(enabled && open && !suspended && uid && backgroundId
+    ? JSON.stringify([uid, backgroundId]) : '', definitive);
   const board = useMemo(() => {
     if (!enabled || !open || suspended) return EMPTY;
     return tokens.map(token => ({
@@ -241,25 +248,28 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   // Id and kind always travel together, and another action always starts from an empty pick.
   const same = next => next?.id === action?.id && next?.kind === action?.kind;
   const choose = next => ({...initialSelection, actionId:next?.id || '', actionKind:next?.kind || ''});
-  const finishAim = (next = {}) => {
-    update({...next, picking:false});
+  const finishAim = (next = {}, completed = false) => {
     const trigger = aimTrigger.current;
-    if (trigger?.isConnected) trigger.focus({preventScroll:window.innerWidth >= 1280});
+    const restoreFocus = () => {
+      if (trigger?.isConnected) trigger.focus({preventScroll:window.innerWidth >= 1280});
+    };
+    update({...next, picking:false, aimCompletion:completed ? { trigger, restoreFocus } : null});
+    if (!completed) restoreFocus();
   };
   const beginAim = (next) => {
     if (selection.picking) { finishAim(); return; }
     aimTrigger.current = document.activeElement;
-    update({...(same(next) ? {} : choose(next)), picking:true});
+    update({...(same(next) ? {} : choose(next)), picking:true, aimCompletion:null});
   };
   const selectAction = (next) => { if (!same(next)) update(choose(next)); };
   const pickToken = (id) => {
     if (!selection.picking || !candidates.some(t => t.placementId === id)) return;
     if (multi) update({targetIds:targetIds.includes(id) ? removeTarget(id) : [...targetIds,id]});
-    else finishAim({targetIds:[id]});
+    else finishAim({targetIds:[id]}, true);
   };
   const removeTarget = id => action?.targetRoles ? targetIds.slice(0,targetIds.indexOf(id)) : targetIds.filter(t => t !== id);
   const pickPoint = (cell) => {
-    if (selection.picking && ground && withinCombatRange(pawn,cell,action)) finishAim({point:cell,targetIds:[]});
+    if (selection.picking && ground && withinCombatRange(pawn,cell,action)) finishAim({point:cell,targetIds:[]}, true);
   };
   const run = async (scope, job, pending = {}) => {
     const key = JSON.stringify([uid,backgroundId,scope]);
@@ -275,27 +285,71 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   };
   const attack = activity[JSON.stringify([uid,backgroundId,'attack'])] || {};
   const mutate = payload => getCallable('mutateGrigliataCombat')(payload);
-  const onLaunch = (used, options) => run('attack', async () => {
-    if (!actorId || used.id !== action?.id || used.kind !== action?.kind) return;
+  const launchPayload = (used, options) => {
+    if (!actorId || arsenalSync !== 'ready' || used.id !== action?.id || used.kind !== action?.kind) return null;
     // The version pins the definition shown here: a weapon action's id is only its slot, and the slot may be re-equipped elsewhere.
     const payload = { ...options, command:'launch', backgroundId, actorPlacementId:actorId, kind:used.kind, actionId:used.id,
       actionVersion:action.version, targetPlacementIds:targetIds };
     if (point) payload.point = point;
     Object.keys(payload).forEach(k => { if (payload[k] == null) delete payload[k]; });
+    return payload;
+  };
+  const launch = async payload => {
     try {
-      await runWithDurableOperationIntent({actorUid:uid,kind:'grigliata-combat',intent:payload,isDefinitiveError:definitive,
-        invoke: operationId => mutate({...payload,operationId})});
+      // A launch whose reply was lost before the guided UI shipped must reuse its original operation ID.
+      return await runWithDurableOperationIntent({actorUid:uid,kind:'grigliata-combat',intent:payload,isDefinitiveError:definitive,
+        invoke: operationId => mutate({...payload,operationId,rollMode:'guided'})});
     } finally {
       // Success or failure, the arsenal is reloaded: a refused launch shows the current repertoire next to its error.
       // The draft is left alone: aiming ended before the launch and the player may already be drafting the next action.
       refresh(v => v+1);
     }
-  });
+  };
+  const onLaunch = (used, options) => {
+    const payload = launchPayload(used, options);
+    if (payload && tray?.phase !== 'sending') return run('attack', () => launch(payload));
+  };
+  const onPrepareLaunch = (used, options, trigger) => {
+    const payload = launchPayload(used, options);
+    const check = action?.checks?.find(choice => choice.channel === options.channel) || action;
+    if (!payload || !check?.attackDie || attack.busy) return undefined;
+    // An ordered attack/assist has a single attack roll. Other targets roll independently.
+    const attackCount = action.targetRoles ? 1 : Math.max(1, payload.targetPlacementIds.length);
+    return prepareRoll({
+      kind: 'attack', title: action.name, notation: attackDiceNotation(action.die, attackCount),
+      anchor: { backgroundId, targetIds: payload.targetPlacementIds, point: payload.point },
+      send: () => launch(payload),
+    }, trigger);
+  };
+  const onRetry = (event, target) => {
+    if (suspended || event.actorUid !== uid || attack.busy || tray?.phase === 'sending') return;
+    const send = () => mutate({command:'retry',combatId:event.id,targetPlacementId:target.placementId,round:target.round});
+    if (!target.attack?.sides) return run('attack', send);
+    return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + target.name,
+      notation: attackDiceNotation(target.attack.sides, target.advantage ? 2 : 1),
+      combatId: event.id, targetPlacementId: target.placementId, anchor: { backgroundId, targetIds: [target.placementId] }, send });
+  };
+  const onRollDamage = (event, target) => {
+    if (suspended || (!isManager && event.actorUid !== uid) || attack.busy) return;
+    const pendingDamage = (target || event).pendingDamage;
+    if (!pendingDamage?.expr) return;
+    const actionName = event.action?.name || 'Azione';
+    const title = target ? actionName + ' · Danno contro ' + combatTargetName(target, event.targets || EMPTY) : 'Danno · ' + actionName;
+    prepareRoll({
+      kind: 'damage', title,
+      notation: pendingDamage.expr, combatId: event.id, targetPlacementId: target?.placementId ?? null,
+      anchor: { backgroundId, targetIds: target ? [target.placementId] : EMPTY, point: event.point },
+      send: () => mutate({
+        command:'rollDamage', combatId:event.id, targetPlacementId:target?.placementId ?? null, round:pendingDamage.round,
+      }),
+    });
+  };
   const damageKey = (event, target) => JSON.stringify([uid, backgroundId, 'damage', event.id, target.placementId]);
   const applyDamage = async (event, target, amount) => {
     const key = damageKey(event, target);
     // Rights checked again here, not only where the form is offered; the server has the last word.
-    if (!mayApplyDamage(target) || !targetIsPresent(target) || locks.current.has(key)) return;
+    if (target.pendingDamage || !mayApplyDamage(target) || !targetIsPresent(target)
+      || locks.current.has(key) || (tray?.phase === 'sending' && tray.scope === key)) return;
     locks.current.add(key);
     const criticalScore = target.critical?.score ?? null;
     const submitted = {value:String(amount), criticalScore};
@@ -309,34 +363,67 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       setDamage(s => ({...s,[key]:{error:damageErrorText(err),submitted}}));
     } finally { locks.current.delete(key); }
   };
-  const onCritical = async (event, target, score) => {
+  const onCritical = (event, target, score) => {
     const key = damageKey(event, target);
-    if (locks.current.has(key)) return;
-    locks.current.add(key);
-    try {
-      await run('attack', () => mutate({command:'critical',combatId:event.id,targetPlacementId:target.placementId,round:target.round,score}),
-        {criticalTargetKey:key});
-    } finally { locks.current.delete(key); }
+    if (suspended || event.actorUid !== uid || target.pendingDamage || locks.current.has(key)
+      || attack.busy || tray?.phase === 'sending') return undefined;
+    const send = async () => {
+      if (locks.current.has(key)) throw new Error('Attendi la conferma del danno.');
+      locks.current.add(key);
+      try {
+        return await mutate({command:'critical',combatId:event.id,targetPlacementId:target.placementId,round:target.round,score});
+      } finally {
+        locks.current.delete(key);
+      }
+    };
+    if (!target.critical && event.action?.criticalHasDice) {
+      return prepareRoll({ kind: 'damage', title: 'Critico contro ' + target.name,
+        notation: event.action.criticalExpr, scope: key, combatId: event.id,
+        anchor: { backgroundId, targetIds: [target.placementId] }, send });
+    }
+    return run('attack', send, {criticalTargetKey:key});
   };
   const damageState = (event, target) => {
     const key = damageKey(event, target);
-    return {...damage[key], criticalPending:attack.criticalTargetKey === key, unavailable:!targetIsPresent(target)};
+    return {...damage[key], criticalPending:attack.criticalTargetKey === key || (tray?.phase === 'sending' && tray.scope === key),
+      unavailable:!targetIsPresent(target)};
   };
+  const resultEvent = tray?.phase === 'result' && feed.events?.find(event => event.id === tray.combatId && (isManager || event.actorUid === uid));
+  const pending = feed.pending || EMPTY;
+  const mapDamageEvents = suspended || (tray && tray.phase !== 'result') ? EMPTY
+    : resultEvent ? [resultEvent, ...pending.filter(event => event.id !== resultEvent.id)] : pending;
+  const readyDamage = mapDamageEvents.flatMap(event => [
+    ...((event.targets || EMPTY).filter(target => target.pendingDamage).map(target => ({ event, target }))),
+    ...(event.pendingDamage ? [{ event, target: null }] : EMPTY),
+  ]).find(({ event, target }) => !(tray?.kind === 'damage' && event.id === tray.combatId
+    && (target?.placementId ?? null) === tray.targetPlacementId));
+  const nextDamage = readyDamage && {
+    label: [
+      'Tiro di danno',
+      readyDamage.target && combatTargetName(readyDamage.target, readyDamage.event.targets),
+      (!readyDamage.target || readyDamage.event.id !== resultEvent?.id) && (readyDamage.event.action?.name || 'Azione'),
+    ].filter(Boolean).join(' · '),
+    prepare: () => onRollDamage(readyDamage.event, readyDamage.target),
+    disabled: Boolean(attack.busy),
+  };
+  const resultOutcomes = (resultEvent?.targets || EMPTY).flatMap(target => {
+    const label = combatOutcomeLabel(target.outcome, resultEvent.kind, resultEvent.action?.hands);
+    return label ? [{ name: combatTargetName(target, resultEvent.targets), label, id: target.placementId }] : EMPTY;
+  });
   // A launch refreshes only the arsenal; listeners reopen only when one of them has failed.
   const reload = () => {
     refresh(v => v+1);
     if (feed.error) retryFeed();
   };
   return {
-    actors, pawn, setActor:setPreferredId, reload,
+    actors, pawn, setActor:setPreferredId, reload, tray, nextDamage, resultStatus: resultEvent?.status, resultOutcomes,
     panel: {
       actor:current.data?.actor, actions, equipped:current.data?.equipped, selection, targets:candidates,
-      events:feed.events || EMPTY, pending:feed.pending || EMPTY, currentUserId:uid,
+      events:feed.events || EMPTY, pending, currentUserId:uid,
       turn:{name:board.find(t => t.tokenId === activeTurnTokenId)?.name, isCurrent:pawn?.tokenId === activeTurnTokenId,
         canAct:!activeTurnTokenId || pawn?.tokenId === activeTurnTokenId},
       onSelectAction:selectAction, onBeginTargeting:beginAim,
-      onRemoveTarget:id => update({targetIds:removeTarget(id)}), onLaunch,
-      onRetry:(event,target) => run('attack',() => mutate({command:'retry',combatId:event.id,targetPlacementId:target.placementId,round:target.round})),
+      onRemoveTarget:id => update({targetIds:removeTarget(id)}), onLaunch, onPrepareLaunch, onRetry, onRollDamage,
       onCritical,
       // The DM for every target, a player for their own pawns; nobody from the narration overlay or the player preview.
       onApplyDamage:suspended ? undefined : applyDamage,
@@ -345,9 +432,10 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       // The DM sets any amount and reads the defense audit; a player is held to each proposal. The narration overlay and
       // the player preview show what a player sees.
       isManager:Boolean(isManager) && !suspended,
-      busy:!!attack.busy, arsenalSync, loading:!!catalogKey && !current.data && !current.error,
+      busy:!!attack.busy || tray?.phase === 'sending', arsenalSync, loading:!!catalogKey && !current.data && !current.error,
       error:attack.error || current.error || feed.error,
     },
-    overlay:open && pawn && action ? { pawn, action, selection, candidates, pickToken, pickPoint, finish:() => finishAim() } : null,
+    overlay:open && pawn && action ? { pawn, action, selection, candidates, pickToken, pickPoint,
+      finish:() => finishAim(), confirm:() => finishAim({}, true) } : null,
   };
 }

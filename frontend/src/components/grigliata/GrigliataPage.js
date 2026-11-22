@@ -7244,6 +7244,10 @@ export default function GrigliataPage() {
               <PerformanceProfiler id="grigliata-board">
                 <GrigliataBoard
                 combatAim={combat.overlay}
+                combatTray={combat.tray}
+                combatNextDamage={combat.nextDamage}
+                combatResultStatus={combat.resultStatus}
+                combatResultOutcomes={combat.resultOutcomes}
                 activeBackground={displayBackground}
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}

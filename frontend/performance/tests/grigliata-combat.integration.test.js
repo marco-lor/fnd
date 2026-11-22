@@ -4,7 +4,7 @@ const path = require('node:path');
 const {createRequire} = require('node:module');
 const {after, before, test} = require('node:test');
 const {assertFails, assertSucceeds, initializeTestEnvironment} = require('@firebase/rules-unit-testing');
-const {collection, doc, getDoc, getDocs, query, setDoc, where} = require('firebase/firestore');
+const {collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, where} = require('firebase/firestore');
 const functionsRequire = createRequire(path.join(__dirname, '../../functions/package.json'));
 const {initializeApp, deleteApp} = functionsRequire('firebase-admin/app');
 const {getFirestore} = functionsRequire('firebase-admin/firestore');
@@ -523,4 +523,45 @@ test('a hidden attacker damage reaches only its target owner, who applies it fro
     defense: 99, reduction: 0,
   })).outcome, 'tie');
   assert.equal((await home()).has(defense.id), false);
+});
+
+test('a DM can finish another player’s damage beyond the latest 40 while the board-wide feed stays private', async () => {
+  await seed('grigliata_state/current', {activeBackgroundId: board});
+  await seed('grigliata_token_placements/' + placementId(attacker), {
+    backgroundId: board, ownerUid: attacker, tokenId: attacker, col: 0, row: 0, label: attacker, isVisibleToPlayers: true,
+  });
+  await seed('users/' + attacker + '/spells/late-dart', {Nome: 'Dardo nascosto', danni: '2d4'});
+  const {combatId} = await mutate(attacker, {
+    command: 'launch', operationId: 'old-pending-dice', rollMode: 'guided', backgroundId: board,
+    actorPlacementId: placementId(attacker), kind: 'spell', actionId: 'personal:late-dart',
+    targetPlacementIds: [placementId(defender)],
+  });
+  const event = await trackCombat(combatId);
+  assert.equal((await event.get()).get('status'), 'awaitingDamage');
+  const hiddenId = 'unshared-waiting-on-this-board';
+  await seed('grigliata_combat_actions/' + hiddenId, {
+    backgroundId: board, actorUid: npcOwner, shared: false, status: 'waiting', createdAt: new Date(0),
+  });
+  const later = Date.now() + 1000;
+  await Promise.all(Array.from({length: 40}, (_, i) => seed('grigliata_combat_actions/later-' + i, {
+    backgroundId: board, actorUid: defender, shared: true, status: 'done', createdAt: new Date(later + i),
+  })));
+  const manager = environment.authenticatedContext(otherDm).firestore();
+  const player = environment.authenticatedContext(defender).firestore();
+  const actions = client => collection(client, 'grigliata_combat_actions');
+  const outstanding = client => getDocs(query(actions(client), where('backgroundId', '==', board),
+    where('status', 'in', ['waiting', 'retry', 'awaitingDamage'])));
+  const recent = await assertSucceeds(getDocs(query(actions(manager), where('backgroundId', '==', board),
+    orderBy('createdAt', 'desc'), limit(40))));
+  assert.equal(recent.size, 40);
+  assert.ok(!recent.docs.some(d => d.id === combatId));
+  const pending = (await assertSucceeds(outstanding(manager))).docs.map(d => d.id);
+  assert.ok(pending.includes(combatId) && pending.includes(hiddenId));
+  await assertFails(outstanding(player));
+  const command = {command: 'rollDamage', combatId, targetPlacementId: placementId(defender), round: 1};
+  const recovered = await mutate(otherDm, command);
+  assert.deepEqual(recovered.rolls.map(die => die.sides), [4, 4]);
+  assert.deepEqual((await mutate(attacker, command)).rolls, recovered.rolls);
+  assert.ok(!(await outstanding(manager)).docs.some(d => d.id === combatId));
+  await trackCombat(combatId);
 });

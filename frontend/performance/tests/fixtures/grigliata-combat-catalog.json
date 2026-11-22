@@ -1,0 +1,1653 @@
+{
+  "source": "fatin-test",
+  "captured": "2026-11-21",
+  "items": [
+    {
+      "item": {
+        "General": {
+          "Nome": "Arco Corto",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            },
+            "Danno Critico": {
+              "1": "1d12",
+              "4": "2d12",
+              "7": "3d12",
+              "10": "4d12"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Arco Lungo",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "3d6",
+              "4": "6d6",
+              "7": "9d6",
+              "10": "12d6"
+            },
+            "Danno Critico": {
+              "1": "3d6",
+              "4": "6d6",
+              "7": "9d6",
+              "10": "12d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Bacchetta",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Balestra Da Guerra",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "2",
+              "4": "4",
+              "7": "6",
+              "10": "8"
+            },
+            "Danno": {
+              "1": "2d6",
+              "4": "4d6",
+              "7": "6d6",
+              "10": "8d6"
+            },
+            "Danno Critico": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Balestra Leggera",
+          "Slot": "Mano Principale o Secondaria"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            },
+            "Danno Critico": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Bastone Magico",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Effetto": "gittata 30 ft",
+          "Nome": "Catena del Predatore",
+          "Slot": "Mano Secondaria",
+          "spells": {
+            "Afferra": {
+              "Azione": "Consumabile",
+              "Costo": 8,
+              "Effetti Positivi": "FORZA + ANIMA VS FORZA + ANIMA se successo se bersaglio pesa meno di 300 kg puoi spendere il tuo movimento rimanente per far muovere il bersaglio (spostandolo con la catena) questo movimento può generare attacchi di opportunitàper alleati non te stesso; se la catena è tesa per 30 piedi il tuo movimento fa spostare insieme a te il bersaglio",
+              "Gittata": 30,
+              "Nome": "Afferra",
+              "TPC Fisico": {
+                "Param1": "Forza"
+              },
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Codex V2 Reliquia Spell 20260812",
+          "Slot": "Consumabile",
+          "spells": {
+            "Codex V2 Eco Astrale 20260812": {
+              "Azione": "Consumabile",
+              "Costo": 0,
+              "Effetti Negativi": "Nessun effetto negativo; test V2.",
+              "Effetti Positivi": "Produce un bagliore astrale di prova.",
+              "Gittata": 0,
+              "Nome": "Codex V2 Eco Astrale 20260812",
+              "Turni": 0
+            }
+          }
+        }
+      },
+      "kind": "consumabile"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Coltelli da Lancio",
+          "Slot": "Mano Principale o Secondaria"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            },
+            "Danno Critico": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Distanza"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Destino",
+          "Slot": "Accessorio",
+          "spells": {
+            "Fenditura Temporale": {
+              "Costo": 1,
+              "Effetti Positivi": "La tua prossima azione tattica in questo turno ottiene +10 mira e +10 critico.",
+              "Gittata": 0,
+              "Nome": "Fenditura Temporale",
+              "Turni": 0
+            },
+            "Resurrezione": {
+              "Costo": 3,
+              "Effetti Positivi": "L'anello può essere utilizzato per riportare in vita un essere vivente che ha perso la vita nelle ultime 24 ore. L'effetto si attiva automaticamente se il portatore perde la vita mentre l'anello ha almeno 3 cariche, in aggiunta teleportandolo nel punto in cui si trovava a mezzanotte.",
+              "Gittata": 0,
+              "Nome": "Resurrezione",
+              "Turni": 0
+            },
+            "Stasi Personale": {
+              "Costo": 1,
+              "Effetti Positivi": "Quando vieni colpito da un attacco, puoi spendere 1 carica per creare una bolla di stasi temporale di 10 metri di raggio intorno a te, l’attacco viene annullato, insieme a tutti i suoi effetti.",
+              "Gittata": 10,
+              "Nome": "Stasi Personale",
+              "Turni": 0
+            },
+            "Stasi Protettiva": {
+              "Costo": 2,
+              "Effetti Positivi": "Se un alleato entro 10 metri sta per essere colpito da un attacco, puoi spendere 2 cariche per negarne completamente gli effetti, come se avesse \"spostato\" il bersaglio abbastanza da fargli schivare l'attacco.",
+              "Gittata": 10,
+              "Nome": "Stasi Protettiva",
+              "Turni": 0
+            }
+          }
+        }
+      },
+      "kind": "accessorio"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "destino test",
+          "Slot": "Accessorio",
+          "spells": {
+            "Fenditura Temporale": {
+              "Costo": 1,
+              "Effetti Positivi": "La tua prossima azione tattica in questo turno ottiene +10 mira e +10 critico.",
+              "Gittata": 0,
+              "Nome": "Fenditura Temporale",
+              "Turni": 0
+            },
+            "Resurrezione": {
+              "Costo": 3,
+              "Effetti Positivi": "L'anello può essere utilizzato per riportare in vita un essere vivente che ha perso la vita nelle ultime 24 ore. L'effetto si attiva automaticamente se il portatore perde la vita mentre l'anello ha almeno 3 cariche, in aggiunta teleportandolo nel punto in cui si trovava a mezzanotte.",
+              "Gittata": 0,
+              "Nome": "Resurrezione",
+              "Turni": 0
+            },
+            "Stasi Personale": {
+              "Costo": 1,
+              "Effetti Positivi": "Quando vieni colpito da un attacco, puoi spendere 1 carica per creare una bolla di stasi temporale di 10 metri di raggio intorno a te, l’attacco viene annullato, insieme a tutti i suoi effetti.",
+              "Gittata": 10,
+              "Nome": "Stasi Personale",
+              "Turni": 0
+            },
+            "Stasi Protettiva": {
+              "Costo": 2,
+              "Effetti Positivi": "Se un alleato entro 10 metri sta per essere colpito da un attacco, puoi spendere 2 cariche per negarne completamente gli effetti, come se avesse \"spostato\" il bersaglio abbastanza da fargli schivare l'attacco.",
+              "Gittata": 10,
+              "Nome": "Stasi Protettiva",
+              "Turni": 0
+            }
+          }
+        }
+      },
+      "kind": "accessorio"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Globo Fluttuante",
+          "Slot": "Mano Principale o Secondaria"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Mano Principale Vuota",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "1",
+              "4": "2",
+              "7": "3",
+              "10": "4"
+            },
+            "Bonus Danno Critico": {
+              "1": "1",
+              "4": "2",
+              "7": "3",
+              "10": "4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Mano Secondaria Vuota",
+          "Slot": "Mano Secondaria"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "1",
+              "4": "2",
+              "7": "3",
+              "10": "4"
+            },
+            "Bonus Danno Critico": {
+              "1": "1",
+              "4": "2",
+              "7": "3",
+              "10": "4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Mazza",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "1",
+              "4": "2",
+              "7": "3",
+              "10": "4"
+            },
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Mazzafrusto",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "2",
+              "4": "4",
+              "7": "6",
+              "10": "8"
+            },
+            "Danno": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            },
+            "Danno Critico": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Picca",
+          "Slot": "Doppia Mano",
+          "ridCostoTecSingola": {
+            "Frapposizione": 2
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d12",
+              "4": "2d12",
+              "7": "3d12",
+              "10": "4d12"
+            },
+            "Danno Critico": {
+              "1": "1d12",
+              "4": "2d12",
+              "7": "3d12",
+              "10": "4d12"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Pugnale",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "3",
+              "4": "6",
+              "7": "9",
+              "10": "12"
+            },
+            "Bonus Danno Critico": {
+              "1": "3",
+              "4": "6",
+              "7": "9",
+              "10": "12"
+            },
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Pugnale Negro",
+          "Slot": "Mano Principale"
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Pugnale Negro",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "3",
+              "4": "6",
+              "7": "9",
+              "10": "12"
+            },
+            "Bonus Danno Critico": {
+              "1": "3",
+              "4": "6",
+              "7": "9",
+              "10": "12"
+            },
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 Accessorio",
+          "Slot": "Accessorio",
+          "ridCostoSpellSingola": {
+            "QA10 Accessorio Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10 Accessorio Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10 Accessorio Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            }
+          }
+        }
+      },
+      "kind": "accessorio"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 Arma",
+          "Slot": "Mano Principale",
+          "ridCostoSpellSingola": {
+            "QA10 Arma Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10 Arma Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10 Arma Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 Armatura",
+          "Slot": "Testa",
+          "ridCostoSpellSingola": {
+            "QA10 Armatura Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10 Armatura Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10 Armatura Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        }
+      },
+      "kind": "armatura"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 Consumabile",
+          "Slot": "Consumabile",
+          "ridCostoSpellSingola": {
+            "QA10 Consumabile Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10 Consumabile Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10 Consumabile Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d12",
+              "4": "2d12",
+              "7": "3d12",
+              "10": "4d12"
+            }
+          }
+        }
+      },
+      "kind": "consumabile"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 R2 Accessorio",
+          "Slot": "Accessorio",
+          "ridCostoSpellSingola": {
+            "QA10R Accessorio Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10R Accessorio Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10R Accessorio Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d10",
+              "4": "2d10",
+              "7": "3d10",
+              "10": "4d10"
+            }
+          }
+        }
+      },
+      "kind": "accessorio"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 R2 Arma",
+          "Slot": "Mano Principale",
+          "ridCostoSpellSingola": {
+            "QA10R Arma Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10R Arma Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10R Arma Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 R2 Armatura",
+          "Slot": "Testa",
+          "ridCostoSpellSingola": {
+            "QA10R Armatura Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10R Armatura Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10R Armatura Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        }
+      },
+      "kind": "armatura"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "QA10 20260920 R2 Consumabile",
+          "Slot": "Consumabile",
+          "ridCostoSpellSingola": {
+            "QA10R Consumabile Spell": 3
+          },
+          "ridCostoTecSingola": {
+            "Attacco": 2
+          },
+          "spells": {
+            "QA10R Consumabile Spell": {
+              "Costo": 8,
+              "Gittata": 0,
+              "Nome": "QA10R Consumabile Spell",
+              "Turni": 0
+            }
+          }
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d12",
+              "4": "2d12",
+              "7": "3d12",
+              "10": "4d12"
+            }
+          }
+        }
+      },
+      "kind": "consumabile"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Scudo",
+          "Slot": "Mano Secondaria"
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Scudo Piccolo",
+          "Slot": "Mano Secondaria"
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Spada",
+          "Slot": "Mano Principale"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            },
+            "Danno Critico": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Spadone",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Bonus Danno": {
+              "1": "3",
+              "4": "6",
+              "7": "9",
+              "10": "12"
+            },
+            "Danno": {
+              "1": "2d6",
+              "4": "4d6",
+              "7": "6d6",
+              "10": "8d6"
+            },
+            "Danno Critico": {
+              "1": "2d6",
+              "4": "4d6",
+              "7": "6d6",
+              "10": "8d6"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Stocco",
+          "Slot": "Mano Secondaria"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d6",
+              "4": "2d6",
+              "7": "3d6",
+              "10": "4d6"
+            },
+            "Danno Critico": {
+              "1": "1d8",
+              "4": "2d8",
+              "7": "3d8",
+              "10": "4d8"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 1,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    },
+    {
+      "item": {
+        "General": {
+          "Nome": "Triplice Globo Fluttuante",
+          "Slot": "Doppia Mano"
+        },
+        "Parametri": {
+          "Special": {
+            "Danno": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            },
+            "Danno Critico": {
+              "1": "1d4",
+              "4": "2d4",
+              "7": "3d4",
+              "10": "4d4"
+            }
+          }
+        },
+        "Specific": {
+          "Hands": 2,
+          "Tipo": "Mischia"
+        }
+      },
+      "kind": "weapon"
+    }
+  ],
+  "cards": [
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 0,
+        "Effetto": "Il personaggio effettua un attacco fisico in mischia o a distanza, a seconda dell'arma equipaggiata.",
+        "Nome": "Attacco"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Attacco fisico in mischia su bersaglio che cerca di allontanarsi. Richiede arma da mischia.",
+        "Nome": "Attacco d'Opportunità"
+      },
+      "key": "AttaccoOpportunità",
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 12,
+        "Effetto": "Il personaggio raggiunge il bersaglio con circospezione per attaccarlo; se l'azione tattica infligge danni al bersaglio, il bersaglio non può attaccare il personaggio con la sua prossima azione tattica a bersaglio singolo.",
+        "Nome": "Attacco Furtivo"
+      },
+      "key": "AttaccoFurtivo",
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Consumabile",
+        "Costo": 0,
+        "Effetto": "Sostituisce il set di armi equipaggiato con il set non equipaggiato con relativo fodero.",
+        "Nome": "Cambio Set Armi"
+      },
+      "key": "CambioSetArmi",
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Se il personaggio non è ingaggiato in mischia può correre addosso ad un bersaglio aggiungendo Forza danni all'azione tattica di questo turno.",
+        "Nome": "Carica"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Comunicazione",
+        "Costo": 3,
+        "Effetto": "Avverte un alleato ingaggiato in mischia dell'imminente attacco a distanza di sé stesso o alleato, dandogli la possibilità di non essere ferito dal fuoco amico.",
+        "Nome": "Coordinazione"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Se il personaggio non è ingaggiato in mischia può attaccare con arma a distanza da una copertura: +2 Difesa contro attacchi a distanza e +2 al dado anima contro incantesimi fino alla prossima azione di movimento.",
+        "Nome": "Copertura"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Comunicazione",
+        "Costo": 6,
+        "Effetto": "Fino al prossimo turno il personaggio si fa proteggere da un alleato distante fino a 4m, frapponendosi fra lui ed i nemici e intercettando gli attacchi. L'alleato subisce i danni altrimenti diretti al personaggio, senza possibilità di poter schivare ma applicando le eventuali riduzioni del danno.",
+        "Nome": "Frapposizione"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 12,
+        "Effetto": "Forza + Dado Anima vs Forza + Dado Anima. Fino alla fine del prossimo turno il bersaglio ha danno fisico dimezzato oppure non può usare azione di movimento oppure mira dimezzata.",
+        "Nome": "Impedimento"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 0,
+        "Effetto": "Il bersaglio si muove al massimo della rapidità fino a un massimo di 9 metri, a seconda delle condizioni del terreno e della situazione.",
+        "Nome": "Movimento"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Forza + Dado Anima vs Forza + Dado Anima annulla l'azione di movimento del bersaglio; questa azione può essere effettuata anticipando la propria azione del turno successivo durante l'azione di movimento del bersaglio ingaggiato in mischia.",
+        "Nome": "Ostruzione"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Fino alla prossima azione tattica il personaggio ottiene +1 Difesa, +1 al dado anima contro incantesimo, +2 riduzione danni. I bonus sono raddoppiati se il personaggio ha equipaggiato uno scudo.",
+        "Nome": "Parata"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Comunicazione",
+        "Costo": 4,
+        "Effetto": "Fino al prossimo turno il personaggio protegge un alleato distante fino a 4m, frapponendosi fra lui ed i nemici e intercettando gli attacchi. Il personaggio subisce i danni altrimenti diretti all'alleato, senza possibilità di poter schivare ma applicando le eventuali riduzioni del danno.",
+        "Nome": "Protezione"
+      },
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Azione": "Consumabile",
+        "Costo": 0,
+        "Effetto": "Utilizza un oggetto consumabile se equipaggiato nello slot cintura su se stesso o su un personaggio vicino. Far ingerire una pozione ad un alleato è possibile solo se l'alleato è in mischia. Passare una pozione ad un alleato lontano richiede un successo su destrezza.",
+        "Nome": "Uso Consumabile in Cintura"
+      },
+      "key": "UsoConsumabileCintura",
+      "kind": "tecnica",
+      "scope": "common"
+    },
+    {
+      "entry": {
+        "Nome": "b",
+        "danni": "2d10",
+        "description": "si attiva alla terza fase",
+        "effetti": "paralizza tutti"
+      },
+      "kind": "spell",
+      "scope": "foe"
+    },
+    {
+      "entry": {
+        "Nome": "a",
+        "danni": "100d100",
+        "description": "boh",
+        "effetti": "tanti"
+      },
+      "kind": "tecnica",
+      "scope": "foe"
+    },
+    {
+      "entry": {
+        "Nome": "haia",
+        "danni": "5d62",
+        "description": "fa molto male",
+        "effetti": "fa male"
+      },
+      "kind": "tecnica",
+      "scope": "foe"
+    },
+    {
+      "entry": {
+        "Nome": "publeemo",
+        "danni": "1d1",
+        "description": "non mi andava",
+        "effetti": "no"
+      },
+      "kind": "tecnica",
+      "scope": "foe"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 0,
+        "Effetti Negativi": "COSTA 1 INVESTIMENTO",
+        "Effetti Positivi": " ti teletrasporti in un punto a tua scelta nel raggio di 30 piedi ed ottieni +5 MIRA per la prossima azione tattica",
+        "Gittata": 0,
+        "Nome": "ACQUISIZIONE OSTILE",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Consumabile",
+        "Costo": 0,
+        "Effetti Positivi": "Max una volta al giorno, scegli un numero X da 1 a 100; lanci X meno FORTUNA D8 per calcolare il costo della tecnica e X PIù FORTUNA D12 per calcolare i danni inflitti ad un bersaglio singolo oppure i punti ferita rigenerati ad un alleato entro 30 ft (non te stesso). Se spendi più mana di quanto hai a disposizione la tecnica spende i punti mana mancanti come puti vita. SE TI AUTO UCCIDI CON QUESTO INCANTESIMO MUORI PERMANENTEMENTE",
+        "Gittata": 0,
+        "Nome": "ARMA SEGRETA",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 19,
+        "Effetti Positivi": "Difesa: Guadagni una barriera da 3d10 e +2 Difesa per 3 turni.\n\nRitorsione: Chi ti infligge danni trovandosi in mischia subisce 1d10 danni; se pesa meno di 300 kg, viene respinto di 3 metri (10ft).\n\nSensi: I tuoi sensi sono proiettati in un raggio di 10m (30ft, sei cieco e sordo oltre tale distanza).\n\nUtilizzo: Castabile su se stessi o un alleato. Può essere interrotto spendendo un'azione consumabile.\n\nVincolo: L'attivazione termina immediatamente Barriera Cosmica Offensiva.",
+        "Gittata": 0,
+        "Nome": "Barriera Cosmica (benefica)",
+        "TPC Fisico": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza",
+          "ParamTarget": "Costituzione"
+        },
+        "Turni": 3
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 19,
+        "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva è attiva causa il termine immediato di Barriera Cosmica Difensiva",
+        "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non può utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
+        "Gittata": 30,
+        "Nome": "Barriera Cosmica (offensiva)",
+        "TPC": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza",
+          "ParamTarget": "''"
+        },
+        "TPC Fisico": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza",
+          "ParamTarget": "Costituzione"
+        },
+        "TPC Mentale": {
+          "Param1": "Costituzione",
+          "Param2": "Costituzione",
+          "ParamTarget": "Costituzione"
+        },
+        "Turni": 3
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 22,
+        "Effetti Positivi": "Il drago colpisce con un attacco base, creando squame appuntite che coprono 9 quadretti davanti a lui. Infligge 1d10 a chi passa o finisce il turno nell'area.",
+        "Gittata": 45,
+        "Nome": "Battito D'Ali",
+        "TPC Fisico": {
+          "Param1": "Mira",
+          "ParamTarget": "Difesa"
+        },
+        "Turni": 10
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 27,
+        "Effetti Positivi": "3d10 in un riquadro 3x3 il cui centro è da MINIMO 25 piedi di distanza a un MASSIMO di 35.",
+        "Gittata": 35,
+        "Nome": "Bomba Scasso",
+        "TPC": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza"
+        },
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 12,
+        "Effetti Positivi": "2d10 danni",
+        "Gittata": 30,
+        "Nome": "Dardo Cosmico",
+        "TPC": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza"
+        },
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 0,
+        "Effetti Negativi": "Impiega una notevole quantità di tempo per castare.",
+        "Effetti Positivi": "Evoca una copia di mana di un drago giovane.",
+        "Gittata": 0,
+        "Nome": "Evocazione Permanente",
+        "Turni": 999
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 36,
+        "Effetti Positivi": "3d12 danno fuoco. Lancia una fiammata dalla bocca che si dirama a cono.",
+        "Gittata": 30,
+        "Nome": "Fiammata",
+        "TPC Fisico": {
+          "Param1": "Mira",
+          "ParamTarget": "Difesa"
+        },
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 15,
+        "Effetti Negativi": "Se sconfitta o se si allontana da te per più di 100 metri la frusta magica si dissolve.",
+        "Effetti Positivi": "Evoca da una a sei fruste per 10 turni (1 minuto). La frusta magica può combattere analogamente ad un personaggio, può solo fare attacco fisico in mischia, ha 6 piedi di gittata (due quadretti invece del normale attacco in mischia). --- FRUSTA MAGICA: 15 HP, 2 mira, 2 attacco, dado anima 1d10, 1d6 danno normale, 1d8 danno critico.",
+        "Gittata": 30,
+        "Nome": "Frusta Magica",
+        "Turni": 10
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 20,
+        "Effetti Positivi": "Cura il bersaglio per 2d10 punti ferita.",
+        "Gittata": 10,
+        "Nome": "Inversione Cellulare",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 5,
+        "Effetti Positivi": "effettui un attacco fisico in mischia con 10 metri di gittata. ottieni un punto INVESTIMENTO (utilizzabile con altre abilità). I punti INVESTIMENTO DURANO FINO ALLA DURATA DEL COMBATTIMENTO o 1 minuto",
+        "Gittata": 0,
+        "Nome": "INVESTIMENTO",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 12,
+        "Effetti Positivi": "2d10, gittata MINIMO 20 piedi massimo 30 piedi",
+        "Gittata": 30,
+        "Nome": "Miccetta Scasso",
+        "TPC": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza"
+        },
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 17,
+        "Effetti Positivi": "Il bersaglio subisce LIVELLO + MAX(INT,SAG) danni aggiuntivi ogni volta che subisce un danno diretto, i suoi incantesimi costano il doppio del mana e subisce la metà dei danni di ogni incantesimo di danno che lancia con successo",
+        "Gittata": 30,
+        "Nome": "Orribile Avvizzimento di Sirkhart",
+        "TPC Mentale": {
+          "Param1": "Costituzione",
+          "Param2": "Saggezza"
+        },
+        "Turni": 1
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 0,
+        "Effetti Negativi": "COSTO 2 INVESTIMENTO",
+        "Effetti Positivi": "attacco fisico con bonus 10 ATTACCO; rigeneri 1d10 punti ferita a te stesso o alleato entro 30 piedi",
+        "Gittata": 0,
+        "Nome": "PARTE DEL LEONE",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 7,
+        "Effetti Positivi": "Evoca un pugnale di ghiaccio che può essere usato sia in mischia che a distanza. Danni: 1d10.",
+        "Gittata": 10,
+        "Nome": "Pugnale di Ghiaccio",
+        "TPC Fisico": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza"
+        },
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 0,
+        "Effetti Negativi": "COSTA 3 ESSENZA",
+        "Effetti Positivi": "EFFETTI IMPREVEDIBILI",
+        "Gittata": 0,
+        "Nome": "RUNA DEL CAOS",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 0,
+        "Effetti Negativi": "costa 7 essenza; necessario toccare la fronte del bersaglio con la mano",
+        "Effetti Positivi": "Rimuove un ricordo dal bersaglio (i riferimenti ad una persona, una situazione in particolare, le ultime 24 ore, non può far dimenticare di saper fare esempio di respirare)",
+        "Gittata": 0,
+        "Nome": "Runa dell'Oblio",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 0,
+        "Effetti Negativi": "costa 10 essenza",
+        "Effetti Positivi": "Fa tornare in vita un essere senziente umanoide che nonsia un mago delle rune, a patto che l'anima sia disponibile (morto da poche ore / recuperata in altro modo)",
+        "Gittata": 0,
+        "Nome": "runa della resurrezione",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Costo": 20,
+        "Effetti Positivi": "1d10 danni.  Se il bersaglio muore mentre è l'effetto di questo incantesimo invece si rigenera e la sua vita viene prolungata da 6 secondi a un giorno. Scasso può impartire un semplice ordine che il bersaglio eseguirà al meglio delle sue possibilità",
+        "Gittata": 0,
+        "Nome": "Sentenza",
+        "TPC": {
+          "Param1": "Intelligenza"
+        },
+        "Turni": 3
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 20,
+        "Effetti Positivi": "2d10 danno a bersaglio singolo a 20 ft, 3d10 a 10 ft, 4d10 in mischia, 1d10 a 30ft + attacco furtivo (non può bersagliarti con attacco, tecnica o incantesimo a bersaglio singolo) , a 40ft-50ft 1 danno + attacco furtivo",
+        "Gittata": 50,
+        "Nome": "Singolarita",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 0,
+        "Effetti Negativi": "COSTA 1 INVESTIMENTO",
+        "Effetti Positivi": "attacco fisico; per i prossimi 3 turni ogni volta che il bersaglio effettua un'azione tattica puoi effettuare un attacco di opportunità. (non stacka con sè stesso)",
+        "Gittata": 0,
+        "Nome": "SPECULAZIONE",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 14,
+        "Effetti Negativi": "Non puoi effettuare azione di movimento fino al termine del tuo prossimo turno.",
+        "Effetti Positivi": "Raffredda il bersaglio, rallentandolo notevolmente, rendendolo inabile ad effettuare qualsiasi azione. Il bersaglio può schivare normalmente.",
+        "Gittata": 10,
+        "Nome": "Stretta Invernale",
+        "TPC Fisico": {
+          "Param1": "Intelligenza",
+          "Param2": "Saggezza",
+          "ParamTarget": "Costituzione"
+        },
+        "Turni": 1
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 0,
+        "Effetti Negativi": "COSTA 1 INVESTIMENTO",
+        "Effetti Positivi": "attacco fisico; il tuo prossimo attacco fisico sul bersaglio ti rigenera 1d10 punti mana; se rigeneri almeno 5 mana ottieni due INVESTIMENTO",
+        "Gittata": 0,
+        "Nome": "TAGLIO DEI COSTI",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 9,
+        "Effetti Positivi": "Ti muovi istantaneamente e senza generare un attacco di opportunità su posizione bersaglio fino a 30ft di distanza, lasci una nuvola di veleno che infligge 1d10 danni a chi ci passa attraverso o ne rimane all'interno (nessun lancio di dado, il danno entra senza poter schivare o ridurre)",
+        "Gittata": 0,
+        "Nome": "TeleRATsporto",
+        "Turni": 3
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 1,
+        "Effetti Positivi": "test descr",
+        "Gittata": 30,
+        "Nome": "testa",
+        "Turni": 0
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Tattica",
+        "Costo": 10,
+        "Effetti Positivi": "Griglia 4x4, 1d10 danno a tutti coloro che camminano o terminano il turno li. La gittata si misura sul quadrato più lontano della griglia.",
+        "Gittata": 10,
+        "Nome": "Triboli",
+        "Turni": 10
+      },
+      "kind": "spell",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Movimento",
+        "Costo": 4,
+        "Effetto": "Scasso può allontanarsi dai nemici senza provocare attacchi di opportunità.",
+        "Nome": "Evitare di fare la fine del topo"
+      },
+      "kind": "tecnica",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Consumabile",
+        "Costo": 2,
+        "Effetto": "La fata può assumere l’altra forma, spendendo 2 MANA. In forma di Fata il personaggio può VOLARE in altezza, velocità e distanza equivalenti alle capacità di corsa; tutto l’equipaggiamento (set armi 1, set armi2 .testa, corpo, cintura, fodero, stivali, accessori) viene magicamente ridotto in dimensioni e peso e rimane equipaggiato. Anche l’inventario si rimpicciolisce, ma al contrario dell’equipaggiamento IL PESO RIMANE INALTERATO. Gli oggetti estratti dall’inventario fatato tornano immediatamente alla dimensione originale, tuttavia non è vero il viceversa, ovvero OGGETTI NORMALI NON RIMPICCIOLISCONO se ottenuti da una fata IN FORMA DI FATA. In forma di fata tutti i DANNI subiti sono RADDOPPIATI ma ottiene un bonus alla DIFESA pari al LIVELLO.\n\n",
+        "Nome": "Trasformazione"
+      },
+      "kind": "tecnica",
+      "scope": "personal"
+    },
+    {
+      "entry": {
+        "Azione": "Consumabile",
+        "Costo": 2,
+        "Effetto": "La fata può assumere l’altra forma, spendendo 2 MANA. In forma di Fata il personaggio può VOLARE in altezza, velocità e distanza equivalenti alle capacità di corsa; tutto l’equipaggiamento (set armi 1, set armi2 .testa, corpo, cintura, fodero, stivali, accessori) viene magicamente ridotto in dimensioni e peso e rimane equipaggiato. Anche l’inventario si rimpicciolisce, ma al contrario dell’equipaggiamento IL PESO RIMANE INALTERATO. Gli oggetti estratti dall’inventario fatato tornano immediatamente alla dimensione originale, tuttavia non è vero il viceversa, ovvero OGGETTI NORMALI NON RIMPICCIOLISCONO se ottenuti da una fata IN FORMA DI FATA.\nIn forma di fata tutti i DANNI subiti sono RADDOPPIATI ma ottiene un bonus alla DIFESA pari al LIVELLO. \n",
+        "Nome": "Trasformazione"
+      },
+      "kind": "tecnica",
+      "scope": "personal"
+    }
+  ]
+}

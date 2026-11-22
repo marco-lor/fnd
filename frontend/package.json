@@ -101,6 +101,8 @@
     "perf:check-user-data-boundaries": "node scripts/performance/check-user-data-boundaries.js",
     "perf:check-media-boundaries": "node scripts/performance/check-media-boundaries.js",
     "test": "react-scripts test",
+    "grigliata:test:combat": "npm --prefix functions run build && node scripts/grigliata/run-combat-tests.js",
+    "grigliata:test:browser": "npm --prefix functions run build && npm run perf:build && node scripts/grigliata/run-combat-tests.js --browser",
     "task13:test:models": "node --test scripts/performance/task13b-model.test.js scripts/task13/foe-order-migration.test.js",
     "task13:test:emulator": "node scripts/task13/run-emulator-tests.js",
     "eject": "react-scripts eject",
