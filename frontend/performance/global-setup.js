@@ -45,6 +45,7 @@ const NON_BACKGROUND_HTTP_FUNCTIONS = new Set([
   'europe-west1-clientFirebaseConfig',
   'europe-west8-task05ListAdminUsers',
   'europe-west8-task05UpdateResource',
+  'europe-west8-task05UpdateSettings',
   'europe-west8-task05CharacterCreation',
   'europe-west8-task05PrepareConsumable',
   'europe-west8-task05CommitConsumable',

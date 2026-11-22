@@ -31,6 +31,7 @@ import {
 } from '../common/privateMediaAssets';
 import * as grigliataBoardTokenUiModule from './grigliataBoardTokenUi';
 import * as fogVisibilityFiltering from './fogVisibilityFiltering';
+import * as tokenStacksModule from './tokenStacks';
 import { TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE } from './grigliataBoardTokenUi';
 import {
   getDecodedImageBytes,
@@ -448,7 +449,7 @@ jest.mock('react-konva', () => {
     });
 
     return (
-      <div {...domProps} data-konva-type="Stage" ref={elementRef}>
+      <div data-testid="konva-stage" {...domProps} data-konva-type="Stage" ref={elementRef}>
         {children}
       </div>
     );
@@ -2465,9 +2466,10 @@ describe('GrigliataBoard', () => {
     expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  test('updates remembered fog without refiltering or relayering board tokens', async () => {
+  test('updates remembered fog without rebuilding token visibility, layers or stacks', async () => {
     const filter = jest.spyOn(fogVisibilityFiltering, 'filterFogVisibleTokens');
     const splitLayers = jest.spyOn(fogVisibilityFiltering, 'splitFogVisibleTokenRenderLayers');
+    const buildStacks = jest.spyOn(tokenStacksModule, 'buildTokenStackCells');
     try {
       const props = buildProps({
         currentUserId: 'user-1',
@@ -2489,8 +2491,10 @@ describe('GrigliataBoard', () => {
       expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
       expect(filter).toHaveBeenCalled();
       expect(splitLayers).toHaveBeenCalled();
+      expect(buildStacks).toHaveBeenCalled();
       filter.mockClear();
       splitLayers.mockClear();
+      buildStacks.mockClear();
 
       rerender(<GrigliataBoard {...props} fogOfWar={{ ...sight, memoryTiles: [buildMemoryTile()] }} />);
 
@@ -2498,11 +2502,13 @@ describe('GrigliataBoard', () => {
       expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
       expect(filter).not.toHaveBeenCalled();
       expect(splitLayers).not.toHaveBeenCalled();
+      expect(buildStacks).not.toHaveBeenCalled();
 
       rerender(<GrigliataBoard {...props} fogOfWar={{ currentVisibleCells: ['8:0'] }} />);
       expect(await screen.findByTestId('token-node-user-2')).toBeInTheDocument();
       expect(filter).toHaveBeenCalled();
       expect(splitLayers).toHaveBeenCalled();
+      expect(buildStacks).toHaveBeenCalled();
 
       const fixedSight = { currentVisiblePolygons: [[[
         { x: 555, y: 0 },
@@ -2524,6 +2530,7 @@ describe('GrigliataBoard', () => {
       expect(await screen.findByTestId('token-node-user-1')).toBeInTheDocument();
       expect(screen.getByTestId('token-node-user-2')).toBeInTheDocument();
     } finally {
+      buildStacks.mockRestore();
       splitLayers.mockRestore();
       filter.mockRestore();
     }
@@ -4112,6 +4119,309 @@ describe('GrigliataBoard', () => {
       expect(onMoveTokens).toHaveBeenCalled();
     });
     expect(onMoveWallSegment).not.toHaveBeenCalled();
+  });
+
+  describe('token stacks', () => {
+    const stackToken = (tokenId, ownerUid, label, overrides = {}) => ({
+      tokenId,
+      id: tokenId,
+      ownerUid,
+      tokenType: 'character',
+      label,
+      imageUrl: '',
+      placed: true,
+      col: 2,
+      row: 2,
+      sizeSquares: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      ...overrides,
+    });
+    const nyx = (overrides) => stackToken('nyx', 'player-1', 'Nyx', overrides);
+    const frusta = (overrides) => stackToken('frusta', 'player-2', 'Frusta Magica', overrides);
+    const stackProps = (overrides = {}) => buildProps({
+      currentUserId: 'player-1',
+      activeBackground: { ...buildProps().activeBackground, tokenLayerOrder: ['nyx', 'frusta'] },
+      tokens: [nyx(), frusta()],
+      ...overrides,
+    });
+    // Client point at the center of a grid cell under the fitted stage transform.
+    const cellCenterClient = (col, row) => {
+      const stage = screen.getByTestId('konva-stage');
+      const scale = getNumericKonvaProp(stage, 'data-scalex');
+      return {
+        clientX: getNumericKonvaProp(stage, 'data-x') + ((col + 0.5) * grid.cellSizePx * scale),
+        clientY: getNumericKonvaProp(stage, 'data-y') + ((row + 0.5) * grid.cellSizePx * scale),
+      };
+    };
+    // Presses the given canvas node (as Konva would report the top token) at a cell, then drags two cells right.
+    const dragFromTokenNode = (tokenId, { col = 2, row = 2, deltaCol = 2 } = {}) => {
+      const start = cellCenterClient(col, row);
+      const end = cellCenterClient(col + deltaCol, row);
+      fireEvent.mouseDown(screen.getByTestId(`token-node-${tokenId}`), { button: 0, buttons: 1, ...start });
+      fireEvent.mouseMove(window, { buttons: 1, ...end });
+      fireEvent.mouseUp(window, { button: 0, buttons: 0, ...end });
+    };
+    const chooseFromStack = (badgeCellKey, tokenId) => {
+      fireEvent.click(screen.getByTestId(`token-stack-badge-${badgeCellKey}`));
+      fireEvent.click(screen.getByTestId(`token-stack-option-${tokenId}`));
+    };
+    const movedTokenIds = (onMoveTokens) => onMoveTokens.mock.calls[0][0].map(({ tokenId }) => tokenId);
+
+    test('reuses stack geometry on selection and turn changes, and rebuilds it after a move', () => {
+      const buildStacks = jest.spyOn(tokenStacksModule, 'buildTokenStackCells');
+      try {
+        const props = stackProps();
+        const { rerender } = render(<GrigliataBoard {...props} />);
+        expect(buildStacks).toHaveBeenCalled();
+        buildStacks.mockClear();
+
+        chooseFromStack('2:2', 'nyx');
+        rerender(<GrigliataBoard {...props} activeTurnTokenId="nyx" />);
+        expect(screen.getByTestId('token-node-nyx')).toHaveAttribute('data-active-turn', 'true');
+        expect(screen.getByTestId('token-stack-badge-2:2')).toBeInTheDocument();
+        expect(buildStacks).not.toHaveBeenCalled();
+
+        rerender(<GrigliataBoard {...props} activeTurnTokenId="nyx" tokens={[nyx({ col: 3 }), frusta()]} />);
+        expect(buildStacks).toHaveBeenCalled();
+        expect(screen.queryByTestId('token-stack-badge-2:2')).not.toBeInTheDocument();
+      } finally {
+        buildStacks.mockRestore();
+      }
+    });
+
+    test('drags the chosen own token from under another player\'s token', async () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      render(<GrigliataBoard {...stackProps({ onMoveTokens })} />);
+
+      const badge = screen.getByTestId('token-stack-badge-2:2');
+      expect(badge).toHaveTextContent('×2');
+      expect(badge).toHaveAccessibleName(expect.stringContaining('Frusta Magica, Nyx'));
+      // The badge sits in the top-right corner of its own cell: the cell center
+      // stays a token drag target and the neighboring cells stay untouched.
+      const center = cellCenterClient(2, 2);
+      const halfCell = (grid.cellSizePx * getNumericKonvaProp(screen.getByTestId('konva-stage'), 'data-scalex')) / 2;
+      const badgeLeft = Number.parseFloat(badge.style.left);
+      const badgeTop = Number.parseFloat(badge.style.top);
+      const badgeSize = Number.parseFloat(badge.style.width);
+      expect(badgeLeft).toBeGreaterThan(center.clientX);
+      expect(badgeTop + badgeSize).toBeLessThan(center.clientY);
+      expect(badgeLeft + badgeSize).toBeCloseTo(center.clientX + halfCell);
+      expect(badgeTop).toBeCloseTo(center.clientY - halfCell);
+
+      fireEvent.click(badge);
+      expect(badge).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByTestId('token-stack-option-frusta')).toBeDisabled();
+      expect(screen.getByTestId('token-stack-option-nyx')).toHaveFocus();
+
+      fireEvent.click(screen.getByTestId('token-stack-option-nyx'));
+      expect(screen.queryByTestId('token-stack-picker')).not.toBeInTheDocument();
+      expect(badge).toHaveFocus();
+      fireEvent.click(badge);
+      expect(screen.getByTestId('token-stack-option-nyx')).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.keyDown(screen.getByTestId('token-stack-option-nyx'), { key: 'Escape' });
+
+      // Canvas hit-testing reports the top token, as on the real Konva stage.
+      dragFromTokenNode('frusta');
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(movedTokenIds(onMoveTokens)).toEqual(['nyx']);
+      expect(onMoveTokens.mock.calls[0][0][0]).toMatchObject({ col: 4, row: 2 });
+    });
+
+    test('keeps the top token as the default drag target without a choice', async () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      render(<GrigliataBoard {...stackProps({ isManager: true, currentUserId: 'dm-1', onMoveTokens })} />);
+
+      expect(screen.getByTestId('token-stack-badge-2:2')).toBeInTheDocument();
+      dragFromTokenNode('frusta');
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(movedTokenIds(onMoveTokens)).toEqual(['frusta']);
+    });
+
+    test('closes the picker with Escape or an outside press without choosing', () => {
+      const onSelectedTokenIdsChange = jest.fn();
+      render(<GrigliataBoard {...stackProps({ onSelectedTokenIdsChange })} />);
+      const badge = screen.getByTestId('token-stack-badge-2:2');
+
+      fireEvent.click(badge);
+      fireEvent.keyDown(screen.getByTestId('token-stack-option-nyx'), { key: 'Escape' });
+      expect(screen.queryByTestId('token-stack-picker')).not.toBeInTheDocument();
+      expect(badge).toHaveFocus();
+
+      fireEvent.click(badge);
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByTestId('token-stack-picker')).not.toBeInTheDocument();
+      expect(onSelectedTokenIdsChange).not.toHaveBeenCalledWith(['nyx']);
+    });
+
+    test('drags a chosen large token from any cell of its single stack badge', async () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      render(
+        <GrigliataBoard
+          {...stackProps({
+            isManager: true,
+            currentUserId: 'dm-1',
+            onMoveTokens,
+            tokens: [nyx({ col: 1, row: 1, sizeSquares: 2 }), frusta({ col: 1, row: 1, sizeSquares: 2 })],
+          })}
+        />
+      );
+
+      expect(screen.getAllByTestId(/^token-stack-badge-/)).toHaveLength(1);
+      chooseFromStack('1:1', 'nyx');
+      dragFromTokenNode('frusta', { col: 2, row: 2 });
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(movedTokenIds(onMoveTokens)).toEqual(['nyx']);
+    });
+
+    test('drops a stale choice once the chosen token no longer belongs to the viewer', () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      const { rerender } = render(<GrigliataBoard {...stackProps({ onMoveTokens })} />);
+      chooseFromStack('2:2', 'nyx');
+
+      rerender(<GrigliataBoard {...stackProps({ onMoveTokens, tokens: [nyx({ ownerUid: 'player-3' }), frusta()] })} />);
+      dragFromTokenNode('frusta');
+
+      expect(onMoveTokens).not.toHaveBeenCalled();
+    });
+
+    test('uses a stack choice for one drag when large tokens still overlap after the move', async () => {
+      const onMoveTokens = jest.fn();
+      const props = (col) => stackProps({
+        isManager: true,
+        onMoveTokens,
+        tokens: [nyx({ col, sizeSquares: 2 }), frusta({ sizeSquares: 2 })],
+      });
+      const { rerender } = render(<GrigliataBoard {...props(2)} />);
+      chooseFromStack('2:2', 'nyx');
+      dragFromTokenNode('frusta', { deltaCol: -1 });
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(onMoveTokens.mock.calls[0][0]).toMatchObject([{ tokenId: 'nyx', col: 1 }]);
+
+      rerender(<GrigliataBoard {...props(1)} />);
+      dragFromTokenNode('frusta');
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(2));
+      expect(onMoveTokens.mock.calls[1][0]).toMatchObject([{ tokenId: 'frusta', col: 4 }]);
+    });
+
+    test('can drag a covered token through a small opening beyond the first eight sight polygons', async () => {
+      const onMoveTokens = jest.fn();
+      const opening = (left, top, right, bottom) => [[
+        { x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom },
+      ]];
+      render(<GrigliataBoard {...stackProps({
+        activeBackground: { ...buildProps().activeBackground, tokenLayerOrder: ['nyx', 'bora', 'frusta'] },
+        tokens: [
+          nyx({ col: 0, row: 0, sizeSquares: 2 }),
+          stackToken('bora', 'player-1', 'Bora', { col: 1, row: 0, sizeSquares: 2 }),
+          frusta({ col: 1, row: 1 }),
+        ],
+        fogOfWar: { currentVisiblePolygons: [
+          ...Array.from({ length: 8 }, (_, index) => opening(index * 8, 0, index * 8 + 2, 2)),
+          opening(74, 100, 76, 102),
+          opening(83, 83, 86, 86),
+        ] },
+        onMoveTokens,
+      })} />);
+      const stage = screen.getByTestId('konva-stage');
+      // At normal viewing scale the badge covers Bora's three-pixel opening.
+      for (let step = 0; step < 4; step += 1) fireEvent.wheel(stage, { deltaY: -120 });
+      chooseFromStack('1:1', 'bora');
+      const badge = screen.getByTestId('token-stack-badge-1:1');
+      const gridPosition = 84.5 / grid.cellSizePx - 0.5;
+      const point = cellCenterClient(gridPosition, gridPosition);
+      const start = { clientX: Math.round(point.clientX), clientY: Math.round(point.clientY) };
+      const end = cellCenterClient(gridPosition + 2, gridPosition);
+      const badgeLeft = Number.parseFloat(badge.style.left);
+      const badgeTop = Number.parseFloat(badge.style.top);
+      const badgeSize = Number.parseFloat(badge.style.width);
+      expect(start.clientX).toBeGreaterThan(badgeLeft);
+      expect(start.clientX).toBeLessThan(badgeLeft + badgeSize);
+      expect(start.clientY).toBeGreaterThan(badgeTop);
+      expect(start.clientY).toBeLessThan(badgeTop + badgeSize);
+      fireEvent.mouseDown(badge, { button: 0, buttons: 1, ...start });
+      fireEvent.mouseUp(window, { button: 0, buttons: 0, ...start });
+      fireEvent.click(badge);
+      expect(screen.getByRole('dialog', { name: 'Pedine sovrapposte' })).toBeVisible();
+      fireEvent.click(screen.getByTestId('token-stack-option-bora'));
+      expect(onMoveTokens).not.toHaveBeenCalled();
+
+      fireEvent.mouseDown(badge, { button: 0, buttons: 1, ...start });
+      fireEvent.mouseMove(window, { buttons: 1, ...end });
+      fireEvent.mouseUp(window, { button: 0, buttons: 0, ...end });
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(onMoveTokens.mock.calls[0][0]).toMatchObject([{ tokenId: 'bora', col: 3, row: 0 }]);
+    });
+
+    test('Delete targets the chosen token after selecting an area of effect', async () => {
+      const figureId = 'map-1__player-1__circle__1';
+      const onDeleteTokens = jest.fn();
+      const onDeleteAoEFigures = jest.fn();
+      render(<GrigliataBoard {...stackProps({
+        aoeFigures: [{
+          id: figureId, backgroundId: 'map-1', ownerUid: 'player-1', figureType: 'circle', slot: 1,
+          originCell: { col: 5, row: 5 }, targetCell: { col: 6, row: 5 },
+          colorKey: 'ion-cyan', isVisibleToPlayers: true,
+        }],
+        onDeleteTokens,
+        onDeleteAoEFigures,
+      })} />);
+      const point = cellCenterClient(5, 5);
+      fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), { button: 0, buttons: 1, ...point });
+      fireEvent.mouseUp(window, { button: 0, buttons: 0, ...point });
+      expect(screen.getByRole('button', { name: /delete selected aoe figure/i })).toBeInTheDocument();
+
+      chooseFromStack('2:2', 'nyx');
+      fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+      await waitFor(() => expect(onDeleteTokens).toHaveBeenCalledWith(['nyx']));
+      expect(onDeleteAoEFigures).not.toHaveBeenCalled();
+    });
+
+    test('does not revive a choice after its token moves away and back', async () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      const managerProps = (tokens) => stackProps({ isManager: true, currentUserId: 'dm-1', onMoveTokens, tokens });
+      const { rerender } = render(<GrigliataBoard {...managerProps([nyx(), frusta()])} />);
+      chooseFromStack('2:2', 'nyx');
+
+      rerender(<GrigliataBoard {...managerProps([nyx({ col: 6, row: 6 }), frusta()])} />);
+      expect(screen.queryByTestId('token-stack-badge-2:2')).not.toBeInTheDocument();
+      rerender(<GrigliataBoard {...managerProps([nyx(), frusta()])} />);
+      dragFromTokenNode('frusta');
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(movedTokenIds(onMoveTokens)).toEqual(['frusta']);
+    });
+
+    test('ignores a choice when the press lands outside the chosen stack', async () => {
+      const onMoveTokens = jest.fn(() => Promise.resolve(true));
+      render(
+        <GrigliataBoard
+          {...stackProps({
+            isManager: true,
+            currentUserId: 'dm-1',
+            onMoveTokens,
+            tokens: [nyx(), frusta({ sizeSquares: 2 })],
+          })}
+        />
+      );
+      chooseFromStack('2:2', 'nyx');
+
+      // Frusta covers 2:2..3:3; pressing it at 3:3 is outside Nyx's stack.
+      dragFromTokenNode('frusta', { col: 3, row: 3 });
+
+      await waitFor(() => expect(onMoveTokens).toHaveBeenCalledTimes(1));
+      expect(movedTokenIds(onMoveTokens)).toEqual(['frusta']);
+    });
+
+    test('hides stack badges while a board tool owns the pointer', () => {
+      render(<GrigliataBoard {...stackProps({ isRulerEnabled: true })} />);
+      expect(screen.queryByTestId('token-stack-badge-2:2')).not.toBeInTheDocument();
+    });
   });
 
   test('paints fog from a token-covered cell while the fog brush is active', async () => {

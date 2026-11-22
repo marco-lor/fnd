@@ -172,6 +172,7 @@ test('measured Task 05 HTTPS callables never count as background trigger activit
   const summary = summarizeTriggerActivityText([
     invocation('europe-west8-task05UpdateResource'),
     invocation('europe-west8-task05UpdateResource'),
+    invocation('europe-west8-task05UpdateSettings'),
     invocation('europe-west8-task05ListAdminUsers'),
     invocation('europe-west8-task05ListAdminUsers'),
     invocation('europe-west8-task05CharacterCreation'),
@@ -182,6 +183,7 @@ test('measured Task 05 HTTPS callables never count as background trigger activit
   assert.equal(summary.backgroundInvocations, 0);
   assert.deepEqual(summary.counts, {
     'europe-west8-task05UpdateResource': 2,
+    'europe-west8-task05UpdateSettings': 1,
     'europe-west8-task05ListAdminUsers': 2,
     'europe-west8-task05CharacterCreation': 1,
     'europe-west8-task05PrepareConsumable': 1,
