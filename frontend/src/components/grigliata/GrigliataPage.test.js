@@ -7280,7 +7280,6 @@ describe('GrigliataPage', () => {
         tokenId: 'user-1',
         resources: {
           hpCurrent: 27,
-          manaCurrent: 15,
           barrieraCurrent: 10,
         },
         tokenPatch: expect.objectContaining({
@@ -7373,11 +7372,11 @@ describe('GrigliataPage', () => {
     expect(screen.getByLabelText('Current HP')).toHaveValue(28);
     expect(screen.getByLabelText('Current Mana')).toHaveValue(13);
     expect(screen.getByLabelText('Current Shield')).toHaveValue(6);
-    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '31' } });
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '10' } });
     fireEvent.change(screen.getByDisplayValue('Scout'), { target: { value: 'Advance scout' } });
 
     await act(async () => {
-      fireEvent.blur(screen.getByLabelText('Current HP'));
+      fireEvent.blur(screen.getByLabelText('Current Mana'));
     });
 
     expect(mockTask05UpdateGrigliataCharacterResourcesCallable).toHaveBeenCalledWith(
@@ -7386,9 +7385,7 @@ describe('GrigliataPage', () => {
         backgroundId: 'map-1',
         tokenId: 'user-2',
         resources: {
-          hpCurrent: 31,
-          manaCurrent: 13,
-          barrieraCurrent: 6,
+          manaCurrent: 10,
         },
         tokenPatch: expect.objectContaining({
           characterId: 'Bran',
@@ -7409,6 +7406,16 @@ describe('GrigliataPage', () => {
     expect(screen.getByLabelText('Current HP')).toHaveValue(18);
     expect(screen.getByLabelText('Current Mana')).toHaveValue(7);
     expect(screen.getByLabelText('Current Shield')).toHaveValue(9);
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '6' } });
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText('Current Mana'));
+    });
+    expect(firestore.setDoc).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
+      { stats: { manaCurrent: 6 }, updatedAt: { __type: 'serverTimestamp' }, updatedBy: 'user-1' },
+      { merge: true }
+    );
+
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
     fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
 
@@ -7419,15 +7426,9 @@ describe('GrigliataPage', () => {
     expect(firestore.setDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
       expect.objectContaining({
+        combatShieldActivation: { __type: 'deleteField' },
         notes: 'Guard companion',
-        stats: expect.objectContaining({
-          hpCurrent: 18,
-          hpTotal: 12,
-          manaCurrent: 7,
-          manaTotal: 4,
-          shieldCurrent: 11,
-          shieldTotal: 5,
-        }),
+        stats: { shieldCurrent: 11 },
       }),
       { merge: true }
     );
@@ -7559,7 +7560,7 @@ describe('GrigliataPage', () => {
     expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
   });
 
-  test('migrates missing custom token totals from the current values on first save', async () => {
+  test.each([false, true])('fills in custom token totals on first save while preserving damaged shields (%s)', async (damagedShield) => {
     setManagerAuth();
     setDocData('grigliata_tokens/token-2', {
       ownerUid: 'user-2',
@@ -7569,6 +7570,7 @@ describe('GrigliataPage', () => {
       imageUrl: 'https://example.com/wolf.png',
       imagePath: 'grigliata/tokens/user-2/wolf.png',
       notes: 'Companion',
+      ...(damagedShield && { combatShieldActivation: 'server-issued' }),
       stats: {
         hpCurrent: 18,
         manaCurrent: 7,
@@ -7601,6 +7603,21 @@ describe('GrigliataPage', () => {
     expect(screen.getByText(/missing one or more saved totals/i)).toBeInTheDocument();
     firestore.setDoc.mockClear();
 
+    fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
+    await act(async () => {
+      fireEvent.blur(screen.getByDisplayValue('Guard companion'));
+    });
+    expect(mockTransactionInstances.at(-1).set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
+      {
+        notes: 'Guard companion',
+        stats: { hpTotal: 18, manaTotal: 7, ...(!damagedShield && { shieldTotal: 9 }) },
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      },
+      { merge: true }
+    );
+
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
 
     await act(async () => {
@@ -7610,13 +7627,9 @@ describe('GrigliataPage', () => {
     expect(firestore.setDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
       expect.objectContaining({
-        notes: 'Companion',
+        combatShieldActivation: { __type: 'deleteField' },
         stats: expect.objectContaining({
-          hpTotal: 18,
-          hpCurrent: 18,
-          manaTotal: 7,
-          manaCurrent: 7,
-          shieldTotal: 11,
+          ...(damagedShield && { shieldTotal: 11 }),
           shieldCurrent: 11,
         }),
       }),
@@ -7951,6 +7964,14 @@ describe('GrigliataPage', () => {
 
     mockBatchInstances.splice(0, mockBatchInstances.length);
 
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '24' } });
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText('Current Mana'));
+    });
+    const [, manaPatch] = getLastCommittedBatch().set.mock.calls.find(([ref]) => ref.path === 'grigliata_tokens/foe-token-1');
+    expect(manaPatch.stats).toEqual({ manaCurrent: 24 });
+    expect(manaPatch).not.toHaveProperty('combatShieldActivation');
+
     fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '84' } });
     fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '28' } });
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '6' } });
@@ -7965,10 +7986,11 @@ describe('GrigliataPage', () => {
     expect(batch.set).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }),
       expect.objectContaining({
+        combatShieldActivation: { __type: 'deleteField' },
         label: 'Test One',
         dadoAnima: 'd10',
         notes: 'Prime foe',
-        stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 28, manaTotal: 20, shieldCurrent: 6 }),
+        stats: { hpCurrent: 84, manaCurrent: 28, shieldCurrent: 6 },
       }),
       { merge: true }
     );
@@ -12135,7 +12157,7 @@ describe('GrigliataPage', () => {
       );
       expect(batch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_tokens/custom-turn' }),
-        { stats: { shieldCurrent: 0, shieldTotal: 0 },
+        { combatShieldActivation: { __type: 'deleteField' }, stats: { shieldCurrent: 0, shieldTotal: 0 },
           updatedAt: { __type: 'serverTimestamp' }, updatedBy: 'user-1' },
         { merge: true }
       );
@@ -12882,6 +12904,7 @@ describe('GrigliataPage', () => {
       expect(customTokenBatch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_tokens/token-1' }),
         expect.objectContaining({
+          combatShieldActivation: { __type: 'deleteField' },
           stats: {
             shieldCurrent: 0,
             shieldTotal: 0,

@@ -3915,13 +3915,6 @@ export default function GrigliataPage() {
       return false;
     }
 
-    const existingStats = existingToken.stats || {};
-    const nextStats = {
-      ...existingStats,
-      ...(stats || {}),
-      hpCurrent: normalizeCurrentResourceValue(stats?.hpCurrent, existingStats?.hpCurrent ?? 0),
-      manaCurrent: normalizeCurrentResourceValue(stats?.manaCurrent, existingStats?.manaCurrent ?? 0),
-    };
     const nextParametri = normalizeFoeParametri(Parametri, existingToken.Parametri || {});
     const nextDadoAnima = typeof dadoAnima === 'string' ? dadoAnima.trim() : (existingToken.dadoAnima || '');
     const activePlacement = activeBackgroundId
@@ -3936,7 +3929,8 @@ export default function GrigliataPage() {
       batch.set(doc(db, 'grigliata_tokens', tokenId), {
         label: trimmedLabel,
         dadoAnima: nextDadoAnima,
-        stats: nextStats,
+        ...(Object.keys(stats).length && { stats }),
+        ...(stats.shieldCurrent !== undefined && { combatShieldActivation: deleteField() }),
         Parametri: nextParametri,
         notes: normalizeTokenNotesValue(notes),
         updatedAt: serverTimestamp(),
@@ -3971,12 +3965,10 @@ export default function GrigliataPage() {
     imageUrl,
     imagePath,
     hpCurrent,
-    hpTotal,
     manaCurrent,
-    manaTotal,
     shieldCurrent,
-    shieldTotal,
     notes,
+    dirtyFields,
   }) => {
     if (!currentUserId || !tokenId) return false;
 
@@ -4003,9 +3995,9 @@ export default function GrigliataPage() {
           backgroundId: activeBackgroundId,
           tokenId,
           resources: {
-            hpCurrent: normalizeCurrentResourceValue(hpCurrent, 0),
-            manaCurrent: normalizeCurrentResourceValue(manaCurrent, 0),
-            barrieraCurrent: normalizeCurrentResourceValue(shieldCurrent, 0),
+            ...(dirtyFields.hpCurrent && { hpCurrent: normalizeCurrentResourceValue(hpCurrent, 0) }),
+            ...(dirtyFields.manaCurrent && { manaCurrent: normalizeCurrentResourceValue(manaCurrent, 0) }),
+            ...(dirtyFields.shieldCurrent && { barrieraCurrent: normalizeCurrentResourceValue(shieldCurrent, 0) }),
           },
           tokenPatch: {
             characterId: characterId || '',
@@ -4025,29 +4017,40 @@ export default function GrigliataPage() {
         const nextHpCurrent = normalizeCurrentResourceValue(hpCurrent, 0);
         const nextManaCurrent = normalizeCurrentResourceValue(manaCurrent, 0);
         const nextShieldCurrent = normalizeCurrentResourceValue(shieldCurrent, 0);
-        const nextHpTotal = missingResourceTotals.hpTotal
-          ? nextHpCurrent
-          : normalizeNonNegativeNumericValue(hpTotal, 0);
-        const nextManaTotal = missingResourceTotals.manaTotal
-          ? nextManaCurrent
-          : normalizeNonNegativeNumericValue(manaTotal, 0);
-        const nextShieldTotal = missingResourceTotals.shieldTotal
-          ? nextShieldCurrent
-          : normalizeNonNegativeNumericValue(shieldTotal, 0);
-
-        await setDoc(doc(db, 'grigliata_tokens', tokenId), {
-          notes: normalizeTokenNotesValue(notes),
-          stats: {
-            hpTotal: nextHpTotal,
-            hpCurrent: nextHpCurrent,
-            manaTotal: nextManaTotal,
-            manaCurrent: nextManaCurrent,
-            shieldTotal: nextShieldTotal,
+        const stats = {
+          ...(dirtyFields.hpCurrent && { hpCurrent: nextHpCurrent }),
+          ...(missingResourceTotals.hpTotal && { hpTotal: nextHpCurrent }),
+          ...(dirtyFields.manaCurrent && { manaCurrent: nextManaCurrent }),
+          ...(missingResourceTotals.manaTotal && { manaTotal: nextManaCurrent }),
+          ...(dirtyFields.shieldCurrent && {
             shieldCurrent: nextShieldCurrent,
-          },
+            ...(missingResourceTotals.shieldTotal && { shieldTotal: nextShieldCurrent }),
+          }),
+        };
+
+        const tokenRef = doc(db, 'grigliata_tokens', tokenId);
+        const tokenPatch = {
+          ...(dirtyFields.notes && { notes: normalizeTokenNotesValue(notes) }),
+          ...(Object.keys(stats).length && { stats }),
+          ...(dirtyFields.shieldCurrent && { combatShieldActivation: deleteField() }),
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId,
-        }, { merge: true });
+        };
+        if (missingResourceTotals.shieldTotal && !dirtyFields.shieldCurrent) {
+          await runTransaction(db, async (transaction) => {
+            const profile = (await transaction.get(tokenRef)).data();
+            // A damaged shield needs its existing capacity for undo. Recheck it
+            // at commit time in case another player applied the first hit.
+            const fillShieldTotal = !profile?.combatShieldActivation
+              && !hasFiniteOwnNumericField(profile?.stats, 'shieldTotal');
+            transaction.set(tokenRef, fillShieldTotal ? {
+              ...tokenPatch,
+              stats: { ...stats, shieldTotal: normalizeCurrentResourceValue(profile?.stats?.shieldCurrent, 0) },
+            } : tokenPatch, { merge: true });
+          });
+        } else {
+          await setDoc(tokenRef, tokenPatch, { merge: true });
+        }
 
         return true;
       }
@@ -4814,6 +4817,7 @@ export default function GrigliataPage() {
 
     if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
       batch.set(doc(db, 'grigliata_tokens', entry.tokenId), {
+        combatShieldActivation: deleteField(),
         stats: {
           shieldCurrent: 0,
           shieldTotal: 0,
@@ -4996,6 +5000,7 @@ export default function GrigliataPage() {
           .slice(index, index + FIRESTORE_BATCH_SIZE)
           .forEach((tokenId) => {
             batch.set(doc(db, 'grigliata_tokens', tokenId), {
+              combatShieldActivation: deleteField(),
               stats: {
                 shieldCurrent: 0,
                 shieldTotal: 0,

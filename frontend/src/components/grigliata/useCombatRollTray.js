@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
-export default function useCombatRollTray(context, isDefinitiveError) {
+export default function useCombatRollTray(context, isDefinitiveError, isCancelled, isCancelling) {
   const [state, setState] = useState(null);
   const current = useRef(null);
   const show = next => {
@@ -13,8 +13,13 @@ export default function useCombatRollTray(context, isDefinitiveError) {
     return () => { current.current = null; };
   }, [context]);
 
+  useLayoutEffect(() => {
+    if (isCancelled(current.current?.combatId)) show(null);
+  });
+
   const prepare = (plan, origin = document.activeElement) => {
-    if (!context || current.current?.phase === 'sending') return undefined;
+    if (!context || (current.current?.phase === 'sending' && !isCancelled(current.current.combatId))
+      || isCancelled(plan.combatId) || isCancelling(plan.combatId)) return undefined;
     const id = {};
     let declarationChanged = false;
     const close = () => {
@@ -24,18 +29,24 @@ export default function useCombatRollTray(context, isDefinitiveError) {
     };
     const throwDice = async gesture => {
       const tray = current.current;
-      if (tray?.id !== id || !['ready', 'error'].includes(tray.phase)) return;
+      if (tray?.id !== id || !['ready', 'error'].includes(tray.phase)
+        || isCancelled(plan.combatId) || isCancelling(plan.combatId)) return;
       const sent = { ...tray, phase: 'sending', error: undefined, gesture, releasedAt: performance.now() };
       show(sent);
       try {
         const { data } = await plan.send();
         if (current.current === sent) {
-          show({ ...sent, phase: 'result', rolls: data?.rolls, gesture, combatId: data?.combatId || plan.combatId,
+          const combatId = data?.combatId || plan.combatId;
+          if (isCancelled(combatId)) {
+            show(null);
+            return;
+          }
+          show({ ...sent, phase: 'result', rolls: data?.rolls, gesture, combatId,
             damage: plan.kind === 'damage' ? data?.damage : undefined });
         }
       } catch (error) {
         if (current.current === sent) {
-          if (declarationChanged) {
+          if (declarationChanged || isCancelled(plan.combatId)) {
             show(null);
             return;
           }
@@ -54,5 +65,5 @@ export default function useCombatRollTray(context, isDefinitiveError) {
     };
   };
 
-  return [state?.context === context ? state : null, prepare];
+  return [state?.context === context && !isCancelled(state.combatId) ? state : null, prepare];
 }

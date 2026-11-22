@@ -518,6 +518,7 @@ service cloud.firestore {
           "dadoAnima",
           "notes",
           "stats",
+          "combatShieldActivation",
           "Parametri",
           "spells",
           "tecniche"
@@ -567,6 +568,22 @@ service cloud.firestore {
             && data.spells is list
             && data.tecniche is list
           )
+        );
+    }
+
+    function grigliataTokenShieldStat(data, field) {
+      let stats = data.get("stats", {});
+      return stats is map ? stats.get(field, null) : null;
+    }
+
+    function isValidGrigliataTokenShieldUpdate(data, existingData) {
+      return !data.keys().hasAny(["combatShieldActivation"])
+        || (
+          data.combatShieldActivation == existingData.get("combatShieldActivation", null)
+          && data.combatShieldActivation is string
+          && data.tokenType == existingData.tokenType
+          && grigliataTokenShieldStat(data, "shieldCurrent") == grigliataTokenShieldStat(existingData, "shieldCurrent")
+          && grigliataTokenShieldStat(data, "shieldTotal") == grigliataTokenShieldStat(existingData, "shieldTotal")
         );
     }
 
@@ -2315,6 +2332,7 @@ service cloud.firestore {
         );
 
       allow create: if isActiveSignedIn()
+        && !request.resource.data.keys().hasAny(["combatShieldActivation"])
         && isValidGrigliataTokenProfile(
           request.resource.data,
           tokenId,
@@ -2337,6 +2355,7 @@ service cloud.firestore {
         && !isGrigliataTokenPendingDeletion(resource.data)
         && grigliataCustomInstanceParentAcceptsMutation(resource.data, tokenId)
         && request.resource.data.ownerUid == resource.data.ownerUid
+        && isValidGrigliataTokenShieldUpdate(request.resource.data, resource.data)
         && (
           (
             isValidGrigliataTokenProfile(

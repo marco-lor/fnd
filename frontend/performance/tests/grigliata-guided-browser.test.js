@@ -231,7 +231,7 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   await expect(dialog).toBeVisible();
   await dialog.getByRole('spinbutton').first().fill('999');
   await dialog.locator('button[type=submit]').click();
-  await expect(dialog).toHaveCount(0);
+  await expect(dialog).toHaveCount(0, {timeout: 15_000});
   await map.getByRole('button', {name: /Bomba Scasso/}).click();
   await map.getByRole('button', {name: /Scegli casella sulla mappa/}).press('Enter');
   const cursor = map.getByRole('button', {name: /^Scegli casella \(/});

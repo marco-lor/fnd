@@ -12,8 +12,8 @@ export type CombatScope = "equipped" | "personal" | "common";
 type TargetMode = "single" | "multiple" | "self" | "area" |
   "point" | "ground" | "manual";
 export type CombatStatus = "waiting" | "retry" | "done";
-// Only the event waits for damage: its targets are done once the defense is answered.
-export type CombatEventStatus = CombatStatus | "awaitingDamage";
+// Targets are done once the defense is answered. The event tracks the remaining damage steps.
+export type CombatEventStatus = CombatStatus | "awaitingDamage" | "awaitingConfirmation" | "cancelled";
 type CombatOutcome = "tie" | "hit" | "resisted" | "accepted" | "declined";
 export type AnimaDie = number;
 type Fields = Record<string, unknown>;
@@ -641,13 +641,20 @@ export const compareCombatRolls = (attack: number, defense: number): CombatOutco
   return attack > defense ? "hit" : "resisted";
 };
 
-// A re-roll first, then a defense, then a damage throw (of a target or of a targetless action).
+type ConfirmationTarget = Pick<CombatTarget, "placementId" | "status" | "outcome" | "damage" | "damageApplied">;
+
+export const combatNeedsConfirmation = (targets: ConfirmationTarget[], effects: CombatEffect[]): boolean =>
+  targets.some((target) => !target.damageApplied && combatDamageEligible(target, effects));
+
+// A re-roll, a defense, a damage throw, then confirmation of concrete damage.
 export const combatStatus = (
-  targets: {status: CombatStatus; pendingDamage?: unknown}[], pendingDamage: unknown = null
+  targets: {status: CombatStatus; pendingDamage?: unknown}[], pendingDamage: unknown = null,
+  needsConfirmation = false
 ): CombatEventStatus => {
   if (targets.some(({status}) => status === "retry")) return "retry";
   if (targets.some(({status}) => status === "waiting")) return "waiting";
-  return pendingDamage || targets.some((target) => target.pendingDamage) ? "awaitingDamage" : "done";
+  if (pendingDamage || targets.some((target) => target.pendingDamage)) return "awaitingDamage";
+  return needsConfirmation ? "awaitingConfirmation" : "done";
 };
 
 // The faces of a check roll, as the tray shows them.

@@ -697,7 +697,7 @@
       "activation": "active",
       "requiredIndexId": "grigliata-combat-actions-actor-pending",
       "queryKey": "grigliata.combat-actions.actor-pending.subscribe.v1",
-      "currentScope": "Every unresolved action launched by the authenticated player on the active background, including waiting, retry and awaitingDamage"
+      "currentScope": "Every unresolved action launched by the authenticated player on the active background, including outstanding damage confirmations"
     },
     {
       "id": "grigliata-combat-actions-manager-pending",
@@ -706,6 +706,14 @@
       "requiredIndexId": "grigliata-combat-actions-manager-pending",
       "queryKey": "grigliata.combat-actions.manager-pending.subscribe.v1",
       "currentScope": "Every unresolved action on the active background for managers, including old actions with damage pending for one target while another awaits a response or reroll"
+    },
+    {
+      "id": "grigliata-combat-actions-manager-cancelled",
+      "ownerTask": "Grigliata Combat",
+      "activation": "active",
+      "requiredIndexId": "grigliata-combat-actions-manager-cancelled",
+      "queryKey": "grigliata.combat-actions.manager-cancelled.subscribe.v1",
+      "currentScope": "The last 40 cancellations on the active background, including older rolls with refunds to verify"
     },
     {
       "id": "grigliata-combat-requests-pending",
@@ -829,6 +837,16 @@
           "fieldPath": "status",
           "order": "ASCENDING"
         }
+      ]
+    },
+    {
+      "id": "grigliata-combat-actions-manager-cancelled",
+      "collectionGroup": "grigliata_combat_actions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "backgroundId", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "updatedAt", "order": "DESCENDING"}
       ]
     },
     {

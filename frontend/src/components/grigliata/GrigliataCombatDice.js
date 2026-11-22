@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FaTimes } from 'react-icons/fa';
-import { attackDiceNotation } from './combatPresentation';
+import { attackDiceNotation, COMBAT_CONFIRMATION_STATUS } from './combatPresentation';
 import { buildPlacementDocId, getGridCellPositionPx } from './boardUtils';
 import './grigliataCombat.css';
 
@@ -161,6 +161,7 @@ const RESULT_STATUS = {
   waiting: 'In attesa di risposta',
   retry: 'Parità · rilancio nel pannello Combattimento',
   awaitingDamage: 'In attesa del tiro di danno',
+  awaitingConfirmation: COMBAT_CONFIRMATION_STATUS,
 };
 
 export function CombatMapDamage({ nextDamage }) {

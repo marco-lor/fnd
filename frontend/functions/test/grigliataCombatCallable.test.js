@@ -1,26 +1,34 @@
 const assert = require('node:assert/strict');
+const {randomBytes, randomUUID} = require('node:crypto');
 const Module = require('node:module');
 const test = require('node:test');
+const {Timestamp} = require('firebase-admin/firestore');
 
 // The callable handlers run on in-memory documents with fixed dice: no network.
 let db;
 let dice = () => 1;
 const stubs = {
-  'crypto': {randomInt: (minimum, maximum) => dice(minimum, maximum)},
+  'crypto': {randomInt: (minimum, maximum) => dice(minimum, maximum), randomBytes, randomUUID},
+  'firebase-admin': {firestore: () => db},
   'firebase-admin/app': {getApp: () => ({options: {projectId: 'demo-fnd-perf'}})},
   'firebase-admin/firestore': {
     getFirestore: () => db,
+    Timestamp,
     FieldValue: {serverTimestamp: () => 'now', increment: value => value},
   },
 };
 const loadModule = Module._load;
 Module._load = function(request, parent, ...rest) {
-  return stubs[request] && parent?.filename.endsWith('grigliataCombat.js')
+  return stubs[request] && /(?:grigliataCombat|userDataCommands)\.js$/.test(parent?.filename ?? '')
     ? stubs[request]
     : loadModule.call(this, request, parent, ...rest);
 };
 process.env.FUNCTIONS_EMULATOR = 'true';
 const {getGrigliataCombatArsenal, mutateGrigliataCombat} = require('../lib/grigliataCombat');
+const {
+  task05AdjustGold, task05CommitConsumable, task05ConsumeTurnEffects, task05PrepareConsumable,
+  task05UpdateGrigliataCharacterResources, task05UpdateResource,
+} = require('../lib/userDataCommands');
 Module._load = loadModule;
 
 const merge = (target = {}, delta) => Object.entries(delta).reduce((result, [key, value]) => ({
@@ -40,6 +48,13 @@ const storable = (value, inArray = false) => {
 
 const memoryFirestore = () => {
   const documents = new Map();
+  const versions = new Map();
+  let commit = 0;
+  const write = (path, data) => {
+    const version = String(commit).padStart(10, '0');
+    versions.set(path, {createTime: versions.get(path)?.createTime ?? version, updateTime: version});
+    return documents.set(path, data);
+  };
   // Every read, tagged with how it was made: `transaction` documents and queries join the
   // transaction's read set; a `query` runs outside it.
   const reads = [];
@@ -51,7 +66,7 @@ const memoryFirestore = () => {
   const snapshot = ref => {
     const value = structuredClone(documents.get(ref.path));
     return {
-      id: ref.id, ref, exists: value !== undefined, data: () => value,
+      id: ref.id, ref, exists: value !== undefined, data: () => value, ...versions.get(ref.path),
       get: field => field.split('.').reduce((node, key) => node?.[key], value),
     };
   };
@@ -74,18 +89,18 @@ const memoryFirestore = () => {
         // Top-level field paths only: each named field is replaced whole, the rest is kept.
         assert.ok(options.mergeFields.every(field => !field.includes('.') && field in value));
         const named = Object.fromEntries(options.mergeFields.map(field => [field, value[field]]));
-        return documents.set(ref.path, {...documents.get(ref.path), ...named});
+        return write(ref.path, {...documents.get(ref.path), ...named});
       }
-      return documents.set(ref.path, options?.merge ? merge(documents.get(ref.path), value) : value);
+      return write(ref.path, options?.merge ? merge(documents.get(ref.path), value) : value);
     },
     create: (ref, data) => {
       assert.equal(documents.has(ref.path), false);
       writes.push(ref.path);
-      documents.set(ref.path, storable(data));
+      write(ref.path, storable(data));
     },
     update: (ref, data) => {
       writes.push(ref.path);
-      documents.set(ref.path, {...documents.get(ref.path), ...storable(data)});
+      write(ref.path, {...documents.get(ref.path), ...storable(data)});
     },
   };
   const query = (path, match) => ({
@@ -111,14 +126,15 @@ const memoryFirestore = () => {
       for (; aborts > 0; aborts -= 1) {
         await operation({...transaction, set: () => {}, create: () => {}, update: () => {}});
       }
+      commit += 1;
       return operation(transaction);
     },
     abortNext: (count = 1) => { aborts = count; },
     onNextQuery: change => { afterQuery = change; },
     reads,
     writes,
-    seed: (path, data) => documents.set(path, structuredClone(data)),
-    remove: path => documents.delete(path),
+    seed: (path, data) => { commit += 1; return write(path, structuredClone(data)); },
+    remove: path => { versions.delete(path); return documents.delete(path); },
     read: path => documents.get(path),
     find: (prefix, matches) => [...documents].find(([path, value]) => path.startsWith(prefix) && matches(value))?.[1],
   };
@@ -726,13 +742,17 @@ test('the board DM applies agreed damage once, barrier first, then PF', async ()
   const before = journal(combatId);
   const receipt = await applyDamage(combatId);
   assert.deepEqual(receipt, {combatId, damageApplied: {amount: 7}});
-  assert.deepEqual(resources(defender), {
+  const {combatShieldActivation, ...balances} = resources(defender);
+  assert.equal(typeof combatShieldActivation, 'string');
+  assert.equal(db.read(`${privateReceiptPath(combatId)}/damage/${place(defender)}`).shieldActivation, combatShieldActivation);
+  assert.deepEqual(balances, {
     stats: {hpCurrent: 97, manaCurrent: 100, barrieraCurrent: 0, barrieraTotal: 6, essenzaCurrent: 5},
     schemaVersion: 2, revision: 1, updatedAt: 'now', updatedBy: dm,
   });
   // The journal keeps the agreed amount on that target and nothing else: no balances, no split.
   const after = journal(combatId);
-  assert.deepEqual(after, {...before, updatedAt: 'now', targets: [{...before.targets[0], damageApplied: {amount: 7}}]});
+  assert.deepEqual(after, {...before, status: 'done', resolvedAt: 'now', updatedAt: 'now',
+    targets: [{...before.targets[0], damageApplied: {amount: 7}}]});
 
   // A retry, whatever its amount or critical, returns the first receipt and leaves resources alone.
   const applied = structuredClone(resources(defender));
@@ -904,7 +924,9 @@ test('a foe loses its token shield then PF; stale boards, tokens and accounts ar
   const combatId = await weaponHit(foe, dm);
   assert.deepEqual(await applyDamage(combatId, {targetPlacementId: place(foe), amount: 20}),
     {combatId, damageApplied: {amount: 20}});
-  assert.deepEqual(db.read(`grigliata_tokens/${foe}`), {
+  const {combatShieldActivation, ...damagedFoe} = db.read(`grigliata_tokens/${foe}`);
+  assert.equal(typeof combatShieldActivation, 'string');
+  assert.deepEqual(damagedFoe, {
     ownerUid: dm, label: foe, ...foeToken, stats: {...foeStats, shieldCurrent: 0, hpCurrent: 0},
     updatedAt: 'now', updatedBy: dm,
   });
@@ -991,7 +1013,9 @@ test('the target owner applies their own damage; anyone else gets one answer wha
   // The owner confirms the hit's 9 damage.
   const receipt = await applyDamage(combatId, {amount: 9}, defender);
   assert.deepEqual(receipt, {combatId, damageApplied: {amount: 9}});
-  assert.deepEqual(resources(defender), {
+  const {combatShieldActivation, ...balances} = resources(defender);
+  assert.equal(typeof combatShieldActivation, 'string');
+  assert.deepEqual(balances, {
     stats: {hpCurrent: 95, manaCurrent: 100, barrieraCurrent: 0},
     schemaVersion: 2, revision: 1, updatedAt: 'now', updatedBy: defender,
   });
@@ -1369,6 +1393,330 @@ const rollDamage = (combatId, options = {}, uid = attacker) => call(uid, {
   command: 'rollDamage', combatId, targetPlacementId: place(defender), round: 1, ...options,
 });
 const die = (sides, value) => ({sides, value});
+
+const cancel = (combatId, uid = attacker) => call(uid, {command: 'cancel', combatId});
+const cancellationDetails = (combatId, uid = dm) => call(uid, {command: 'getCancellationDetails', combatId});
+const privateReceiptPath = combatId => `grigliata_combat_receipts/${combatId}`;
+
+const damageOneOfTwoTargets = async (token = defender) => {
+  seedElf();
+  seedSpell('volley', {Nome: 'Raffica', Costo: 0, combat: {mode: 'multiple', targetCount: 2, damageExpr: '4'}});
+  const {combatId} = await launch('spell', 'personal:volley', {targetPlacementIds: [place(token), place('elf')]});
+  await applyDamage(combatId, {targetPlacementId: place(token), amount: 2});
+  return combatId;
+};
+
+const spendHomeMana = () => updateDefenderResource({resource: 'mana', mode: 'delta', value: -3});
+const updateDefenderResource = data => task05UpdateResource.run({
+  auth: {uid: defender}, data: {operationId: `resource-test-${++operations}`, ...data},
+});
+
+for (const tokenType of ['character', 'foe']) {
+  test(`cancellation restores a ${tokenType}'s barrier after it pays only PM for another spell`, async () => {
+    damageFixture();
+    const spell = {Nome: 'Dardo Cosmico', Costo: 3};
+    if (tokenType === 'character') {
+      seedStats(defender, {barrieraCurrent: 5, barrieraTotal: 5});
+      db.seed(`users/${defender}/spells/bolt`, spell);
+    } else {
+      seedPawn(defender, 1, {tokenType, Parametri: parametri, dadoAnima: 'd12',
+        stats: {...stats, shieldCurrent: 5, shieldTotal: 5}, spells: [spell]}, dm);
+    }
+    const combatId = await damageOneOfTwoTargets();
+    seedTurn(defender);
+    const uid = tokenType === 'character' ? defender : dm;
+    const actorPlacementId = place(defender);
+    const {actions} = await getGrigliataCombatArsenal.run({auth: {uid}, data: {backgroundId: board, actorPlacementId}});
+    const bolt = actions.find(({name}) => name === spell.Nome);
+    assert.ok(bolt);
+    const {combatId: boltId} = await call(uid, {
+      command: 'launch', operationId: `combat-test-${++operations}`, backgroundId: board,
+      actorPlacementId, targetPlacementIds: [place(attacker)], kind: 'spell', actionId: bolt.id,
+    });
+    assert.deepEqual(journal(boltId).cost, {hp: 0, mana: 3, essenza: 0, extra: null});
+    assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+    const balances = tokenType === 'character' ? resources(defender).stats : db.read(`grigliata_tokens/${defender}`).stats;
+    assert.equal(balances[tokenType === 'character' ? 'barrieraCurrent' : 'shieldCurrent'], 5);
+    assert.equal(balances.manaCurrent, 97);
+  });
+}
+
+test('a Home mana spend preserves the continuity of a legacy barrier', async () => {
+  damageFixture();
+  seedStats(defender, {barriera: 5});
+  const combatId = await damageOneOfTwoTargets();
+  const damagePath = `${privateReceiptPath(combatId)}/damage/${place(defender)}`;
+  const {shieldActivation, ...legacyReceipt} = db.read(damagePath);
+  db.seed(damagePath, legacyReceipt);
+  await spendHomeMana();
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+  assert.deepEqual(resources(defender).stats, {...stats, manaCurrent: 97, barriera: 5, barrieraCurrent: 5});
+});
+
+test('a PM potion keeps its gain when cancelling a pending character barrier hit', async () => {
+  damageFixture();
+  seedStats(defender, {manaCurrent: 99, manaTotal: 100, barrieraCurrent: 5, barrieraTotal: 5});
+  const combatId = await damageOneOfTwoTargets();
+  const inventoryId = 'potion';
+  db.seed(`users/${defender}/inventory/${inventoryId}`, {
+    quantity: 2,
+    currentSnapshot: {
+      type: 'consumabile', Parametri: {Special: {'Rigenera Dado Anima Mana': {4: 1}}},
+    },
+  });
+  const {preparationId} = await task05PrepareConsumable.run({auth: {uid: defender}, data: {
+    operationId: `resource-test-${++operations}`, inventoryId, resource: 'mana',
+  }});
+  const potion = await task05CommitConsumable.run({auth: {uid: defender}, data: {
+    operationId: `resource-test-${++operations}`, preparationId,
+  }});
+  assert.equal(potion.resourceValue, 100);
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+  assert.deepEqual(resources(defender).stats, {...stats, manaTotal: 100, barrieraCurrent: 5, barrieraTotal: 5});
+});
+
+test('the DM gold adjustment survives a character barrier refund', async () => {
+  damageFixture();
+  seedStats(defender, {gold: 10, barrieraCurrent: 5, barrieraTotal: 5});
+  const combatId = await damageOneOfTwoTargets();
+  const gold = await task05AdjustGold.run({auth: {uid: dm}, data: {
+    operationId: `resource-test-${++operations}`, userId: defender, delta: 2,
+  }});
+  assert.equal(gold.newGold, 12);
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+  assert.deepEqual(resources(defender).stats, {...stats, gold: 12, barrieraCurrent: 5, barrieraTotal: 5});
+});
+
+const editGrigliataDefender = (changes, tokenPatch) => task05UpdateGrigliataCharacterResources.run({
+  auth: {uid: defender}, data: {
+    operationId: `resource-test-${++operations}`, backgroundId: board, tokenId: defender,
+    resources: changes, tokenPatch,
+  },
+});
+
+test('editing only PM in Grigliata preserves the barrier refund', async () => {
+  damageFixture();
+  seedStats(defender, {barrieraCurrent: 5, barrieraTotal: 5});
+  const combatId = await damageOneOfTwoTargets();
+  await editGrigliataDefender({manaCurrent: 97}, {notes: 'A note'});
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+  assert.deepEqual(resources(defender).stats, {...stats, manaCurrent: 97, barrieraCurrent: 5, barrieraTotal: 5});
+});
+
+test('an explicit Grigliata barrier edit breaks continuity even at the same value', async () => {
+  damageFixture();
+  seedStats(defender, {barrieraCurrent: 5, barrieraTotal: 5});
+  const combatId = await damageOneOfTwoTargets();
+  await editGrigliataDefender({barrieraCurrent: 3}, {});
+  await editGrigliataDefender({manaCurrent: 97}, {});
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: true});
+  assert.deepEqual(resources(defender).stats, {...stats, manaCurrent: 97, barrieraCurrent: 3, barrieraTotal: 5});
+});
+
+for (const endBarrier of ['reset', 'expiry']) {
+  test(`cancellation leaves an identical reactivation alone after barrier ${endBarrier}`, async () => {
+    damageFixture();
+    const setBarrier = (value, turns, totalValue = value) => updateDefenderResource({
+      resource: 'barriera', mode: 'set', value, totalValue, remainingTurns: turns, totalTurns: turns,
+    });
+    await setBarrier(5, 1);
+    const combatId = await damageOneOfTwoTargets();
+    const damaged = resources(defender).stats;
+    if (endBarrier === 'reset') {
+      await setBarrier(0, 0);
+    } else {
+      await task05ConsumeTurnEffects.run({auth: {uid: dm},
+        data: {userId: defender, operationId: `resource-test-${++operations}`}});
+    }
+    assert.equal(resources(defender).stats.barrieraTotal, 0);
+    await setBarrier(3, 1, 5);
+    assert.deepEqual(resources(defender).stats, damaged);
+    await spendHomeMana();
+    assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: true});
+    assert.deepEqual(resources(defender).stats, {...damaged, manaCurrent: 97});
+  });
+}
+
+test('cancelling one hit keeps a later hit on the same barrier refundable', async () => {
+  damageFixture();
+  seedStats(defender, {barrieraCurrent: 5, barrieraTotal: 5});
+  const first = await damageOneOfTwoTargets();
+  const second = await damageOneOfTwoTargets();
+  assert.equal(resources(defender).stats.barrieraCurrent, 1);
+  assert.deepEqual((await cancel(first)).cancellation, {needsReview: false});
+  assert.equal(resources(defender).stats.barrieraCurrent, 3);
+  assert.deepEqual((await cancel(second)).cancellation, {needsReview: false});
+  assert.equal(resources(defender).stats.barrieraCurrent, 5);
+});
+
+test('a later combat write cannot vouch for a replaced token shield', async () => {
+  damageFixture();
+  const path = `grigliata_tokens/${defender}`;
+  seedPawn(defender, 1, {tokenType: 'custom', stats: {...stats, shieldCurrent: 5, shieldTotal: 5}});
+  const first = await damageOneOfTwoTargets();
+  const damaged = db.read(path);
+  const replacement = {...damaged};
+  delete replacement.combatShieldActivation;
+  db.seed(path, {...replacement, stats: {...replacement.stats, shieldCurrent: 0, shieldTotal: 0}});
+  db.seed(path, replacement);
+  const second = await damageOneOfTwoTargets();
+  assert.notEqual(db.read(path).combatShieldActivation, damaged.combatShieldActivation);
+  assert.deepEqual((await cancel(first)).cancellation, {needsReview: true});
+  assert.equal(db.read(path).stats.shieldCurrent, 1);
+  assert.deepEqual((await cancel(second)).cancellation, {needsReview: false});
+  assert.equal(db.read(path).stats.shieldCurrent, 3);
+});
+
+test('a non-expiring turn preserves continuity even when it changes the barrier timer', async () => {
+  damageFixture();
+  await updateDefenderResource({resource: 'barriera', mode: 'set', value: 5, totalValue: 5, remainingTurns: 2, totalTurns: 2});
+  const combatId = await damageOneOfTwoTargets();
+  await task05ConsumeTurnEffects.run({auth: {uid: dm},
+    data: {userId: defender, operationId: `resource-test-${++operations}`}});
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: false});
+  assert.equal(resources(defender).stats.barrieraCurrent, 5);
+  assert.equal(resources(defender).active_turn_effect.barriera.remainingTurns, 1);
+});
+
+test('zero damage awaits confirmation and cancellation blocks every previously returned reply', async () => {
+  damageFixture();
+  seedSpell('zero', {Nome: 'Zero', Costo: 3, combat: {damageExpr: '1d4 - 1'}});
+  const operationId = 'cancel-guided-zero';
+  const launchZero = () => guided('spell', 'personal:zero', {operationId});
+  const {combatId} = await launchZero();
+  assert.equal(journal(combatId).status, 'awaitingDamage');
+  assert.equal((await rollDamage(combatId)).damage, 0);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['awaitingConfirmation', null]);
+  assert.deepEqual(await cancel(combatId), {combatId, status: 'cancelled', cancellation: {needsReview: false}});
+  assert.equal(resources(attacker).stats.manaCurrent, 100);
+  assert.deepEqual(requestOf(combatId), {
+    combatId, backgroundId: board, ownerUid: defender, status: 'cancelled', createdAt: 'now', updatedAt: 'now',
+  });
+  const cancelled = {code: 'failed-precondition', message: /annullata/};
+  await assert.rejects(launchZero, cancelled);
+  await assert.rejects(rollDamage(combatId), cancelled);
+  await assert.rejects(applyDamage(combatId, {amount: 0}, defender), cancelled);
+
+  const weapon = await weaponHit();
+  assert.equal(journal(weapon).status, 'awaitingConfirmation');
+  await confirmCritical(weapon, 13);
+  await cancel(weapon, dm);
+  await assert.rejects(defend(weapon), cancelled);
+  await assert.rejects(confirmCritical(weapon, 13), cancelled);
+  const tied = await launch('weapon', 'weaponMain');
+  await defend(tied.combatId, {defense: 4});
+  const retry = () => call(attacker, {command: 'retry', combatId: tied.combatId, targetPlacementId: place(defender), round: 1});
+  await retry();
+  await cancel(tied.combatId);
+  await assert.rejects(retry, cancelled);
+});
+
+test('cancellation rebases and aggregates real cost and self damage, even after changing maps and retrying', async () => {
+  damageFixture();
+  seedElf();
+  seedStats(attacker, {hpCurrent: 10, manaCurrent: 2, essenzaCurrent: 5, barrieraCurrent: 3, barrieraTotal: 6});
+  seedSpell('volley', {Nome: 'Raffica', Costo: 5, combat: {
+    mode: 'multiple', targetCount: 2, allowSelf: true, damageExpr: '7', extraResource: {name: 'Essenza', amount: 2},
+  }});
+  const {combatId} = await launch('spell', 'personal:volley', {
+    targetPlacementIds: [place(attacker), place('elf')], confirmHp: true, maxHpCost: 3, confirmExtra: true,
+  });
+  assert.equal(journal(combatId).status, 'awaitingConfirmation');
+  assert.deepEqual(journal(combatId).cost, {hp: 3, mana: 2, essenza: 2, extra: {name: 'Essenza', amount: 2}});
+  assert.deepEqual(db.read(privateReceiptPath(combatId)).cost.amounts, {hpCurrent: 3, manaCurrent: 2, essenzaCurrent: 2});
+  await applyDamage(combatId, {targetPlacementId: place(attacker), amount: 20});
+  assert.deepEqual(db.read(`${privateReceiptPath(combatId)}/damage/${place(attacker)}`).amounts,
+    {hpCurrent: 7, barrieraCurrent: 3});
+  assert.deepEqual(resources(attacker).stats, {hpCurrent: 0, manaCurrent: 0, essenzaCurrent: 3, barrieraCurrent: 0, barrieraTotal: 6});
+  assert.equal(journal(combatId).status, 'awaitingConfirmation');
+  seedStats(attacker, {hpCurrent: 1, manaCurrent: 3, essenzaCurrent: 6, barrieraCurrent: 1, barrieraTotal: 6});
+  db.remove(`grigliata_token_placements/${place(attacker)}`);
+  db.remove(`grigliata_tokens/${attacker}`);
+  db.seed('grigliata_state/current', {activeBackgroundId: 'another-map'});
+  const resourcePath = `users/${attacker}/state/resources`;
+  const oldWrites = db.writes.length;
+  db.abortNext();
+  const receipt = await cancel(combatId, dm);
+  assert.deepEqual(receipt.cancellation, {needsReview: true});
+  assert.deepEqual(resources(attacker).stats, {hpCurrent: 11, manaCurrent: 5, essenzaCurrent: 8, barrieraCurrent: 1, barrieraTotal: 6});
+  assert.deepEqual((await cancellationDetails(combatId)).corrections.map(item => [item.reason, item.amounts]),
+    [['barrierAmbiguous', {barrieraCurrent: 3}]]);
+  assert.equal(db.writes.slice(oldWrites).filter(path => path === resourcePath).length, 1);
+  assert.equal(requestOf(combatId, attacker).status, 'cancelled');
+  assert.equal(requestOf(combatId, 'elf').status, 'cancelled');
+  await assert.rejects(applyDamage(combatId, {targetPlacementId: place(attacker), amount: 20}), {code: 'failed-precondition'});
+  const totalWrites = db.writes.length;
+  assert.deepEqual(await cancel(combatId), receipt);
+  assert.equal(db.writes.length, totalWrites);
+});
+
+test('private legacy cancellation refunds proven costs and sends unresolved corrections only to the DM', async () => {
+  damageFixture();
+  seedElf();
+  db.seed('users/stranger', {role: 'player'});
+  seedSpell('volley', {Nome: 'Raffica', Costo: 3, combat: {mode: 'multiple', targetCount: 2, damageExpr: '5'}});
+  const {combatId} = await launch('spell', 'personal:volley', {targetPlacementIds: [place(defender), place('elf')]});
+  await applyDamage(combatId, {amount: 7});
+  const path = `grigliata_combat_actions/${combatId}`;
+  db.seed(path, {...journal(combatId), shared: false, status: 'done', cost: {hp: 0, mana: 3, essenza: 0}});
+  db.remove(privateReceiptPath(combatId));
+  db.remove(`${privateReceiptPath(combatId)}/damage/${place(defender)}`);
+  const staleRequestPath = `grigliata_combat_requests/${hashValue([combatId, place(defender)])}`;
+  db.seed(staleRequestPath, {combatId, backgroundId: board, ownerUid: defender, status: 'waiting', defense: {value: 5}});
+  for (const uid of [defender, 'stranger']) await assert.rejects(cancel(combatId, uid), {code: 'not-found'});
+  assert.deepEqual((await cancel(combatId, dm)).cancellation, {needsReview: true});
+  assert.equal(resources(attacker).stats.manaCurrent, 100);
+  assert.equal(resources(defender).stats.hpCurrent, 93);
+  assert.equal(db.read(staleRequestPath).status, 'cancelled');
+  assert.equal(db.read(staleRequestPath).defense, undefined);
+  assert.deepEqual(journal(combatId).cancellation, {needsReview: true});
+  for (const uid of [attacker, defender, 'stranger']) {
+    await assert.rejects(cancellationDetails(combatId, uid), {code: 'permission-denied'});
+  }
+  assert.deepEqual((await cancellationDetails(combatId)).corrections.map(item => item.reason), ['legacyDamageUnknown']);
+});
+
+test('cancellation restores a proven token shield up to its maximum, and leaves removed or replaced shields alone', async () => {
+  for (const scenario of ['same', 'over-cap', 'removed', 'recreated', 'new-token']) {
+    damageFixture();
+    seedPawn('custom', 2, {tokenType: 'custom', stats: {hpCurrent: 8, shieldCurrent: 3, shieldTotal: scenario === 'over-cap' ? 2 : 3}});
+    seedSpell('volley', {Nome: 'Raffica', Costo: 0, combat: {mode: 'multiple', targetCount: 2, damageExpr: '4'}});
+    const {combatId} = await launch('spell', 'personal:volley', {targetPlacementIds: [place('custom'), place(defender)]});
+    await applyDamage(combatId, {targetPlacementId: place('custom'), amount: 5});
+    const path = 'grigliata_tokens/custom';
+    const injured = db.read(path);
+    db.remove(`grigliata_token_placements/${place('custom')}`);
+    if (scenario === 'removed' || scenario === 'recreated') {
+      const replacement = {...injured};
+      delete replacement.combatShieldActivation;
+      db.seed(path, {...replacement, stats: {...replacement.stats, shieldTotal: 0}});
+      if (scenario === 'recreated') db.seed(path, replacement);
+    }
+    if (scenario === 'new-token') {
+      db.remove(path);
+      db.seed(path, injured);
+    }
+    await cancel(combatId);
+    assert.equal(db.read(path).stats.hpCurrent, scenario === 'new-token' ? 6 : 8, scenario);
+    assert.equal(db.read(path).stats.shieldCurrent, {same: 3, 'over-cap': 2}[scenario] ?? 0, scenario);
+    const {corrections} = await cancellationDetails(combatId);
+    const reason = {removed: 'barrierUnavailable', recreated: 'barrierAmbiguous',
+      'new-token': 'entityUnavailable', 'over-cap': 'barrierCapacity'}[scenario];
+    assert.deepEqual(corrections.map(item => item.reason), reason ? [reason] : [], scenario);
+  }
+});
+
+test('the last confirmation closes combat including legacy events, and closed actions stay closed', async () => {
+  damageFixture();
+  const combatId = await weaponHit();
+  const path = `grigliata_combat_actions/${combatId}`;
+  db.seed(path, {...journal(combatId), status: 'done'});
+  await applyDamage(combatId, {amount: 0});
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  await assert.rejects(cancel(combatId), {code: 'failed-precondition'});
+  assert.equal(journal(combatId).status, 'done');
+});
+
 const seedElf = () => {
   seedPawn('elf', 2);
   db.seed('users/elf', {role: 'player'});
@@ -1559,7 +1907,7 @@ test('a guided immediate action waits for one throw per target; each lands as an
   faces(2, 2);
   const elf = await rollDamage(combatId, {targetPlacementId: place('elf')});
   assert.deepEqual([elf.damage, elf.effects], [4, [landed(4, 'elf'), cure(3, 'elf')]]);
-  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['awaitingConfirmation', null]);
   // Journal and owners' copies are those of the immediate launch with the same faces.
   assert.deepEqual(asImmediate(combatId), immediateEntry(immediate.combatId));
   sameRequest(combatId, immediate.combatId);
@@ -1707,7 +2055,7 @@ test('a guided opposed spell hit answers without damage until the actor throws i
     rolls: [die(10, 10), die(10, 5), die(10, 1)], effects: [landed], damageDetails: null,
   });
   const resolved = journal(combatId);
-  assert.deepEqual([resolved.status, resolved.resolvedAt], ['done', 'now']);
+  assert.deepEqual([resolved.status, resolved.resolvedAt], ['awaitingConfirmation', null]);
   // As an immediate answer writes it: the target's damage and its trial's.
   const {pendingDamage, ...settled} = target;
   assert.deepEqual(resolved.targets[0], {
@@ -1961,7 +2309,7 @@ test('guided mode waits for any formula with dice, of a band or on the ground, n
   await assert.rejects(applyDamage(thorn.combatId), {code: 'failed-precondition', message: /danno concreto/});
   // A constant lands at once, with the owner's confirmation, as without a roll mode.
   const flat = await guided('spell', 'personal:flat');
-  assert.deepEqual([journal(flat.combatId).status, pendingOf(flat.combatId)], ['done', undefined]);
+  assert.deepEqual([journal(flat.combatId).status, pendingOf(flat.combatId)], ['awaitingConfirmation', undefined]);
   assert.deepEqual(journal(flat.combatId).effects.map(({kind, amount}) => [kind, amount]), [['damage', 3]]);
   assert.equal(requestOf(flat.combatId).status, 'damagePending');
   await assert.rejects(rollDamage(flat.combatId), {code: 'failed-precondition'});
@@ -1992,7 +2340,7 @@ test('guided mode waits for any formula with dice, of a band or on the ground, n
       targetPlacementId: place(defender)}]]);
   const [far] = await at(8);
   assert.deepEqual([far.status, 'pendingDamage' in far.targets[0], far.effects.map(({expr, amount}) => [expr, amount])],
-    ['done', false, [['1', 1]]]);
+    ['awaitingConfirmation', false, [['1', 1]]]);
 
   // Damage on the ground waits on the event, for a throw with no target.
   moveDefender(1);
@@ -2057,7 +2405,7 @@ test('guided mode adds no step to table effects, cures, constant weapons or acti
   db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: club});
   const blunt = await guided('weapon', 'weaponMain');
   const blow = await defend(blunt.combatId);
-  assert.deepEqual([blow.damage, 'damagePending' in blow, journal(blunt.combatId).status], [14, false, 'done']);
+  assert.deepEqual([blow.damage, 'damagePending' in blow, journal(blunt.combatId).status], [14, false, 'awaitingConfirmation']);
   const control = await weaponHit();
   assert.deepEqual(asImmediate(blunt.combatId), immediateEntry(control));
   db.seed(`users/${attacker}/inventory/item-weaponMain`, {currentSnapshot: greatsword});
@@ -2080,7 +2428,7 @@ test('guided mode adds no step to table effects, cures, constant weapons or acti
   assert.deepEqual([recipient.outcome, 'pendingDamage' in recipient], ['applied', false]);
   await assert.rejects(rollDamage(struck.combatId, {targetPlacementId: place('ally')}), {code: 'failed-precondition'});
   assert.equal((await rollDamage(struck.combatId)).damage, 24);
-  assert.equal(journal(struck.combatId).status, 'done');
+  assert.equal(journal(struck.combatId).status, 'awaitingConfirmation');
 });
 
 test('each target throws its own damage while another still answers; no one sees another target’s damage', async () => {
@@ -2128,7 +2476,7 @@ test('each target throws its own damage while another still answers; no one sees
   assert.deepEqual([requestOf(combatId, 'elf').ownerDamage, requestOf(combatId, 'elf').damagePending], [undefined, true]);
   faces(6, 6);
   assert.equal((await rollDamage(combatId, {targetPlacementId: place('elf'), round: 2})).damage, 12);
-  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['done', 'now']);
+  assert.deepEqual([journal(combatId).status, journal(combatId).resolvedAt], ['awaitingConfirmation', null]);
   assert.deepEqual([requestOf(combatId, 'elf').ownerDamage.target.damage, requestOf(combatId, 'elf').status,
     requestOf(combatId, 'elf').damagePending], [12, 'damagePending', false]);
   assert.equal(requestOf(combatId).ownerDamage.target.damage, 7);

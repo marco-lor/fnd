@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitForElementToBeRemoved, within } from '@testing-library/react';
 import GrigliataCombatInbox, { applyReceiptDamage } from './GrigliataCombatInbox';
 import * as firestore from '../../performance/firestore';
 import { getCallable } from '../../data/functions/callableRegistry';
@@ -386,6 +386,66 @@ test('one owner listener reads waiting defenses and damage to confirm together, 
   expect(pending.options).toEqual({ includeMetadataChanges: true });
 });
 
+test('a cancelled defense disappears with its held retry, and cached requests cannot reopen it', async () => {
+  render(<GrigliataCombatInbox uid={uid} />);
+  const [pending] = listener(PENDING);
+  const first = { ...request, id: 'req-1', actor: null };
+  const next = { ...lia, combatId: 'combat-next', defense: { label: 'Altra difesa', value: 3 } };
+  act(() => pending.next(cached([first])));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  act(() => pending.next(server([first, next])));
+  expect(screen.getByText('Attaccante → Bro')).toBeInTheDocument();
+
+  mutate.mockRejectedValueOnce(lostReply());
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  act(() => pending.next(server([next])));
+  expect(await screen.findByRole('button', { name: 'Riprova' })).toBeInTheDocument();
+  const [watched] = openReceiptListeners();
+  expect(watched.target.path).toBe('grigliata_combat_requests/req-1');
+  const cancelled = { combatId: first.combatId, backgroundId: first.backgroundId, ownerUid: uid, status: 'cancelled' };
+  act(() => watched.next({ ...copyOf(cancelled), metadata: { fromCache: true } }));
+  act(() => watched.next(copyOf({ ...cancelled, ownerUid: 'another-user' })));
+  expect(screen.getByRole('button', { name: 'Riprova' })).toBeInTheDocument();
+  act(() => watched.next(copyOf(cancelled)));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: 'Altra difesa' })).toHaveFocus();
+  expect(watched.unsubscribe).toHaveBeenCalledTimes(1);
+
+  act(() => pending.next(cached([first])));
+  expect(screen.getByRole('spinbutton', { name: 'Altra difesa' })).toHaveFocus();
+  expect(screen.queryByText('Attaccante → Bro')).not.toBeInTheDocument();
+});
+
+test.each([
+  ['the server error', Object.assign(new Error("L'azione è stata annullata."), { code: 'functions/failed-precondition' })],
+  ['a status in the error details', Object.assign(new Error('Tiro annullato.'), { code: 'functions/failed-precondition', details: { status: 'cancelled' } })],
+])('%s ends a cancelled defense before the listeners catch up', async (_source, failure) => {
+  render(<GrigliataCombatInbox uid={uid} />);
+  const [pending] = listener(PENDING);
+  act(() => pending.next(server([{ ...request, id: 'req-1' }, { ...lia, combatId: 'combat-next' }])));
+  mutate.mockRejectedValueOnce(failure);
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  expect(await screen.findByText('Nyx → Lia')).toBeInTheDocument();
+  expect(defenseField()).toHaveFocus();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('a damage confirmation that loses the cancellation race retires its stale receipt and draft', async () => {
+  render(<GrigliataCombatInbox uid={uid} />);
+  const [pending] = listener(PENDING);
+  const bolt = immediate('req-9');
+  act(() => pending.next(server([bolt])));
+  act(() => listener(RECEIPT)[0].next(copyFor(bolt)));
+  fireEvent.change(screen.getByLabelText('Danno finale'), { target: { value: '12' } });
+  mutate.mockRejectedValueOnce(Object.assign(new Error("L'azione è stata annullata."), { code: 'functions/failed-precondition' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Applica danno' }));
+  await waitForElementToBeRemoved(() => screen.queryByText('Bro · Fulmine'));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  act(() => pending.next(cached([bolt])));
+  expect(screen.queryByLabelText('Danno finale')).not.toBeInTheDocument();
+  expect(mutate).toHaveBeenCalledTimes(1);
+});
+
 test.each([0, 6])('a dismissed guided proposal of %s retires after another device removes it from the fresh owner inbox', async amount => {
   render(<GrigliataCombatInbox uid={uid} />);
   const [pending] = listener(PENDING);
@@ -399,11 +459,12 @@ test.each([0, 6])('a dismissed guided proposal of %s retires after another devic
 
   const proposal = { ...request, ...ownerCopy({ damage: amount }), id: 'req-1', status: 'damagePending', damagePending: false };
   act(() => receipt.next(copyFor(proposal)));
-  expect(openReceiptListeners()).toHaveLength(0);
+  expect(openReceiptListeners()).toEqual([receipt]);
   act(() => pending.next(server([])));
   expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
 
   act(() => pending.next(server([proposal])));
+  expect(openReceiptListeners()).toHaveLength(0);
   act(() => pending.next(cached([])));
   expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
   act(() => pending.next(server([])));
@@ -703,8 +764,10 @@ test('damage arriving during a defense waits for the prompt to close and then op
   expect(await screen.findByText('Colpo evitato')).toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByText('Lia · Fulmine')).toBeInTheDocument();
-  expect(listener(RECEIPT)).toHaveLength(1);
-  act(() => listener(RECEIPT)[0].next(copyFor(bolt)));
+  expect(listener(RECEIPT).map(entry => entry.target.path)).toEqual([
+    'grigliata_combat_requests/req-1', 'grigliata_combat_requests/req-9',
+  ]);
+  act(() => listener(RECEIPT)[1].next(copyFor(bolt)));
   expect(screen.getByLabelText('Danno finale')).toHaveValue('9');
   expect(screen.queryByRole('button', { name: MORE_DAMAGE })).not.toBeInTheDocument();
 });

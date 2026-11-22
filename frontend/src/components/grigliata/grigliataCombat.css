@@ -814,6 +814,28 @@ button.gc-hand:hover,
 .gc-status-card li strong { font-size: 0.8rem; }
 .gc-status-card li .gc-secondary { font-size: 0.73rem; }
 
+.gc-cancel { margin-block-start: 0.32rem; }
+.gc-cancel-options { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
+.gc-cancel-options > span { color: var(--gc-muted); font-size: 0.8rem; }
+.gc-cancel button {
+  min-block-size: 2rem;
+  padding: 0.25rem 0.42rem;
+  border-radius: 0.3rem;
+  color: var(--gc-muted);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.gc-cancel button:hover:enabled { background: var(--gc-control); color: var(--gc-text); }
+.gc-cancel button:disabled,
+.gc-cancel button[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
+.gc-status-card .gc-cancel-review,
+.gc-log-caption > .gc-cancel-review { color: var(--gc-gold); }
+.gc-corrections { margin-block: 0 0.45rem; font-size: 0.8rem; }
+.gc-corrections button { min-block-size: 2rem; }
+.gc-corrections ul { display: grid; gap: 0.35rem; }
+.gc-corrections li { display: grid; gap: 0.1rem; padding: 0.35rem; background: var(--gc-inset); }
+
 .gc-log-list {
   max-height: min(27rem, 55vh);
   overflow-y: auto;

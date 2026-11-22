@@ -178,13 +178,15 @@ export function combatProposalLabel(damage, effects = []) {
 
 const isDamageAmount = value => Number.isSafeInteger(value) && value >= 0;
 const LANDED_OUTCOMES = ['hit', 'applied', 'accepted'];
+export const UNRESOLVED_COMBAT_STATUSES = ['waiting', 'retry', 'awaitingDamage', 'awaitingConfirmation'];
+export const COMBAT_CONFIRMATION_STATUS = 'In attesa della conferma del danno';
 
 // The damage the DM may apply to one target of a logged action, the same rule the server enforces: an answered target
 // that was hit, affected or consented, with a whole damage from 0 up tied to that very pawn (its own roll, or a damage
 // effect naming it). Healing, area suggestions bound to no pawn and unanswered or resisted targets propose nothing.
 // A completed critical proposes its total; one the table must still roll proposes no number and shows its formula.
 export function combatDamageProposal(event, target) {
-  if (target?.status !== 'done' || !LANDED_OUTCOMES.includes(target.outcome)) return null;
+  if (event?.status === 'cancelled' || target?.status !== 'done' || !LANDED_OUTCOMES.includes(target.outcome)) return null;
   const effect = (event?.effects || []).filter(item => (
     item?.kind === 'damage' && item.targetPlacementId === target.placementId && isDamageAmount(item.amount)
   )).pop();
@@ -207,6 +209,44 @@ export function combatDamageFloor(proposal, isManager) {
 export const combatAppliedDamage = target => (
   target?.damageApplied && typeof target.damageApplied === 'object' ? target.damageApplied : null
 );
+
+export function combatCanCancel(event, isApplied = combatAppliedDamage) {
+  if (!event.id || event.ownerPrivate) return false;
+  if (UNRESOLVED_COMBAT_STATUSES.includes(event.status)) return true;
+  // Older events already said `done` while a target still had damage to apply.
+  return event.status === 'done' && (event.targets || []).some(target => (
+    !isApplied(target) && combatDamageProposal(event, target) !== null
+  ));
+}
+
+const CORRECTION_REASONS = {
+  legacyCostUnknown: 'Spesa originaria da ricostruire.',
+  legacyDamageUnknown: 'Ripartizione del danno tra PF, barriera o scudo da verificare.',
+  entityUnavailable: 'Pedina o risorse non più disponibili.',
+  balanceUnavailable: 'Saldo della risorsa non disponibile.',
+  barrierUnavailable: 'Barriera o scudo non disponibile.',
+  barrierAmbiguous: 'Verifica se nel frattempo la barriera o lo scudo sono cambiati.',
+  barrierCapacity: 'Il ripristino supera la capienza attuale.',
+};
+const CORRECTION_RESOURCES = {
+  hpCurrent: 'PF', manaCurrent: 'PM', essenzaCurrent: 'Essenza', barrieraCurrent: 'punti barriera', shieldCurrent: 'punti scudo',
+};
+
+export function describeCombatCorrection(event, { reason, subject = {}, placementId, amounts = {}, agreedDamage }) {
+  const pawns = [event.actor, ...(event.targets || [])].filter(Boolean);
+  const tokenId = subject.tokenId || subject.id;
+  const pawn = (placementId && pawns.find(item => item.placementId === placementId))
+    || (tokenId && pawns.find(item => item.tokenId === tokenId))
+    || (subject.kind === 'character' && pawns.find(item => item.ownerUid === subject.id));
+  return {
+    name: pawn?.name || 'Pedina della scena',
+    reason: CORRECTION_REASONS[reason] || 'Risorse da verificare.',
+    amounts: Object.entries(CORRECTION_RESOURCES).flatMap(([field, label]) => (
+      Number.isFinite(amounts[field]) ? [amounts[field] + ' ' + label] : []
+    )).join(' · '),
+    agreedDamage: isDamageAmount(agreedDamage) ? 'Danno concordato · ' + agreedDamage : '',
+  };
+}
 
 // A typed final damage: digits only, a whole number from 0 up; null when it is anything else.
 export function parseCombatDamage(text) {

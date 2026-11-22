@@ -4,12 +4,14 @@ import { db } from '../firebaseConfig';
 import { getCallable } from '../../data/functions/callableRegistry';
 import { runWithDurableOperationIntent } from '../../data/functions/backendOperationIntentStore';
 import { buildPlacementDocId } from './boardUtils';
-import { attackDiceNotation, combatOutcomeLabel, combatTargetName, combatTime } from './combatPresentation';
+import {
+  attackDiceNotation, combatAppliedDamage, combatCanCancel, combatOutcomeLabel, combatTargetName, combatTime,
+  UNRESOLVED_COMBAT_STATUSES,
+} from './combatPresentation';
 import { canTargetToken, combatAllies, combatArea, combatDistance, picksGround, picksMultiple, withinCombatRange } from './combatTargeting';
 import useCombatRollTray from './useCombatRollTray';
 
 const EMPTY = [];
-const UNRESOLVED = ['waiting', 'retry', 'awaitingDamage'];
 const initialSelection = { actionId: '', actionKind: '', targetIds: [], point: null, picking: false, aimCompletion: null };
 const records = (snap) => snap.docs.map(entry => ({ ...entry.data(), id: entry.id }));
 const byCreation = (a, b) => combatTime(a.createdAt) - combatTime(b.createdAt) || a.id.localeCompare(b.id);
@@ -68,7 +70,7 @@ function mergeOwnerDamage(full, projected) {
 }
 
 // Returns the feed and a retry that reopens every listener: Firestore ends a listener for good on its first error.
-function useCombatFeed(uid, backgroundId, isManager, open) {
+function useCombatFeed(uid, backgroundId, isManager, open, cancelled) {
   const [attempt, setAttempt] = useState(0);
   const key = JSON.stringify([uid, backgroundId, isManager, open, attempt]);
   const [feed, setFeed] = useState({});
@@ -77,29 +79,21 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
     let active = true;
     const bySource = {};
     const errors = {};
-    const publish = () => {
-      const unresolved = bySource.pending || EMPTY;
-      // One copy per action: the newest write, whichever listener delivered it (a tie keeps the later source).
-      const unique = new Map();
-      for (const e of [...(bySource.scene || EMPTY), ...(bySource.owned || EMPTY), ...unresolved]) {
-        if (!unique.has(e.id) || combatTime(e.updatedAt) >= combatTime(unique.get(e.id).updatedAt)) unique.set(e.id, e);
-      }
-      // The full journal provides the display context. A fresher owner copy can advance that target's outcome
-      // without hiding the rest of the journal, and a completed receipt survives an older snapshot.
-      for (const projected of ownerDamageEvents(bySource.ownerDamage || EMPTY, uid)) {
-        const full = unique.get(projected.id);
-        unique.set(projected.id, full ? mergeOwnerDamage(full, projected) : projected);
-      }
-      // Only the actor gets a status card. For the DM, older unresolved actions from other actors stay in the journal.
-      const pending = unresolved.map(e => unique.get(e.id))
-        .filter(e => e.actorUid === uid && UNRESOLVED.includes(e.status)).sort(byCreation);
-      setFeed({ key, events: [...unique.values()].sort((a, b) => byCreation(b, a)), pending, error: Object.values(errors)[0] });
-    };
+    const publish = () => setFeed({ key, bySource: { ...bySource }, error: Object.values(errors)[0] });
     const actions = (...filters) => query(collection(db, 'grigliata_combat_actions'), where('backgroundId', '==', backgroundId), ...filters);
     const subscribe = (source, label, target) => onSnapshot(labelFirestoreTarget(target,label),
       snap => {
         if (!active) return;
-        bySource[source] = records(snap);
+        const incoming = records(snap);
+        for (const event of incoming) {
+          if (event.status !== 'cancelled') continue;
+          if (source !== 'ownerDamage') {
+            cancelled.set(event.id, { confirmed: true, cancellation: event.cancellation });
+          } else if (event.ownerUid === uid && typeof event.combatId === 'string' && !cancelled.has(event.combatId)) {
+            cancelled.set(event.combatId, {});
+          }
+        }
+        bySource[source] = incoming;
         delete errors[source];
         publish();
       },
@@ -110,7 +104,7 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
         publish();
       });
     const own = where('actorUid', '==', uid);
-    const unresolved = where('status', 'in', UNRESOLVED);
+    const unresolved = where('status', 'in', UNRESOLVED_COMBAT_STATUSES);
     const newest = [orderBy('createdAt', 'desc'), limit(40)];
     const unsubs = [
       isManager
@@ -126,14 +120,50 @@ function useCombatFeed(uid, backgroundId, isManager, open) {
     ];
     // A player also reads the redacted outcome on each of their pawns of the actions they cannot read in full; the DM
     // reads the whole scene.
-    if (!isManager) {
+    if (isManager) {
+      // An older attack can leave the pending feed after a cancellation on a second device.
+      unsubs.push(subscribe('cancelled','grigliata.combat-actions.manager-cancelled.subscribe.v1',
+        actions(where('status','==','cancelled'),orderBy('updatedAt','desc'),limit(40))));
+    } else {
       unsubs.push(subscribe('ownerDamage','grigliata.combat-requests.owner-damage.subscribe.v1',query(
         collection(db, 'grigliata_combat_requests'), where('ownerUid', '==', uid), where('backgroundId', '==', backgroundId),
         orderBy('ownerDamageUpdatedAt', 'desc'), limit(40))));
     }
     return () => { active = false; unsubs.forEach(unsub => unsub()); };
-  }, [key, uid, backgroundId, isManager, open]);
-  return [feed.key === key ? feed : {}, () => setAttempt(n => n + 1)];
+  }, [key, uid, backgroundId, isManager, open, cancelled]);
+  const view = useMemo(() => {
+    if (feed.key !== key) return {};
+    const { bySource, error } = feed;
+    const unresolved = bySource.pending || EMPTY;
+    const unique = new Map();
+    for (const event of [...(bySource.scene || EMPTY), ...(bySource.owned || EMPTY), ...unresolved, ...(bySource.cancelled || EMPTY)]) {
+      const previous = unique.get(event.id);
+      if (previous?.status === 'cancelled' && event.status !== 'cancelled') continue;
+      if (!previous || (event.status === 'cancelled' && previous.status !== 'cancelled')
+        || combatTime(event.updatedAt) >= combatTime(previous.updatedAt)) unique.set(event.id, event);
+    }
+    // The full event or private request may reach this listener before another listener drops its stale copy.
+    for (const [id, { event, cancellation }] of cancelled) {
+      const full = unique.get(id);
+      if (full && full.status !== 'cancelled') unique.set(id, { ...(event || full), status: 'cancelled', cancellation });
+      else if (!full && event) unique.set(id, event);
+    }
+    // A fresher owner copy can advance its target's outcome without hiding the rest of the full record.
+    for (const projected of ownerDamageEvents(bySource.ownerDamage || EMPTY, uid)) {
+      if (cancelled.has(projected.id)) continue;
+      const full = unique.get(projected.id);
+      unique.set(projected.id, full ? mergeOwnerDamage(full, projected) : projected);
+    }
+    const pending = unresolved.map(event => unique.get(event.id))
+      .filter(event => event.actorUid === uid && UNRESOLVED_COMBAT_STATUSES.includes(event.status)).sort(byCreation);
+    return { events: [...unique.values()].sort((a, b) => byCreation(b, a)), pending, error };
+  }, [feed, key, cancelled, uid]);
+  const recordCancellation = (event, cancellation) => {
+    if (cancelled.get(event.id)?.confirmed) return;
+    cancelled.set(event.id, { cancellation, event: { ...event, status: 'cancelled', cancellation, updatedAt: null } });
+    setFeed(current => ({ ...current }));
+  };
+  return [view, () => setAttempt(n => n + 1), recordCancellation];
 }
 
 export default function useGrigliataCombat({ uid, backgroundId, enabled, open, isManager, tokens, activeTurnTokenId, suspended }) {
@@ -146,10 +176,18 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   // Kept apart from `activity` so a refused application never reads as an arsenal error, and kept here rather than in
   // the form so a panel closed and reopened mid-request still shows it and still refuses a second send.
   const [damage, setDamage] = useState({});
-  const locks = useRef(new Set());
+  const locks = useRef(new Map());
   const aimTrigger = useRef(null);
+  // Only the scope changes the map's identity. Closing the panel or retrying a listener keeps its terminal IDs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cancelled = useMemo(() => new Map(), [uid, backgroundId, isManager]);
+  const isCancelled = id => cancelled.has(id);
+  const activityKey = scope => JSON.stringify([uid, backgroundId, scope]);
+  const cancelKey = id => ['cancel', id];
+  const isCancelling = id => Boolean(id) && locks.current.has(activityKey(cancelKey(id)));
+  const combatBlocked = event => event.status === 'cancelled' || isCancelled(event.id) || isCancelling(event.id);
   const [tray, prepareRoll] = useCombatRollTray(enabled && open && !suspended && uid && backgroundId
-    ? JSON.stringify([uid, backgroundId]) : '', definitive);
+    ? JSON.stringify([uid, backgroundId]) : '', definitive, isCancelled, isCancelling);
   const board = useMemo(() => {
     if (!enabled || !open || suspended) return EMPTY;
     return tokens.map(token => ({
@@ -179,7 +217,7 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     setShownKey(catalogKey);
     refresh(v => v + 1);
   }
-  const [feed, retryFeed] = useCombatFeed(enabled ? uid : '', backgroundId, isManager, open);
+  const [feed, retryFeed, recordCancellation] = useCombatFeed(enabled ? uid : '', backgroundId, isManager, open, cancelled);
   useEffect(() => {
     if (!catalogKey) return undefined;
     let active = true;
@@ -272,18 +310,25 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     if (selection.picking && ground && withinCombatRange(pawn,cell,action)) finishAim({point:cell,targetIds:[]}, true);
   };
   const run = async (scope, job, pending = {}) => {
-    const key = JSON.stringify([uid,backgroundId,scope]);
-    if (locks.current.has(key)) return;
-    locks.current.add(key);
+    const key = activityKey(scope);
+    const previous = locks.current.get(key);
+    if (previous && !isCancelled(previous.combatId)) return;
+    const work = { combatId: pending.combatId };
+    locks.current.set(key, work);
     setActivity(s => ({...s,[key]:{...pending,busy:true}}));
     try {
       await job();
-      setActivity(s => ({...s,[key]:{}}));
+      if (locks.current.get(key) === work) setActivity(s => ({...s,[key]:{}}));
     } catch (err) {
-      setActivity(s => ({...s,[key]:{error:errorText(err)}}));
-    } finally { locks.current.delete(key); }
+      if (locks.current.get(key) === work && !isCancelled(pending.combatId)) {
+        setActivity(s => ({...s,[key]:{combatId:pending.combatId,error:errorText(err)}}));
+      }
+    } finally {
+      if (locks.current.get(key) === work) locks.current.delete(key);
+    }
   };
-  const attack = activity[JSON.stringify([uid,backgroundId,'attack'])] || {};
+  const attackState = activity[activityKey('attack')];
+  const attack = !attackState || isCancelled(attackState.combatId) ? {} : attackState;
   const mutate = payload => getCallable('mutateGrigliataCombat')(payload);
   const launchPayload = (used, options) => {
     if (!actorId || arsenalSync !== 'ready' || used.id !== action?.id || used.kind !== action?.kind) return null;
@@ -322,15 +367,15 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     }, trigger);
   };
   const onRetry = (event, target) => {
-    if (suspended || event.actorUid !== uid || attack.busy || tray?.phase === 'sending') return;
+    if (suspended || combatBlocked(event) || event.actorUid !== uid || attack.busy || tray?.phase === 'sending') return;
     const send = () => mutate({command:'retry',combatId:event.id,targetPlacementId:target.placementId,round:target.round});
-    if (!target.attack?.sides) return run('attack', send);
+    if (!target.attack?.sides) return run('attack', send, { combatId: event.id });
     return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + target.name,
       notation: attackDiceNotation(target.attack.sides, target.advantage ? 2 : 1),
       combatId: event.id, targetPlacementId: target.placementId, anchor: { backgroundId, targetIds: [target.placementId] }, send });
   };
   const onRollDamage = (event, target) => {
-    if (suspended || (!isManager && event.actorUid !== uid) || attack.busy) return;
+    if (suspended || combatBlocked(event) || (!isManager && event.actorUid !== uid) || attack.busy) return;
     const pendingDamage = (target || event).pendingDamage;
     if (!pendingDamage?.expr) return;
     const actionName = event.action?.name || 'Azione';
@@ -345,12 +390,34 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     });
   };
   const damageKey = (event, target) => JSON.stringify([uid, backgroundId, 'damage', event.id, target.placementId]);
+  const canCancel = event => Boolean(enabled && open && !suspended && uid && (isManager || event.actorUid === uid))
+    && !isCancelled(event.id) && combatCanCancel(event, target => combatAppliedDamage(target) || damage[damageKey(event, target)]?.applied);
+  const cancelState = event => activity[activityKey(cancelKey(event.id))] || {};
+  const onCancel = event => {
+    const latest = feed.events?.find(item => item.id === event.id) || event;
+    if (!canCancel(latest) || isCancelling(event.id)) return;
+    return run(cancelKey(event.id), async () => {
+      const { data } = await mutate({ command: 'cancel', combatId: event.id });
+      if (data?.combatId !== event.id || data.status !== 'cancelled') throw new Error('Annullamento in attesa di conferma. Riprova.');
+      recordCancellation(latest, data.cancellation);
+      refresh(value => value + 1);
+    }, { combatId: event.id });
+  };
+  const onCancellationDetails = async event => {
+    const latest = feed.events?.find(item => item.id === event.id);
+    if (!isManager || suspended || latest?.status !== 'cancelled' || !latest.cancellation?.needsReview) {
+      throw new Error('Correzioni non disponibili.');
+    }
+    const { data } = await mutate({ command: 'getCancellationDetails', combatId: event.id });
+    if (data?.combatId !== event.id || !Array.isArray(data.corrections)) throw new Error('Correzioni non disponibili.');
+    return data.corrections;
+  };
   const applyDamage = async (event, target, amount) => {
     const key = damageKey(event, target);
     // Rights checked again here, not only where the form is offered; the server has the last word.
-    if (target.pendingDamage || !mayApplyDamage(target) || !targetIsPresent(target)
+    if (combatBlocked(event) || target.pendingDamage || !mayApplyDamage(target) || !targetIsPresent(target)
       || locks.current.has(key) || (tray?.phase === 'sending' && tray.scope === key)) return;
-    locks.current.add(key);
+    locks.current.set(key, {});
     const criticalScore = target.critical?.score ?? null;
     const submitted = {value:String(amount), criticalScore};
     setDamage(s => ({...s,[key]:{busy:true,submitted}}));
@@ -358,18 +425,18 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       const {data} = await mutate({command:'applyDamage',combatId:event.id,targetPlacementId:target.placementId,amount,criticalScore});
       const recorded = data?.damageApplied?.amount;
       if (!Number.isSafeInteger(recorded) || recorded < 0) throw new Error('Esito non confermato. Riprova.');
-      setDamage(s => ({...s,[key]:{applied:{amount:recorded}}}));
+      if (!isCancelled(event.id)) setDamage(s => ({...s,[key]:{applied:{amount:recorded}}}));
     } catch (err) {
-      setDamage(s => ({...s,[key]:{error:damageErrorText(err),submitted}}));
+      if (!isCancelled(event.id)) setDamage(s => ({...s,[key]:{error:damageErrorText(err),submitted}}));
     } finally { locks.current.delete(key); }
   };
   const onCritical = (event, target, score) => {
     const key = damageKey(event, target);
-    if (suspended || event.actorUid !== uid || target.pendingDamage || locks.current.has(key)
+    if (suspended || combatBlocked(event) || event.actorUid !== uid || target.pendingDamage || locks.current.has(key)
       || attack.busy || tray?.phase === 'sending') return undefined;
     const send = async () => {
       if (locks.current.has(key)) throw new Error('Attendi la conferma del danno.');
-      locks.current.add(key);
+      locks.current.set(key, {});
       try {
         return await mutate({command:'critical',combatId:event.id,targetPlacementId:target.placementId,round:target.round,score});
       } finally {
@@ -381,9 +448,10 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
         notation: event.action.criticalExpr, scope: key, combatId: event.id,
         anchor: { backgroundId, targetIds: [target.placementId] }, send });
     }
-    return run('attack', send, {criticalTargetKey:key});
+    return run('attack', send, {combatId:event.id,criticalTargetKey:key});
   };
   const damageState = (event, target) => {
+    if (event.status === 'cancelled' || isCancelled(event.id)) return {};
     const key = damageKey(event, target);
     return {...damage[key], criticalPending:attack.criticalTargetKey === key || (tray?.phase === 'sending' && tray.scope === key),
       unavailable:!targetIsPresent(target)};
@@ -391,7 +459,8 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   const resultEvent = tray?.phase === 'result' && feed.events?.find(event => event.id === tray.combatId && (isManager || event.actorUid === uid));
   const pending = feed.pending || EMPTY;
   const mapDamageEvents = suspended || (tray && tray.phase !== 'result') ? EMPTY
-    : resultEvent ? [resultEvent, ...pending.filter(event => event.id !== resultEvent.id)] : pending;
+    : (resultEvent ? [resultEvent, ...pending.filter(event => event.id !== resultEvent.id)] : pending)
+      .filter(event => event.status !== 'awaitingConfirmation' && !combatBlocked(event));
   const readyDamage = mapDamageEvents.flatMap(event => [
     ...((event.targets || EMPTY).filter(target => target.pendingDamage).map(target => ({ event, target }))),
     ...(event.pendingDamage ? [{ event, target: null }] : EMPTY),
@@ -427,8 +496,10 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       onCritical,
       // The DM for every target, a player for their own pawns; nobody from the narration overlay or the player preview.
       onApplyDamage:suspended ? undefined : applyDamage,
-      canApplyDamage:(event, target) => mayApplyDamage(target),
+      canApplyDamage:(event, target) => event.status !== 'cancelled' && !isCancelled(event.id) && mayApplyDamage(target),
       damageState,
+      onCancel:suspended ? undefined : onCancel, canCancel, cancelState,
+      onCancellationDetails:isManager && !suspended ? onCancellationDetails : undefined,
       // The DM sets any amount and reads the defense audit; a player is held to each proposal. The narration overlay and
       // the player preview show what a player sees.
       isManager:Boolean(isManager) && !suspended,

@@ -224,7 +224,7 @@ const hasDirtySelectedTokenDraft = (dirtyFields) => (
     || dirtyFields?.notes
   )
 );
-const buildSelectedTokenDetailsPayload = (token, draft) => ({
+const buildSelectedTokenDetailsPayload = (token, draft, dirtyFields) => ({
   tokenId: token.tokenId,
   tokenType: token.tokenType,
   ownerUid: token.ownerUid,
@@ -239,6 +239,7 @@ const buildSelectedTokenDetailsPayload = (token, draft) => ({
   shieldCurrent: draft.shieldCurrent,
   shieldTotal: n(token.shieldTotal, 0),
   notes: draft.notes,
+  dirtyFields,
 });
 const getSelectedTokenLoadingMessage = (token) => (
   token?.loadingMessage
@@ -253,30 +254,32 @@ const getSelectedTokenTotalText = (label, totalValue, isMissing) => (
 );
 
 const EMPTY_SELECTED_FOE_DRAFT = {
-  stats: {},
+  hpCurrent: 0,
+  manaCurrent: 0,
+  shieldCurrent: 0,
   parametri: {},
   notes: '',
 };
 const EMPTY_SELECTED_FOE_DIRTY_STATE = {
-  stats: false,
+  hpCurrent: false,
+  manaCurrent: false,
+  shieldCurrent: false,
   parametri: false,
   notes: false,
 };
 const buildSelectedFoeDraft = (token) => ({
-  stats: token?.stats || {},
+  hpCurrent: n(token?.stats?.hpCurrent, n(token?.stats?.hpTotal, 0)),
+  manaCurrent: n(token?.stats?.manaCurrent, n(token?.stats?.manaTotal, 0)),
+  shieldCurrent: n(token?.stats?.shieldCurrent, n(token?.stats?.shieldTotal, 0)),
   parametri: token?.Parametri || {},
   notes: token?.notes || '',
 });
 const areFoeDraftValuesEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const areSelectedFoeDraftsEqual = (left, right) => (
-  areFoeDraftValuesEqual(left.stats, right.stats)
-  && areFoeDraftValuesEqual(left.parametri, right.parametri)
-  && left.notes === right.notes
+  Object.keys(EMPTY_SELECTED_FOE_DRAFT).every((field) => areFoeDraftValuesEqual(left[field], right[field]))
 );
 const areSelectedFoeDirtyStatesEqual = (left, right) => (
-  left.stats === right.stats
-  && left.parametri === right.parametri
-  && left.notes === right.notes
+  Object.keys(EMPTY_SELECTED_FOE_DIRTY_STATE).every((field) => left[field] === right[field])
 );
 const hasDirtySelectedFoeDraft = (dirtyFields) => Object.values(dirtyFields || {}).some(Boolean);
 
@@ -757,7 +760,7 @@ function SelectedResourceTokenDetailsPanel({
 
     const savedDraft = { ...draftRef.current };
     const savePromise = Promise.resolve(onSaveSelectedTokenDetails(
-      buildSelectedTokenDetailsPayload(token, savedDraft)
+      buildSelectedTokenDetailsPayload(token, savedDraft, dirtyFieldsRef.current)
     ));
 
     autosavePromiseRef.current = savePromise;
@@ -879,7 +882,7 @@ function SelectedResourceTokenDetailsPanel({
 
       {isReady && isLegacyCustomToken && (
         <div className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
-          This legacy custom token is missing one or more saved totals. Saving will seed each missing total from the current value.
+          This legacy custom token is missing one or more saved totals. Saving uses the current values. If the shield has absorbed damage, edit Shield to set its missing total.
         </div>
       )}
 
@@ -999,9 +1002,9 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
 
   if (!token) return null;
 
-  const hpTotal = n(draft.stats?.hpTotal, 0);
-  const manaTotal = n(draft.stats?.manaTotal, 0);
-  const shieldTotal = n(draft.stats?.shieldTotal, 0);
+  const hpTotal = n(token.stats?.hpTotal, 0);
+  const manaTotal = n(token.stats?.manaTotal, 0);
+  const shieldTotal = n(token.stats?.shieldTotal, 0);
   const isSaving = savingFoeTokenId === token.tokenId;
   const contentTransition = prefersReducedMotion
     ? { duration: 0.01 }
@@ -1028,11 +1031,16 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
     }
 
     const savedDraft = draftRef.current;
+    const dirtyResources = dirtyFieldsRef.current;
     const savePromise = Promise.resolve(onUpdateFoeToken({
       tokenId: token.tokenId,
       label: token.label,
       dadoAnima: token.dadoAnima,
-      stats: savedDraft.stats,
+      stats: {
+        ...(dirtyResources.hpCurrent && { hpCurrent: savedDraft.hpCurrent }),
+        ...(dirtyResources.manaCurrent && { manaCurrent: savedDraft.manaCurrent }),
+        ...(dirtyResources.shieldCurrent && { shieldCurrent: savedDraft.shieldCurrent }),
+      },
       Parametri: savedDraft.parametri,
       notes: savedDraft.notes,
     }));
@@ -1106,7 +1114,7 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
               )}
             </div>
           </div>
-          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(draft.stats?.level, 1)} | {token?.category || 'Unknown'} | {token?.rank || 'Unranked'}</p>
+          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(token.stats?.level, 1)} | {token?.category || 'Unknown'} | {token?.rank || 'Unranked'}</p>
         </div>
       </div>
 
@@ -1114,27 +1122,27 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
         <SelectedResourceField
           resource="hp"
           tokenId={`foe-${token.tokenId}`}
-          value={n(draft.stats?.hpCurrent, hpTotal)}
+          value={draft.hpCurrent}
           totalText={`Total HP: ${hpTotal}`}
-          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, hpCurrent: n(event.target.value, 0) })}
+          onChange={(event) => updateDraftField('hpCurrent', n(event.target.value, 0))}
           onBlur={() => { void commitSelectedFoeDraft(); }}
           onKeyDown={handleFoeFieldKeyDown}
         />
         <SelectedResourceField
           resource="mana"
           tokenId={`foe-${token.tokenId}`}
-          value={n(draft.stats?.manaCurrent, manaTotal)}
+          value={draft.manaCurrent}
           totalText={`Total Mana: ${manaTotal}`}
-          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, manaCurrent: n(event.target.value, 0) })}
+          onChange={(event) => updateDraftField('manaCurrent', n(event.target.value, 0))}
           onBlur={() => { void commitSelectedFoeDraft(); }}
           onKeyDown={handleFoeFieldKeyDown}
         />
         <SelectedResourceField
           resource="shield"
           tokenId={`foe-${token.tokenId}`}
-          value={n(draft.stats?.shieldCurrent, shieldTotal)}
+          value={draft.shieldCurrent}
           totalText={`Total Shield: ${shieldTotal}`}
-          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, shieldCurrent: n(event.target.value, 0) })}
+          onChange={(event) => updateDraftField('shieldCurrent', n(event.target.value, 0))}
           onBlur={() => { void commitSelectedFoeDraft(); }}
           onKeyDown={handleFoeFieldKeyDown}
         />
