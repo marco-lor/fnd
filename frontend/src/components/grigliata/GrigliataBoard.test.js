@@ -31,6 +31,7 @@ import {
 } from '../common/privateMediaAssets';
 import * as grigliataBoardTokenUiModule from './grigliataBoardTokenUi';
 import * as fogVisibilityFiltering from './fogVisibilityFiltering';
+import * as tokenStacksModule from './tokenStacks';
 import { TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE } from './grigliataBoardTokenUi';
 import {
   getDecodedImageBytes,
@@ -2465,9 +2466,10 @@ describe('GrigliataBoard', () => {
     expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  test('updates remembered fog without refiltering or relayering board tokens', async () => {
+  test('updates remembered fog without rebuilding token visibility, layers or stacks', async () => {
     const filter = jest.spyOn(fogVisibilityFiltering, 'filterFogVisibleTokens');
     const splitLayers = jest.spyOn(fogVisibilityFiltering, 'splitFogVisibleTokenRenderLayers');
+    const buildStacks = jest.spyOn(tokenStacksModule, 'buildTokenStackCells');
     try {
       const props = buildProps({
         currentUserId: 'user-1',
@@ -2489,8 +2491,10 @@ describe('GrigliataBoard', () => {
       expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
       expect(filter).toHaveBeenCalled();
       expect(splitLayers).toHaveBeenCalled();
+      expect(buildStacks).toHaveBeenCalled();
       filter.mockClear();
       splitLayers.mockClear();
+      buildStacks.mockClear();
 
       rerender(<GrigliataBoard {...props} fogOfWar={{ ...sight, memoryTiles: [buildMemoryTile()] }} />);
 
@@ -2498,11 +2502,13 @@ describe('GrigliataBoard', () => {
       expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
       expect(filter).not.toHaveBeenCalled();
       expect(splitLayers).not.toHaveBeenCalled();
+      expect(buildStacks).not.toHaveBeenCalled();
 
       rerender(<GrigliataBoard {...props} fogOfWar={{ currentVisibleCells: ['8:0'] }} />);
       expect(await screen.findByTestId('token-node-user-2')).toBeInTheDocument();
       expect(filter).toHaveBeenCalled();
       expect(splitLayers).toHaveBeenCalled();
+      expect(buildStacks).toHaveBeenCalled();
 
       const fixedSight = { currentVisiblePolygons: [[[
         { x: 555, y: 0 },
@@ -2524,6 +2530,7 @@ describe('GrigliataBoard', () => {
       expect(await screen.findByTestId('token-node-user-1')).toBeInTheDocument();
       expect(screen.getByTestId('token-node-user-2')).toBeInTheDocument();
     } finally {
+      buildStacks.mockRestore();
       splitLayers.mockRestore();
       filter.mockRestore();
     }
@@ -4162,6 +4169,28 @@ describe('GrigliataBoard', () => {
     };
     const movedTokenIds = (onMoveTokens) => onMoveTokens.mock.calls[0][0].map(({ tokenId }) => tokenId);
 
+    test('reuses stack geometry on selection and turn changes, and rebuilds it after a move', () => {
+      const buildStacks = jest.spyOn(tokenStacksModule, 'buildTokenStackCells');
+      try {
+        const props = stackProps();
+        const { rerender } = render(<GrigliataBoard {...props} />);
+        expect(buildStacks).toHaveBeenCalled();
+        buildStacks.mockClear();
+
+        chooseFromStack('2:2', 'nyx');
+        rerender(<GrigliataBoard {...props} activeTurnTokenId="nyx" />);
+        expect(screen.getByTestId('token-node-nyx')).toHaveAttribute('data-active-turn', 'true');
+        expect(screen.getByTestId('token-stack-badge-2:2')).toBeInTheDocument();
+        expect(buildStacks).not.toHaveBeenCalled();
+
+        rerender(<GrigliataBoard {...props} activeTurnTokenId="nyx" tokens={[nyx({ col: 3 }), frusta()]} />);
+        expect(buildStacks).toHaveBeenCalled();
+        expect(screen.queryByTestId('token-stack-badge-2:2')).not.toBeInTheDocument();
+      } finally {
+        buildStacks.mockRestore();
+      }
+    });
+
     test('drags the chosen own token from under another player\'s token', async () => {
       const onMoveTokens = jest.fn(() => Promise.resolve(true));
       render(<GrigliataBoard {...stackProps({ onMoveTokens })} />);
@@ -4279,7 +4308,7 @@ describe('GrigliataBoard', () => {
       expect(onMoveTokens.mock.calls[1][0]).toMatchObject([{ tokenId: 'frusta', col: 4 }]);
     });
 
-    test('can drag a chosen token when the stack badge covers its visible part', async () => {
+    test('can drag a covered token through a small opening beyond the first eight sight polygons', async () => {
       const onMoveTokens = jest.fn();
       const opening = (left, top, right, bottom) => [[
         { x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom },
@@ -4291,7 +4320,11 @@ describe('GrigliataBoard', () => {
           stackToken('bora', 'player-1', 'Bora', { col: 1, row: 0, sizeSquares: 2 }),
           frusta({ col: 1, row: 1 }),
         ],
-        fogOfWar: { currentVisiblePolygons: [opening(74, 100, 76, 102), opening(83, 83, 86, 86)] },
+        fogOfWar: { currentVisiblePolygons: [
+          ...Array.from({ length: 8 }, (_, index) => opening(index * 8, 0, index * 8 + 2, 2)),
+          opening(74, 100, 76, 102),
+          opening(83, 83, 86, 86),
+        ] },
         onMoveTokens,
       })} />);
       const stage = screen.getByTestId('konva-stage');

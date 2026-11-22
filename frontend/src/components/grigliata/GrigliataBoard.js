@@ -3197,11 +3197,9 @@ export default function GrigliataBoard({
         ...token,
         renderPosition: dragPosition || token.position,
         isDragPreview: !!dragPosition,
-        isActiveTurn: token.tokenId === activeTurnTokenId,
-        isSelected: selectedTokenIdSet.has(token.tokenId),
       };
     }),
-    [activeTurnTokenId, tokenItems, dragPositionOverrides, selectedTokenIdSet]
+    [tokenItems, dragPositionOverrides]
   );
   const renderedAoEFigures = useMemo(
     () => figureItems.map((figure) => {
@@ -5873,7 +5871,7 @@ export default function GrigliataBoard({
         token: chosenToken,
         grid: normalizedGrid,
         aboveFogTokens: visibleRenderedTokensAboveFog,
-        fogOfWar,
+        fogOfWar: fogSight,
         isFogViewerManager: resolvedIsFogViewerManager,
       })
     ) {
@@ -6469,10 +6467,10 @@ export default function GrigliataBoard({
       belowFogTokens: visibleRenderedTokensBelowFog,
       aboveFogTokens: visibleRenderedTokensAboveFog,
       grid: normalizedGrid,
-      fogOfWar,
+      fogOfWar: fogSight,
       isFogViewerManager: resolvedIsFogViewerManager,
     })),
-    [fogOfWar, normalizedGrid, resolvedIsFogViewerManager, tokenDragState, visibleRenderedTokensAboveFog, visibleRenderedTokensBelowFog]
+    [fogSight, normalizedGrid, resolvedIsFogViewerManager, tokenDragState, visibleRenderedTokensAboveFog, visibleRenderedTokensBelowFog]
   );
   const tokenStackBadges = useMemo(
     () => [...tokenStackCells.values()].filter((stack) => stack.anchor && stack.tokenIds.length > 1),
@@ -6550,8 +6548,14 @@ export default function GrigliataBoard({
   useEffect(() => {
     tokenPortraitMaxEdgeRef.current = tokenPortraitMaxEdge;
   }, [tokenPortraitMaxEdge]);
+  // Apply turn and selection flags after fog filtering so a click reuses the overlap geometry.
+  const tokenMediaCandidates = useMemo(() => visibleRenderedTokens.map((token) => ({
+    ...token,
+    isActiveTurn: token.tokenId === activeTurnTokenId,
+    isSelected: selectedTokenIdSet.has(token.tokenId),
+  })), [activeTurnTokenId, selectedTokenIdSet, visibleRenderedTokens]);
   const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
-    tokens: visibleRenderedTokens,
+    tokens: tokenMediaCandidates,
     viewport,
     stageSize,
     limit: activeBackgroundAssetType === 'image' && !isViewportFitGeometryReady ? 0 : tokenMediaLoadLimit,
@@ -6563,7 +6567,7 @@ export default function GrigliataBoard({
     stageSize,
     tokenMediaLoadLimit,
     viewport,
-    visibleRenderedTokens,
+    tokenMediaCandidates,
   ]);
   const visibleRenderedSharedInteractions = isNarrationPresentationActive ? [] : renderedSharedInteractions;
   const visibleLocalPingsForRender = isNarrationPresentationActive ? [] : visibleLocalPings;
@@ -7225,8 +7229,8 @@ export default function GrigliataBoard({
                   token={token}
                   position={token.renderPosition}
                   canMove={token.canMove}
-                  isActiveTurn={token.isActiveTurn}
-                  isSelected={token.isSelected}
+                  isActiveTurn={token.tokenId === activeTurnTokenId}
+                  isSelected={selectedTokenIdSet.has(token.tokenId)}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
                   portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
@@ -7281,8 +7285,8 @@ export default function GrigliataBoard({
                   token={token}
                   position={token.renderPosition}
                   canMove={token.canMove}
-                  isActiveTurn={token.isActiveTurn}
-                  isSelected={token.isSelected}
+                  isActiveTurn={token.tokenId === activeTurnTokenId}
+                  isSelected={selectedTokenIdSet.has(token.tokenId)}
                   loadMedia={tokenMediaIds.has(token.tokenId)}
                   portraitMaxEdge={tokenPortraitMaxEdge}
                   badgeImages={tokenStatusBadgeImages}
