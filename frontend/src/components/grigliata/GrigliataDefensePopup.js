@@ -52,9 +52,11 @@ const without = (all, id) => {
   const { [id]: gone, ...rest } = all;
   return rest;
 };
-const receiptDetails = ({ target, action }) => ({
-  target: { placementId: target?.placementId, name: target?.name || 'Difesa' },
-  actionName: action?.name,
+const receiptDetails = request => ({
+  combatId: request.combatId,
+  scope: requestScope(request, request.target?.placementId, request.ownerUid),
+  target: { placementId: request.target?.placementId, name: request.target?.name || 'Difesa' },
+  actionName: request.action?.name,
 });
 const lostFocus = () => !document.activeElement || document.activeElement === document.body;
 
@@ -70,8 +72,8 @@ function refocusDamage(memory, root) {
   (controls.find(control => memory.name && control.getAttribute('name') === memory.name) || controls[0])?.focus();
 }
 
-// The identities a receipt's private copy must match; null when one is missing.
-const damageScope = ({ id, combatId, backgroundId }, placementId, ownerUid) => (
+// The identities a private request must match; null when one is missing.
+const requestScope = ({ id, combatId, backgroundId }, placementId, ownerUid) => (
   [id, combatId, placementId, ownerUid].every(value => typeof value === 'string' && value)
     ? { requestId: id, combatId, placementId, ownerUid, backgroundId: typeof backgroundId === 'string' ? backgroundId : null }
     : null
@@ -79,23 +81,26 @@ const damageScope = ({ id, combatId, backgroundId }, placementId, ownerUid) => (
 
 // What this answer lets its owner confirm: only a landed outcome with a concrete damage on this very pawn, by the
 // rule the Registro uses. The amount itself is never taken from here: the form waits for the server's own copy.
-function receiptDamageScope(request, answer, ownerUid) {
-  const placementId = request.target?.placementId;
+function receiptDamageScope(scope, answer) {
+  if (!scope) return null;
+  const { placementId } = scope;
   const landed = { status: 'done', outcome: answer.outcome, damage: answer.damage, placementId };
   if (!answer.damagePending && !combatDamageProposal({ effects: answer.effects || [] }, landed)) return null;
-  return damageScope(request, placementId, ownerUid);
+  return scope;
 }
 
 // The damage of an action that asked this owner for no defense, still to confirm: a receipt with the same scope,
 // document watch and form as an answered defense, or null unless every identity is this owner's.
 function immediateDamageReceipt(entry, ownerUid) {
   if (entry?.status !== 'damagePending') return null;
-  const scope = damageScope(entry, entry.ownerDamage?.target?.placementId, ownerUid);
+  const scope = requestScope(entry, entry.ownerDamage?.target?.placementId, ownerUid);
   const owner = receiptOwnerDamage({ id: entry.id, data: entry }, scope);
   const proposal = owner && !owner.damageApplied ? combatDamageProposal(NO_EFFECTS, owner) : null;
   if (!proposal) return null;
   return {
     key: JSON.stringify(['damage', entry.id]),
+    combatId: entry.combatId,
+    scope,
     immediate: true,
     target: { placementId: owner.placementId, name: owner.name || 'Bersaglio' },
     actionName: entry.ownerDamage.action?.name,
@@ -108,7 +113,7 @@ function immediateDamageReceipt(entry, ownerUid) {
   };
 }
 
-function scopedDamageData(snapshot, scope) {
+function scopedRequestData(snapshot, scope) {
   const data = snapshot?.data;
   if (!scope || snapshot?.id !== scope.requestId || !data || data.ownerUid !== scope.ownerUid
     || data.combatId !== scope.combatId || (scope.backgroundId && data.backgroundId !== scope.backgroundId)) return null;
@@ -117,7 +122,7 @@ function scopedDamageData(snapshot, scope) {
 
 // The owner's private copy of this one outcome, with only the fields the form needs.
 export function receiptOwnerDamage(snapshot, scope) {
-  const target = scopedDamageData(snapshot, scope)?.ownerDamage?.target;
+  const target = scopedRequestData(snapshot, scope)?.ownerDamage?.target;
   if (!target || target.placementId !== scope.placementId || target.ownerUid !== scope.ownerUid) return null;
   const { placementId, name, ownerUid, status, round, outcome, damage, critical } = target;
   return {
@@ -127,11 +132,8 @@ export function receiptOwnerDamage(snapshot, scope) {
   };
 }
 
-// A cached copy may predate the answer: it never clears a copy already read, and the form opens only once the server
-// itself has answered.
 function nextDamageFeed(before = {}, snapshot, scope) {
-  if (snapshot?.fromCache) return before;
-  const data = scopedDamageData(snapshot, scope);
+  const data = scopedRequestData(snapshot, scope);
   const owner = receiptOwnerDamage(snapshot, scope);
   let settlement = before.settlement;
   if (owner?.damageApplied || combatDamageProposal(NO_EFFECTS, owner)) settlement = 'proposal';
@@ -153,8 +155,8 @@ function receiptDamageView(feed = {}, state = {}) {
   return null;
 }
 
-// A single private watch follows the receipt across the dialog, corner and unresolved queue.
-function DamageWatch({ scope, attempt, watch, setFeeds }) {
+// The same private watch follows a defense from sending to its retained receipt.
+function RequestWatch({ scope, attempt, watch, setFeeds, cancelCombat }) {
   const { requestId, combatId, placementId, backgroundId, ownerUid } = scope;
   useEffect(() => {
     let active = true;
@@ -163,7 +165,16 @@ function DamageWatch({ scope, attempt, watch, setFeeds }) {
     let stop;
     try {
       stop = watch(requestId, {
-        next: snapshot => { if (active) setFeeds(all => ({ ...all, [requestId]: nextDamageFeed(all[requestId], snapshot, read) })); },
+        next: snapshot => {
+          if (!active || snapshot?.fromCache) return;
+          const status = scopedRequestData(snapshot, read)?.status;
+          if (status === 'cancelled') {
+            cancelCombat(combatId);
+            return;
+          }
+          if (status === 'waiting') return;
+          setFeeds(all => ({ ...all, [requestId]: nextDamageFeed(all[requestId], snapshot, read) }));
+        },
         error: fail,
       });
     } catch {
@@ -178,7 +189,7 @@ function DamageWatch({ scope, attempt, watch, setFeeds }) {
         return settlement ? { ...all, [requestId]: { settlement } } : without(all, requestId);
       });
     };
-  }, [watch, requestId, combatId, placementId, backgroundId, ownerUid, attempt, setFeeds]);
+  }, [watch, requestId, combatId, placementId, backgroundId, ownerUid, attempt, setFeeds, cancelCombat]);
   return null;
 }
 
@@ -345,7 +356,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
 function DefenseInbox({
   uid, isManager, requests, damageRequests, activeDamageBackgroundId, onRespond, busy, error, onWatchDamage, onApplyDamage,
 }) {
-  const [deferred, setDeferred] = useState(new Set());
+  const [deferred, setDeferred] = useState(new Map());
   const [activeKey, setActiveKey] = useState('');
   const [receiptQueue, setReceiptQueue] = useState(() => ({ shown: [], waiting: [], parked: [], targets: new Map() }));
   const { shown: receipts, waiting: queuedReceipts, parked: parkedReceipts, targets } = receiptQueue;
@@ -359,7 +370,32 @@ function DefenseInbox({
   const [attempts, setAttempts] = useState({});
   // Keep each unconfirmed answer and its values until that defense is settled.
   const [answers, setAnswers] = useState({});
-  const answering = useRef(false);
+  const answering = useRef(null);
+  const [cancelledCombats, setCancelledCombats] = useState(() => new Set());
+  const cancelled = useRef(cancelledCombats);
+  const cancelCombat = useCallback(combatId => {
+    if (!combatId || cancelled.current.has(combatId)) return;
+    cancelled.current = new Set(cancelled.current).add(combatId);
+    if (answering.current?.request.combatId === combatId) answering.current = null;
+    setCancelledCombats(cancelled.current);
+    setAnswers(all => Object.values(all).reduce((kept, answer) =>
+      answer.request.combatId === combatId ? without(kept, answer.key) : kept, all));
+    setDeferred(all => new Map([...all].filter(([, id]) => id !== combatId)));
+    setReceiptQueue(queue => {
+      const retain = receipt => receipt.combatId !== combatId;
+      return {
+        ...queue,
+        shown: queue.shown.filter(retain),
+        waiting: queue.waiting.filter(retain),
+        parked: queue.parked.filter(retain),
+      };
+    });
+  }, []);
+  useLayoutEffect(() => {
+    for (const entry of [...requests, ...damageRequests]) {
+      if (entry?.status === 'cancelled' && entry.ownerUid === uid) cancelCombat(entry.combatId);
+    }
+  }, [requests, damageRequests, uid, cancelCombat]);
   // Damage to confirm already offered once: a later write of its request never offers or announces it again.
   const offeredDamage = useRef(new Set());
   const seenInOwnerInbox = useRef(new Set());
@@ -372,27 +408,23 @@ function DefenseInbox({
   const returnFocus = useRef(null);
   const titleId = useId();
   const descriptionId = useId();
-  const liveRequestKeys = useMemo(() => new Set(requests.map(requestKey)), [requests]);
-  const attemptsByRequest = Object.values(answers);
-  const held = attemptsByRequest.filter(answer => (answer.busy || answer.unconfirmed) && !liveRequestKeys.has(answer.key));
-  const queue = [...requests, ...held.map(answer => answer.request)];
+  const waitingRequests = useMemo(() => requests.filter(entry =>
+    entry.status === 'waiting' && !cancelledCombats.has(entry.combatId)), [requests, cancelledCombats]);
+  const liveRequestKeys = useMemo(() => new Set(waitingRequests.map(requestKey)), [waitingRequests]);
+  const unsettled = useMemo(() => Object.values(answers).filter(answer => answer.busy || answer.unconfirmed), [answers]);
+  const held = unsettled.filter(answer => !liveRequestKeys.has(answer.key));
+  const queue = [...waitingRequests, ...held.map(answer => answer.request)];
   const available = queue.filter(candidate => !deferred.has(requestKey(candidate)));
   const request = available.find(candidate => requestKey(candidate) === activeKey) || available[0];
   const key = request ? requestKey(request) : '';
   const own = answers[key];
   const confirmsDamage = Boolean(onWatchDamage && onApplyDamage);
-  // Closed guided receipts need their terminal write even when no proposal will enter the inbox.
-  const hiddenThrows = [...queuedReceipts, ...parkedReceipts].filter(receipt =>
-    receipt.waitingForDamage && receipt.damage && !feeds[receipt.damage.requestId]?.settlement);
-  const watched = new Map(confirmsDamage
-    ? [...receipts, ...hiddenThrows].filter(receipt => receipt.damage).map(receipt => [receipt.damage.requestId, receipt.damage])
-    : []);
   // Damage ready to confirm, including earlier defenses when the owner returns on another device.
   const pendingDamage = useMemo(() => (confirmsDamage
     ? damageRequests
-      .filter(entry => entry?.backgroundId === activeDamageBackgroundId)
+      .filter(entry => entry?.backgroundId === activeDamageBackgroundId && !cancelledCombats.has(entry?.combatId))
       .map(entry => immediateDamageReceipt(entry, uid)).filter(Boolean)
-    : NONE), [activeDamageBackgroundId, confirmsDamage, damageRequests, uid]);
+    : NONE), [activeDamageBackgroundId, confirmsDamage, damageRequests, uid, cancelledCombats]);
   const visibleReceipts = receipts.filter(receipt => onReceiptMap(receipt, activeDamageBackgroundId));
   const activeDamageIds = new Set(pendingDamage.map(receipt => receipt.damage.requestId));
   const listedDamageIds = useMemo(() => new Set(damageRequests.map(entry => entry?.id)), [damageRequests]);
@@ -447,13 +479,14 @@ function DefenseInbox({
 
   // A queued receipt keeps its draft and submission. Only discard them once the receipt leaves the queue entirely.
   useEffect(() => {
-    const retained = new Set([...receipts, ...queuedReceipts, ...parkedReceipts].map(receipt => receipt.damage?.requestId));
-    const prune = all => Object.keys(all).reduce((kept, id) => retained.has(id) ? kept : without(kept, id), all);
-    setFeeds(prune);
-    setDamage(prune);
-    setDrafts(prune);
-    setAttempts(prune);
-  }, [parkedReceipts, queuedReceipts, receipts]);
+    const retained = new Set([...receipts, ...queuedReceipts, ...parkedReceipts].map(receipt => receipt.scope?.requestId));
+    const prune = (all, ids = retained) => Object.keys(all).reduce((kept, id) => ids.has(id) ? kept : without(kept, id), all);
+    const followed = new Set([...retained, ...unsettled.map(({ request }) => request.id)]);
+    setFeeds(all => prune(all, followed));
+    setDamage(all => prune(all));
+    setDrafts(all => prune(all));
+    setAttempts(all => prune(all));
+  }, [parkedReceipts, queuedReceipts, receipts, unsettled]);
 
   useLayoutEffect(() => {
     liveKeys.current = liveRequestKeys;
@@ -516,6 +549,7 @@ function DefenseInbox({
       refocusDamage(memory, dialogRef.current.open ? dialogRef.current : feedRef.current);
     } else {
       damageFocus.current = null;
+      if (key) focusPrompt(dialogRef.current);
     }
   });
 
@@ -534,11 +568,11 @@ function DefenseInbox({
 
   function defer() {
     if (!key) return;
-    setDeferred(new Set(queue.map(requestKey).filter(id => id === key || deferred.has(id))));
+    setDeferred(new Map(queue.map(entry => [requestKey(entry), entry.combatId]).filter(([id]) => id === key || deferred.has(id))));
   }
 
   function reopen() {
-    setDeferred(new Set());
+    setDeferred(new Map());
   }
 
   // The oldest left behind come back, within the four kept. Once the count itself goes, focus follows to the newest
@@ -555,10 +589,11 @@ function DefenseInbox({
   }
 
   async function respond(answeredRequest, values, gesture) {
-    if (answering.current) return;
-    answering.current = true;
+    const { combatId } = answeredRequest;
+    if (answering.current || cancelled.current.has(combatId)) return;
     const answeredKey = requestKey(answeredRequest);
     const sent = { key: answeredKey, request: answeredRequest, values };
+    answering.current = sent;
     const save = next => setAnswers(all => next ? { ...all, [answeredKey]: next } : without(all, answeredKey));
     // A retry keeps its prompt as it was while it goes: same values, same round.
     save({ ...sent, busy: true, unconfirmed: Boolean(answers[answeredKey]?.unconfirmed) });
@@ -566,6 +601,7 @@ function DefenseInbox({
     try {
       reply = await onRespond(answeredRequest, values);
     } catch (failure) {
+      if (cancelled.current.has(combatId)) return;
       const message = failure?.message || DEFENSE_FAILED;
       if (failure?.unconfirmed) {
         save({ ...sent, error: message, unconfirmed: true });
@@ -578,15 +614,21 @@ function DefenseInbox({
       }
       return;
     } finally {
-      answering.current = false;
+      if (answering.current === sent) answering.current = null;
+    }
+    if (cancelled.current.has(combatId)) return;
+    if (reply?.status === 'cancelled') {
+      cancelCombat(combatId);
+      return;
     }
     save(null);
     if (!reply?.outcome) return;
     const { action } = answeredRequest;
     const { attack, defense } = reply;
+    const details = receiptDetails(answeredRequest);
     addReceipt({
       key: answeredKey,
-      ...receiptDetails(answeredRequest),
+      ...details,
       outcome: combatDefenderOutcomeLabel(reply.outcome, action?.kind, action?.hands),
       rolls: defense?.total != null && (attack?.total != null || answeredRequest.defense?.showDie) && {
         attack: attack?.total != null ? attack.label || 'Attacco' : null,
@@ -603,23 +645,26 @@ function DefenseInbox({
       effects: reply.effects || [],
       // A landed spell or technique can do more than damage (e.g. no movement next turn): the defender sees it here.
       cardText: ['hit', 'accepted'].includes(reply.outcome) ? combatCardText(action, action?.kind) : '',
-      damage: receiptDamageScope(answeredRequest, reply, uid),
+      damage: receiptDamageScope(details.scope, reply),
     });
   }
 
   async function applyDamage(scope, owner, amount) {
-    const id = scope.requestId;
+    const { requestId: id, combatId } = scope;
     // Checked again here, not only where the form is offered: one application in flight per pawn, none once recorded.
-    if (locks.current.has(id) || owner.damageApplied || damage[id]?.applied) return;
+    if (cancelled.current.has(combatId) || locks.current.has(id) || owner.damageApplied || damage[id]?.applied) return;
     locks.current.add(id);
     const criticalScore = owner.critical?.score ?? null;
     const submitted = { value: String(amount), criticalScore };
     setDamage(all => ({ ...all, [id]: { busy: true, submitted } }));
     // Keep the reply if the receipt is still visible or waiting to be reopened.
-    const settle = next => setDamage(all => (all[id] ? { ...all, [id]: next } : all));
+    const settle = next => {
+      if (!cancelled.current.has(combatId)) setDamage(all => (all[id] ? { ...all, [id]: next } : all));
+    };
     try {
-      const applied = await onApplyDamage({ combatId: scope.combatId, targetPlacementId: owner.placementId, amount, criticalScore });
-      settle({ applied });
+      const applied = await onApplyDamage({ combatId, targetPlacementId: owner.placementId, amount, criticalScore });
+      if (applied?.status === 'cancelled') cancelCombat(combatId);
+      else settle({ applied });
     } catch (failure) {
       settle({ error: failure?.message || DAMAGE_FAILED, submitted });
     } finally {
@@ -667,15 +712,28 @@ function DefenseInbox({
     return null;
   }
 
+  // The owner query covers queued proposals it already lists. Other retained receipts and unsettled
+  // replies need their own document for cancellation after the request drops out of the query.
+  const retainedOutsideQuery = [...queuedReceipts, ...parkedReceipts].filter(receipt => {
+    const id = receipt.damage?.requestId;
+    return id && (damage[id]?.busy || (!listedDamageIds.has(id) && !seenInOwnerInbox.current.has(id) && stillPending(receipt)));
+  });
+  const scopes = [
+    ...unsettled.map(({ request }) => requestScope(request, request.target?.placementId, uid)),
+    ...[...receipts, ...retainedOutsideQuery].map(receipt => receipt.scope),
+  ];
+  const watched = new Map(onWatchDamage ? scopes.filter(Boolean).map(scope => [scope.requestId, scope]) : []);
+
   return (
     <>
       {Array.from(watched.values(), scope => (
-        <DamageWatch
+        <RequestWatch
           key={scope.requestId}
           scope={scope}
           attempt={attempts[scope.requestId] || 0}
           watch={onWatchDamage}
           setFeeds={setFeeds}
+          cancelCombat={cancelCombat}
         />
       ))}
       <div className="gc-defense-feed" ref={feedRef}>
@@ -711,7 +769,7 @@ function DefenseInbox({
             <DefensePrompt
               key={key}
               {...{ request, titleId, descriptionId }}
-              busy={busy || attemptsByRequest.some(answer => answer.busy)}
+              busy={busy || unsettled.some(answer => answer.busy)}
               error={own?.error || error}
               sent={own && (own.busy || own.unconfirmed) ? own.values : null}
               unconfirmed={Boolean(own?.unconfirmed)}
@@ -730,9 +788,9 @@ function DefenseInbox({
 // `onRespond(request, values)` resolves the server's answer, or rejects with a message to show, flagged `unconfirmed`
 // when the answer may already be recorded (a retry then resends it for the same round); hosts that report failures
 // through `busy` and `error` resolve nothing instead.
-// `onWatchDamage(requestId, { next, error })` follows the signed-in owner's private request and returns its unsubscribe;
+// `onWatchDamage(requestId, { next, error })` follows the signed-in owner's private request and returns its unsubscribe.
 // `onApplyDamage({ combatId, targetPlacementId, amount, criticalScore })` resolves the recorded `{ amount }` or rejects with
-// a message to show. Without both, receipts read as before.
+// a message to show. Either command may resolve to `{ status: 'cancelled' }` when cancellation wins.
 // `damageRequests` lists the owner's `damagePending` requests from the server (never a cached copy): damage of actions
 // that asked no defense, each offered once as a receipt to confirm.
 // `isManager` is the signed-in DM, who may confirm any amount for a pawn of theirs; an owner is held to each proposal.
@@ -741,13 +799,13 @@ export function GrigliataDefensePopup({
   onWatchDamage, onApplyDamage,
 }) {
   if (!currentUserId || !onRespond) return null;
-  const pending = requests.filter(request => request.ownerUid === currentUserId && request.status === 'waiting');
+  const owned = requests.filter(request => request.ownerUid === currentUserId);
   return (
     <DefenseInbox
       key={currentUserId}
       uid={currentUserId}
       isManager={Boolean(isManager)}
-      requests={pending}
+      requests={owned}
       damageRequests={damageRequests}
       activeDamageBackgroundId={activeDamageBackgroundId}
       onRespond={onRespond}

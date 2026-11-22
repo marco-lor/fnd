@@ -4,11 +4,14 @@ const path = require('node:path');
 const {createRequire} = require('node:module');
 const {after, before, test} = require('node:test');
 const {assertFails, assertSucceeds, initializeTestEnvironment} = require('@firebase/rules-unit-testing');
-const {collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc, where} = require('firebase/firestore');
+const {collection, deleteField, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where} = require('firebase/firestore');
 const functionsRequire = createRequire(path.join(__dirname, '../../functions/package.json'));
 const {initializeApp, deleteApp} = functionsRequire('firebase-admin/app');
 const {getFirestore} = functionsRequire('firebase-admin/firestore');
 const {getGrigliataCombatArsenal, mutateGrigliataCombat} = require('../../functions/lib/grigliataCombat');
+const {
+  task05AdjustGold, task05CommitConsumable, task05PrepareConsumable, task05UpdateGrigliataCharacterResources,
+} = require('../../functions/lib/userDataCommands');
 
 const projectId = 'demo-fnd-perf';
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST || '';
@@ -185,6 +188,144 @@ const trackCombat = async (combatId) => {
 };
 const applyDamage = (uid, combatId, target, amount, criticalScore = null) => mutate(uid, {
   command: 'applyDamage', combatId, targetPlacementId: placementId(target), amount, criticalScore,
+});
+
+test('cancelling one volley refunds the real losses, retires both prompts and preserves a second volley', async () => {
+  const payer = db.doc(`users/${attacker}/state/resources`);
+  const recipient = db.doc(`users/${defender}/state/resources`);
+  await db.doc(`grigliata_token_placements/${placementId(npc)}`).update({isVisibleToPlayers: true});
+  await seed(payer.path, {stats: {hpCurrent: 20, manaCurrent: 3}});
+  await seed(recipient.path, {stats: {hpCurrent: 3, barrieraCurrent: 2, barrieraTotal: 2}});
+  await seed(`users/${attacker}/spells/undo-volley`, {
+    Nome: 'Fiammata di prova', Costo: 5,
+    combat: {mode: 'multiple', targetCount: 2, rangeFt: 20, attackStats: ['Mira'], defenseStats: ['Difesa'],
+      attackDie: false, defenseDie: false, damageExpr: '9'},
+  });
+  const volley = {
+    command: 'launch', backgroundId: board, actorPlacementId: placementId(attacker),
+    kind: 'spell', actionId: 'personal:undo-volley', targetPlacementIds: [placementId(defender), placementId(npc)],
+    confirmHp: true, maxHpCost: 5,
+  };
+  const {combatId} = await mutate(attacker, {...volley, operationId: 'undo-volley-first'});
+  const action = await trackCombat(combatId);
+  const second = await mutate(attacker, {...volley, operationId: 'undo-volley-second'});
+  const other = await trackCombat(second.combatId);
+  const defend = {command: 'defend', combatId, round: 1, targetPlacementId: placementId(defender), defense: -99};
+  assert.equal((await mutate(defender, defend)).outcome, 'hit');
+  await applyDamage(otherDm, combatId, defender, 9);
+  assert.deepEqual((await recipient.get()).get('stats'), {hpCurrent: 0, barrieraCurrent: 0, barrieraTotal: 2});
+  const publicClient = environment.authenticatedContext(defender).firestore();
+  await assertFails(getDoc(doc(publicClient, 'grigliata_combat_receipts', combatId)));
+  await assertFails(getDoc(doc(publicClient, 'grigliata_combat_receipts', combatId, 'damage', placementId(defender))));
+
+  const cancel = {command: 'cancel', combatId};
+  await assert.rejects(() => mutate(defender, cancel), error => ['permission-denied', 'not-found'].includes(error.code));
+  const lateDefense = {...defend, targetPlacementId: placementId(npc)};
+  const [, , reply] = await Promise.all([
+    mutate(attacker, cancel),
+    mutate(otherDm, cancel),
+    mutate(npcOwner, lateDefense).catch(error => error.code),
+  ]);
+  assert.ok(reply === 'failed-precondition' || reply.outcome === 'hit');
+  assert.equal((await action.get()).get('status'), 'cancelled');
+  assert.deepEqual((await payer.get()).get('stats'), {hpCurrent: 15, manaCurrent: 3});
+  assert.deepEqual((await recipient.get()).get('stats'), {hpCurrent: 3, barrieraCurrent: 2, barrieraTotal: 2});
+  assert.equal((await other.get()).get('status'), 'waiting');
+  const requests = id => db.collection('grigliata_combat_requests').where('combatId', '==', id).get();
+  assert.deepEqual((await requests(combatId)).docs.map(item => item.get('status')), ['cancelled', 'cancelled']);
+  assert.deepEqual((await requests(second.combatId)).docs.map(item => item.get('status')), ['waiting', 'waiting']);
+  await assert.rejects(() => mutate(npcOwner, lateDefense), {code: 'failed-precondition'});
+  await assert.rejects(() => applyDamage(otherDm, combatId, defender, 9), {code: 'failed-precondition'});
+});
+
+test('only one of the final damage confirmation and cancellation can commit', async () => {
+  const payer = db.doc(`users/${attacker}/state/resources`);
+  const recipient = db.doc(`users/${defender}/state/resources`);
+  await seed(payer.path, {stats: {hpCurrent: 20, manaCurrent: 10}});
+  await seed(recipient.path, {stats: {hpCurrent: 8}});
+  await seed(`users/${attacker}/spells/undo-final`, {
+    Nome: 'Ultima conferma', Costo: 3, combat: {mode: 'single', opposed: false, damageExpr: '2'},
+  });
+  const {combatId} = await mutate(attacker, {
+    command: 'launch', operationId: 'undo-volley-final', actionId: 'personal:undo-final', kind: 'spell',
+    backgroundId: board, actorPlacementId: placementId(attacker), targetPlacementIds: [placementId(defender)],
+  });
+  const event = await trackCombat(combatId);
+  assert.equal((await event.get()).get('status'), 'awaitingConfirmation');
+  const outcomes = await Promise.allSettled([
+    mutate(attacker, {command: 'cancel', combatId}), applyDamage(defender, combatId, defender, 2),
+  ]);
+  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(result => result.status === 'rejected').reason.code, 'failed-precondition');
+  const cancelled = outcomes[0].status === 'fulfilled';
+  assert.equal((await event.get()).get('status'), cancelled ? 'cancelled' : 'done');
+  assert.equal((await payer.get()).get('stats.manaCurrent'), cancelled ? 10 : 7);
+  assert.equal((await recipient.get()).get('stats.hpCurrent'), cancelled ? 8 : 6);
+});
+
+test('a defender who casts another spell keeps that expense when a cancelled hit restores their barrier', async () => {
+  const recipient = db.doc(`users/${defender}/state/resources`);
+  await seed(recipient.path, {stats: {hpCurrent: 10, manaCurrent: 10, barrieraCurrent: 3, barrieraTotal: 3}});
+  await db.doc(`grigliata_token_placements/${placementId(npc)}`).update({isVisibleToPlayers: true});
+  await seed(`users/${attacker}/spells/undo-barrier`, {
+    Nome: 'Fiammata di prova', Costo: 0, combat: {mode: 'multiple', targetCount: 2, damageExpr: '2'},
+  });
+  await seed(`users/${defender}/spells/own-action`, {Nome: 'Concentrazione di prova', Costo: 1, combat: {mode: 'self'}});
+  const {combatId} = await mutate(attacker, {
+    command: 'launch', operationId: 'undo-barrier-hit', backgroundId: board, actorPlacementId: placementId(attacker),
+    kind: 'spell', actionId: 'personal:undo-barrier', targetPlacementIds: [placementId(defender), placementId(npc)],
+  });
+  await trackCombat(combatId);
+  await applyDamage(defender, combatId, defender, 2);
+  const ownAction = await mutate(defender, {
+    command: 'launch', operationId: 'undo-barrier-second-spell', backgroundId: board, actorPlacementId: placementId(defender),
+    kind: 'spell', actionId: 'personal:own-action', targetPlacementIds: [placementId(defender)],
+  });
+  await trackCombat(ownAction.combatId);
+  assert.equal((await recipient.get()).get('stats.barrieraCurrent'), 1);
+  const reply = await mutate(attacker, {command: 'cancel', combatId});
+  assert.equal(reply.cancellation.needsReview, false);
+  assert.deepEqual((await recipient.get()).get('stats'), {hpCurrent: 10, manaCurrent: 9, barrieraCurrent: 3, barrieraTotal: 3});
+});
+
+test('a character barrier refund preserves a sheet PM edit, potion gain, and gold adjustment', async () => {
+  const recipient = db.doc(`users/${defender}/state/resources`);
+  await seed(recipient.path, {stats: {
+    hpCurrent: 10, manaCurrent: 8, manaTotal: 10, gold: 10, barrieraCurrent: 3, barrieraTotal: 3,
+  }});
+  await seed(`users/${defender}/inventory/test-mana-potion`, {
+    quantity: 2,
+    currentSnapshot: {type: 'consumabile', Parametri: {Special: {'Rigenera Dado Anima Mana': {4: 1}}}},
+  });
+  await db.doc(`grigliata_token_placements/${placementId(npc)}`).update({isVisibleToPlayers: true});
+  await seed(`users/${attacker}/spells/token-sheet-hit`, {
+    Nome: 'Raffica di prova', Costo: 0, combat: {mode: 'multiple', targetCount: 2, damageExpr: '2'},
+  });
+  const {combatId} = await mutate(attacker, {
+    command: 'launch', operationId: 'token-sheet-hit', backgroundId: board, actorPlacementId: placementId(attacker),
+    kind: 'spell', actionId: 'personal:token-sheet-hit', targetPlacementIds: [placementId(defender), placementId(npc)],
+  });
+  await trackCombat(combatId);
+  await applyDamage(defender, combatId, defender, 2);
+  assert.equal((await recipient.get()).get('stats.barrieraCurrent'), 1);
+
+  await task05UpdateGrigliataCharacterResources.run({auth: {uid: defender}, data: {
+    operationId: 'token-sheet-edit-pm', backgroundId: board, tokenId: defender, resources: {manaCurrent: 9},
+  }});
+  const {preparationId} = await task05PrepareConsumable.run({auth: {uid: defender}, data: {
+    operationId: 'token-sheet-prepare-potion', inventoryId: 'test-mana-potion', resource: 'mana',
+  }});
+  await task05CommitConsumable.run({auth: {uid: defender}, data: {
+    operationId: 'token-sheet-commit-potion', preparationId,
+  }});
+  await task05AdjustGold.run({auth: {uid: otherDm}, data: {
+    operationId: 'token-sheet-adjust-gold', userId: defender, delta: 2,
+  }});
+
+  assert.deepEqual((await mutate(attacker, {command: 'cancel', combatId})).cancellation, {needsReview: false});
+  assert.deepEqual((await recipient.get()).get('stats'), {
+    hpCurrent: 10, manaCurrent: 10, manaTotal: 10, gold: 12, barrieraCurrent: 3, barrieraTotal: 3,
+  });
 });
 
 test('concurrent damage retries apply once per target from fresh balances', async () => {
@@ -565,3 +706,52 @@ test('a DM can finish another player’s damage beyond the latest 40 while the b
   assert.ok(!(await outstanding(manager)).docs.some(d => d.id === combatId));
   await trackCombat(combatId);
 });
+
+for (const tokenType of ['custom', 'foe']) {
+  for (const replaceShield of [false, true]) {
+    test(`DM cancellation handles a ${tokenType} shield after ${replaceShield ? 'same-value reactivation' : 'a PF, PM and notes edit'}`, async () => {
+      const ownerUid = tokenType === 'custom' ? defender : npcOwner;
+      const editor = tokenType === 'custom' ? ownerUid : otherDm;
+      const tokenPath = `grigliata_tokens/${npc}`;
+      const target = db.doc(tokenPath);
+      const client = environment.authenticatedContext(editor).firestore();
+      const token = doc(client, tokenPath);
+      await seed(tokenPath, {
+        ownerUid, label: npc, tokenType, imageUrl: '', imagePath: '', updatedBy: ownerUid,
+        updatedAt: new Date(0), stats: {hpCurrent: 9, manaCurrent: 4, shieldCurrent: 5, shieldTotal: 5},
+        ...(tokenType === 'foe' ? {
+          imageSource: 'foesHub', foeSourceId: 'test-foe', Parametri: {}, spells: [], tecniche: [],
+        } : {imageSource: 'uploaded'}),
+      });
+      await seed(`grigliata_token_placements/${placementId(npc)}`, {
+        backgroundId: board, ownerUid, tokenId: npc, col: 2, row: 0, isVisibleToPlayers: true,
+      });
+      await seed(`users/${attacker}/spells/token-shield`, {
+        Nome: 'Colpo alla barriera', Costo: 0, combat: {mode: 'multiple', targetCount: 2, damageExpr: '2'},
+      });
+      const {combatId} = await mutate(attacker, {
+        command: 'launch', operationId: `undo-${tokenType}-shield-${replaceShield}`, backgroundId: board,
+        actorPlacementId: placementId(attacker), kind: 'spell', actionId: 'personal:token-shield',
+        targetPlacementIds: [placementId(npc), placementId(defender)],
+      });
+      await trackCombat(combatId);
+      const damageReceipt = `grigliata_combat_receipts/${combatId}/damage/${placementId(npc)}`;
+      seeded.add(`grigliata_combat_receipts/${combatId}`);
+      seeded.add(damageReceipt);
+      seeded.add(`${tokenPath}/combat_barrier/continuity`);
+      await applyDamage(otherDm, combatId, npc, 2);
+      assert.equal((await target.get()).get('stats.shieldCurrent'), 3);
+      await assertSucceeds(setDoc(token, {
+        ...(replaceShield && {combatShieldActivation: deleteField()}),
+        stats: {hpCurrent: 8, manaCurrent: 2, ...(replaceShield && {shieldCurrent: 3, shieldTotal: 5})},
+        notes: 'Edited after the hit', updatedAt: serverTimestamp(), updatedBy: editor,
+      }, {merge: true}));
+      const reply = await mutate(otherDm, {command: 'cancel', combatId});
+      assert.equal(reply.cancellation.needsReview, replaceShield);
+      assert.deepEqual((await target.get()).get('stats'), {
+        hpCurrent: 8, manaCurrent: 2, shieldCurrent: replaceShield ? 3 : 5, shieldTotal: 5,
+      });
+      assert.equal((await target.get()).get('notes'), 'Edited after the hit');
+    });
+  }
+}

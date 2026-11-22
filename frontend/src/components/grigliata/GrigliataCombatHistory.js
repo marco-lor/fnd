@@ -1,8 +1,9 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { FaArrowRight, FaClock, FaDiceD20, FaHistory } from 'react-icons/fa';
 import {
-  combatAppliedDamage, combatCardText, combatDamageFloor, combatDamageProposal, combatOutcomeLabel,
-  combatPointLabel, combatSpentLabel, combatTargetName, combatTime, formatCombatRoll, signedCombatModifier,
+  combatAppliedDamage, combatCanCancel, combatCardText, combatDamageFloor, combatDamageProposal, combatOutcomeLabel,
+  combatPointLabel, combatSpentLabel, combatTargetName, combatTime, describeCombatCorrection, formatCombatRoll, signedCombatModifier,
+  COMBAT_CONFIRMATION_STATUS,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
 
@@ -20,6 +21,8 @@ function eventDestinations(event) {
 }
 
 function eventResult(event) {
+  if (event.status === 'cancelled') return 'Annullata';
+  if (event.status === 'awaitingConfirmation') return COMBAT_CONFIRMATION_STATUS;
   if (event.status === 'waiting') return 'In attesa di risposta';
   if (event.status === 'retry') return 'Parità · rilancio';
   if (event.status === 'awaitingDamage') return 'In attesa del tiro di danno';
@@ -59,6 +62,87 @@ function DetailRow({ label, children, className = '' }) {
 
 function LoggedRoll({ roll }) {
   return roll && <DetailRow label={roll.label || 'Tiro'}>{formatCombatRoll(roll)}</DetailRow>;
+}
+
+function CancelCombat({ event, onCancel, state = IDLE }) {
+  const [confirming, setConfirming] = useState(false);
+  const questionId = useId();
+  const start = useRef(null);
+  const keep = useRef(null);
+  const restore = useRef(false);
+  useLayoutEffect(() => {
+    if (confirming) keep.current?.focus();
+    else if (restore.current) start.current?.focus();
+  }, [confirming]);
+  const action = [event.action?.name || 'Tiro', eventDestinations(event)].filter(Boolean).join(' · ');
+  return (
+    <div className="gc-cancel">
+      {confirming ? (
+        <div className="gc-cancel-options">
+          <span id={questionId}>Annullare {action}?</span>
+          <button ref={keep} type="button" disabled={state.busy} onClick={() => {
+            restore.current = true;
+            setConfirming(false);
+          }}>Mantieni il tiro</button>
+          <button type="button" aria-disabled={state.busy || undefined} aria-describedby={questionId}
+            aria-label={(state.busy ? 'Annullamento in corso' : 'Conferma annullamento') + ' · ' + action}
+            onClick={() => { if (!state.busy) onCancel(event); }}>
+            {state.busy ? 'Annullamento in corso' : 'Conferma annullamento'}
+          </button>
+        </div>
+      ) : (
+        <button ref={start} type="button" aria-label={'Annulla tiro · ' + action} disabled={state.busy}
+          onClick={() => setConfirming(true)}>Annulla tiro</button>
+      )}
+      {state.error && <p role="alert" className="gc-error">{state.error}</p>}
+    </div>
+  );
+}
+
+const needsCancellationReview = (event, isManager) => isManager && event.status === 'cancelled' && event.cancellation?.needsReview;
+
+function CancellationDetails({ event, onCancellationDetails }) {
+  const id = useId();
+  const [state, setState] = useState(IDLE);
+  const [open, setOpen] = useState(false);
+  const { busy, error, corrections } = state;
+  const toggle = async () => {
+    if (busy) return;
+    if (corrections) {
+      setOpen(!open);
+      return;
+    }
+    setOpen(true);
+    setState({ busy: true });
+    try {
+      setState({ corrections: await onCancellationDetails(event) });
+    } catch (failure) {
+      setState({ error: failure?.message || 'Impossibile caricare le correzioni. Riprova.' });
+    }
+  };
+  return (
+    <div className="gc-corrections">
+      <button type="button" className="gc-link" aria-expanded={open} aria-controls={id} aria-disabled={busy || undefined} onClick={toggle}>
+        {busy ? 'Caricamento correzioni…' : error ? 'Riprova a caricare le correzioni' : open ? 'Nascondi correzioni' : 'Mostra correzioni'}
+      </button>
+      <div id={id} hidden={!open}>
+        {error && <p className="gc-error" role="alert">{error}</p>}
+        {corrections && (corrections.length ? (
+          <ul>
+            {corrections.map((item, index) => {
+              const { name, reason, amounts, agreedDamage } = describeCombatCorrection(event, item);
+              return <li key={index}>
+                <strong>{name}</strong>
+                <span>{reason}</span>
+                {amounts && <span>{amounts}</span>}
+                {agreedDamage && <span>{agreedDamage}</span>}
+              </li>;
+            })}
+          </ul>
+        ) : <p className="gc-hint">Nessuna correzione registrata.</p>)}
+      </div>
+    </div>
+  );
 }
 
 function CriticalInput({ critical, onCritical, hasDice, busy }) {
@@ -111,12 +195,13 @@ function CriticalResult({ critical }) {
   );
 }
 
-function TargetRolls({ target, targets, kind, hands, busy, onCritical, criticalHasDice, proposal, damage = IDLE, onApplyDamage, onRollDamage, isManager }) {
+function TargetRolls({ target, targets, kind, hands, busy, onCritical, criticalHasDice, proposal, damage = IDLE, onApplyDamage, onRollDamage, isManager, cancelled }) {
   const name = combatTargetName(target, targets);
   // What the server recorded wins; the reply to this viewer's own request covers the moments before its snapshot arrives.
   const applied = combatAppliedDamage(target) || damage.applied || null;
-  const pending = target.status === 'waiting' ? 'In attesa' : target.status === 'retry' ? 'Parità · rilancio' : '';
-  const result = pending || combatOutcomeLabel(target.outcome, kind, hands);
+  const pending = cancelled ? '' : target.status === 'waiting' ? 'In attesa' : target.status === 'retry' ? 'Parità · rilancio' : '';
+  const outcome = value => cancelled && value === 'tie' ? 'Parità' : combatOutcomeLabel(value, kind, hands);
+  const result = pending || outcome(target.outcome);
   const trials = target.trials || [];
   const latest = trials[trials.length - 1];
   const showCurrent = !latest || target.round !== latest.round;
@@ -125,7 +210,7 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, criticalH
       <strong>{name}{result && ' · ' + result}</strong>
       {trials.map((trial, index) => (
         <dl key={trial.round ?? index}>
-          <DetailRow label={'Prova ' + (trial.round ?? index + 1)}>{combatOutcomeLabel(trial.outcome, kind, hands)}</DetailRow>
+          <DetailRow label={'Prova ' + (trial.round ?? index + 1)}>{outcome(trial.outcome)}</DetailRow>
           <LoggedRoll roll={trial.attack} />
           <LoggedRoll roll={trial.defense} />
           {isManager && trial.defenseAdjusted === true && (
@@ -135,7 +220,7 @@ function TargetRolls({ target, targets, kind, hands, busy, onCritical, criticalH
         </dl>
       ))}
       {showCurrent && <dl><LoggedRoll roll={target.attack} /><LoggedRoll roll={target.defense} /></dl>}
-      {target.pendingDamage && <p className="gc-hint">In attesa del tiro di danno · {target.pendingDamage.expr}</p>}
+      {!cancelled && target.pendingDamage && <p className="gc-hint">In attesa del tiro di danno · {target.pendingDamage.expr}</p>}
       {target.pendingDamage && onRollDamage && <button className="gc-secondary" type="button" disabled={busy} onClick={onRollDamage}>
         Danno contro {name} · vai al tiro sulla mappa
       </button>}
@@ -174,13 +259,17 @@ function EffectValue({ effect, recipient }) {
   return summary || effect.description || 'Da applicare al tavolo';
 }
 
-function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isManager }) {
+function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState,
+  onCancel, cancel, onCancellationDetails, isManager }) {
   const { actor, action, targets = [], affected = [], cost, effects = [] } = event;
+  const cancelled = event.status === 'cancelled';
+  const needsReview = needsCancellationReview(event, isManager);
+  const rollDamage = !cancelled && event.status !== 'awaitingConfirmation' && onRollDamage;
   const destination = eventDestinations(event);
   // The DM spots typed defense values without opening every entry.
   const overridden = isManager && targets.some(target => (target.trials || []).some(trial => trial.defenseAdjusted === true));
   // Per target: the DM answers for every pawn, a player only for their own.
-  const damageCommand = target => (onApplyDamage && event.id && !target.pendingDamage && (!canApplyDamage || canApplyDamage(event, target))
+  const damageCommand = target => (!cancelled && onApplyDamage && event.id && !target.pendingDamage && (!canApplyDamage || canApplyDamage(event, target))
     ? amount => onApplyDamage(event, target, amount)
     : undefined);
   // The card's own text replaces the generic table line (the manual effect bound to no pawn), so a condition stays in
@@ -195,23 +284,25 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
           <small>{actor?.name || 'Attaccante'}{destination && <><FaArrowRight aria-hidden="true" />{destination}</>}</small>
           <strong>{action?.name || 'Azione'}</strong>
           <span>{eventResult(event) + (overridden ? ' · valori di difesa modificati' : '')}</span>
+          {needsReview && <span className="gc-cancel-review">Effetti da verificare al tavolo.</span>}
         </span>
       </summary>
       <div className="gc-log-detail">
+        {needsReview && onCancellationDetails && <CancellationDetails {...{ event, onCancellationDetails }} />}
         {/* A private summary: the outcome on the viewer's own pawns, never the attacker or the other targets. */}
         {event.ownerPrivate && <p className="gc-hint">Riepilogo privato: solo l’esito sulle tue pedine.</p>}
         {targets.map(target => (
           <TargetRolls
             key={target.placementId}
-            {...{ target, targets, busy, isManager }}
+            {...{ target, targets, busy, isManager, cancelled }}
             kind={event.kind}
             hands={action?.hands}
             criticalHasDice={action?.criticalHasDice}
-            onCritical={onCritical && action?.hands > 0 ? score => onCritical(event, target, score) : undefined}
+            onCritical={!cancelled && onCritical && action?.hands > 0 ? score => onCritical(event, target, score) : undefined}
             proposal={combatDamageProposal(event, target)}
-            damage={damageState?.(event, target)}
+            damage={cancelled ? undefined : damageState?.(event, target)}
             onApplyDamage={damageCommand(target)}
-            onRollDamage={onRollDamage && (() => onRollDamage(event, target))}
+            onRollDamage={rollDamage && (() => rollDamage(event, target))}
           />
         ))}
         <dl>
@@ -232,9 +323,10 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
             );
           })}
         </dl>
-        {event.pendingDamage && onRollDamage && <button className="gc-secondary" type="button" disabled={busy}
-          onClick={() => onRollDamage(event, null)}>Danno {event.pendingDamage.expr} · vai al tiro sulla mappa</button>}
+        {event.pendingDamage && rollDamage && <button className="gc-secondary" type="button" disabled={busy}
+          onClick={() => rollDamage(event, null)}>Danno {event.pendingDamage.expr} · vai al tiro sulla mappa</button>}
         {instruction && <p className="gc-source">{instruction}</p>}
+        {onCancel && <CancelCombat {...{ event, onCancel }} state={cancel} />}
       </div>
     </details>
   );
@@ -242,7 +334,8 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
 
 // `isManager` is the signed-in DM: free damage amounts and the defense audit. Anyone else is held to each proposal.
 export function GrigliataCombatHistory({
-  events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isManager = false,
+  events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState,
+  onCancel, canCancel = combatCanCancel, cancelState, onCancellationDetails, isManager = false,
 }) {
   const isOwner = event => currentUserId
     ? (event.actorUid || event.actor?.ownerUid) === currentUserId
@@ -252,75 +345,86 @@ export function GrigliataCombatHistory({
       <summary><FaHistory aria-hidden="true" />Registro{events.length > 0 && <small>{events.length}</small>}</summary>
       {events.length > 0 ? (
         <div className="gc-log-list">
-          {events.map(event => (
-            <CombatHistoryEntry
-              key={event.id || event.combatId}
-              event={event}
-              {...{ busy, onApplyDamage, canApplyDamage, damageState, isManager }}
-              onCritical={isOwner(event) ? onCritical : undefined}
-              onRollDamage={isManager && !isOwner(event) ? onRollDamage : undefined}
-            />
-          ))}
+          {events.map(event => {
+            const own = isOwner(event);
+            const cancel = cancelState?.(event);
+            return (
+              <CombatHistoryEntry
+                key={event.id || event.combatId}
+                {...{ event, onApplyDamage, canApplyDamage, damageState, isManager, cancel, onCancellationDetails }}
+                busy={busy || cancel?.busy}
+                onCritical={own ? onCritical : undefined}
+                onRollDamage={isManager && !own ? onRollDamage : undefined}
+                onCancel={(own || isManager) && canCancel(event) ? onCancel : undefined}
+              />
+            );
+          })}
         </div>
       ) : <p className="gc-empty">Nessuna azione registrata.</p>}
     </details>
   );
 }
 
-const resolvedTime = event => combatTime(event.resolvedAt || event.createdAt);
+const resolvedTime = event => combatTime(event.status === 'cancelled' ? event.updatedAt : event.resolvedAt || event.createdAt);
+const confirmationTime = event => combatTime(event.updatedAt === undefined ? event.createdAt : event.updatedAt);
 
-// `pending` is every unresolved action of the signed-in player on this map, whichever pawn launched it:
-// it stays until answered. The journal only adds the selected pawn's latest result: the action answered
-// last, so an old attack answered late shows its outcome even after newer ones.
-export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, onRollDamage }) {
+// Keep every open defense or roll in view, plus the newest damage confirmation. The journal carries the rest.
+// The selected pawn also keeps its latest terminal result, including an older launch resolved late.
+export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, onRollDamage, onCancel,
+  canCancel = combatCanCancel, cancelState, isManager }) {
   const selected = actor?.placementId;
-  const latest = selected && events.filter(event => event.actor?.placementId === selected && event.status === 'done')
+  const latest = selected && events.filter(event => event.actor?.placementId === selected && ['done', 'cancelled'].includes(event.status))
     .reduce((last, event) => (!last || resolvedTime(event) > resolvedTime(last) ? event : last), null);
   const resolved = latest && !pending.some(event => event.id === latest.id);
+  const confirmation = pending.filter(event => event.status === 'awaitingConfirmation')
+    .reduce((last, event) => (!last || confirmationTime(event) >= confirmationTime(last) ? event : last), null);
+  const shown = pending.filter(event => event.status !== 'awaitingConfirmation' || event === confirmation);
   // Pawn names only when they tell actions apart: not the selected pawn, or several pawns while none is selected.
-  const named = pending.some(event => event.actor?.placementId !== (selected || pending[0].actor?.placementId));
-  return (resolved ? [...pending, latest] : pending).map(event => (
-    <section className="gc-status-card" aria-label="Stato dell’azione" key={event.id || event.combatId}>
-      <div className="gc-flex">
-        <FaClock aria-hidden="true" />
-        <div>
-          <strong>{[named && event.actor?.name, event.action?.name || 'Azione'].filter(Boolean).join(' · ')}</strong>
-          <p role="status">{eventResult(event)}</p>
+  const named = shown.some(event => event.actor?.placementId !== (selected || shown[0].actor?.placementId));
+  return (resolved ? [...shown, latest] : shown).map(event => {
+    const cancel = cancelState?.(event);
+    const active = !['done', 'cancelled', 'awaitingConfirmation'].includes(event.status);
+    const working = busy || cancel?.busy;
+    return (
+      <section className="gc-status-card" aria-label="Stato dell’azione" key={event.id || event.combatId}>
+        <div className="gc-flex">
+          <FaClock aria-hidden="true" />
+          <div>
+            <strong>{[named && event.actor?.name, event.action?.name || 'Azione'].filter(Boolean).join(' · ')}</strong>
+            <p role="status">{eventResult(event)}</p>
+          </div>
         </div>
-      </div>
-      {event.pendingDamage && onRollDamage && (
-        <button type="button" className="gc-secondary" disabled={busy} onClick={() => onRollDamage(event, null)}>
-          Danno {event.pendingDamage.expr} · vai al tiro sulla mappa
-        </button>
-      )}
-      {event.status !== 'done' && (
-        <ul>
-          {(event.targets || []).map(target => (
-            <li key={target.placementId}>
-              <div>
-                <strong>{combatTargetName(target, event.targets)}</strong>
-                {target.attack && <small>{target.attack.label} · {formatCombatRoll(target.attack)}</small>}
-              </div>
-              {target.pendingDamage && onRollDamage ? (
-                <button type="button" className="gc-secondary" disabled={busy} onClick={() => onRollDamage(event, target)}>
-                  Danno contro {combatTargetName(target, event.targets)} · vai al tiro sulla mappa
-                </button>
-              ) : target.status === 'retry' && onRetry ? (
-                <button
-                  type="button"
-                  className="gc-secondary"
-                  disabled={busy}
-                  onClick={() => onRetry(event, target)}
-                >
-                  Rilancia contro {combatTargetName(target, event.targets)}
-                </button>
-              ) : (
-                <small>{target.status === 'waiting' ? 'Tocca al proprietario' : combatOutcomeLabel(target.outcome, event.kind, event.action?.hands)}</small>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  ));
+        {needsCancellationReview(event, isManager) && <p className="gc-hint gc-cancel-review">Effetti da verificare al tavolo.</p>}
+        {active && event.pendingDamage && onRollDamage && (
+          <button type="button" className="gc-secondary" disabled={working} onClick={() => onRollDamage(event, null)}>
+            Danno {event.pendingDamage.expr} · vai al tiro sulla mappa
+          </button>
+        )}
+        {active && (
+          <ul>
+            {(event.targets || []).map(target => (
+              <li key={target.placementId}>
+                <div>
+                  <strong>{combatTargetName(target, event.targets)}</strong>
+                  {target.attack && <small>{target.attack.label} · {formatCombatRoll(target.attack)}</small>}
+                </div>
+                {target.pendingDamage && onRollDamage ? (
+                  <button type="button" className="gc-secondary" disabled={working} onClick={() => onRollDamage(event, target)}>
+                    Danno contro {combatTargetName(target, event.targets)} · vai al tiro sulla mappa
+                  </button>
+                ) : target.status === 'retry' && onRetry ? (
+                  <button type="button" className="gc-secondary" disabled={working} onClick={() => onRetry(event, target)}>
+                    Rilancia contro {combatTargetName(target, event.targets)}
+                  </button>
+                ) : (
+                  <small>{target.status === 'waiting' ? 'Tocca al proprietario' : combatOutcomeLabel(target.outcome, event.kind, event.action?.hands)}</small>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {onCancel && canCancel(event) && <CancelCombat {...{ event, onCancel }} state={cancel} />}
+      </section>
+    );
+  });
 }

@@ -85,6 +85,20 @@ test('only a landed answer with concrete damage follows its own private request,
   expect(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' })).toBeInTheDocument();
 });
 
+test('a fresh waiting copy read during submission does not settle an eventual damage receipt', async () => {
+  const request = defenseRequest('req-a');
+  const reply = deferred();
+  const { onRespond, show } = setup([request], { answers: [] });
+  onRespond.mockReturnValueOnce(reply.promise);
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  emit(request, request);
+  show([]);
+  await act(async () => reply.resolve(HIT));
+  expect(screen.getByText('Recupero il danno da confermare…')).toBeVisible();
+  emit(request, ownerCopy(request));
+  expect(amountOf('Bro')).toHaveValue('9');
+});
+
 test('a guided defense watches for the attacker’s damage and does not open a second receipt when the request is listed', async () => {
   const request = defenseRequest('req-guided');
   const { answer, show } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
@@ -145,7 +159,7 @@ test('a guided defense closed before a negative roll loses its launcher as soon 
   expect(live(request.id)).toHaveLength(0);
 });
 
-test.each([0, 6])('a late guided proposal of %s stays accessible after its hidden watch ends', async amount => {
+test.each([0, 6])('a late guided proposal of %s stays accessible as the owner query takes over', async amount => {
   const request = defenseRequest('req-late-proposal');
   const { answer, show } = setup([request], { answers: [{ outcome: 'hit', damagePending: true }] });
   await answer(request, []);
@@ -157,9 +171,10 @@ test.each([0, 6])('a late guided proposal of %s stays accessible after its hidde
     status: 'damagePending', target: request.target, damagePending: false, id: request.id, defense: request.defense,
   });
   emit(request, settled);
+  expect(live(request.id)).toEqual([watch]);
+  show([], { damageRequests: [settled], activeDamageBackgroundId: 'map' });
   expect(watch.stop).toHaveBeenCalledTimes(1);
   expect(live(request.id)).toHaveLength(0);
-  show([], { damageRequests: [settled], activeDamageBackgroundId: 'map' });
   fireEvent.click(screen.getByRole('button', { name: 'Danni da confermare · 1' }));
   expect(live(request.id)).toHaveLength(1);
   expect(damageForm('Bro')).not.toBeInTheDocument();
@@ -191,13 +206,16 @@ test.each([
   ['a hit without a damage roll', { outcome: 'hit', damage: null, effects: [] }, 'Colpito', {}, 'Invia Difesa'],
   ['a consent with healing only', { outcome: 'accepted', damage: null, effects: [{ kind: 'heal', amount: 3, targetPlacementId: 'map__bro' }] }, 'Effetto accettato', CONSENT, 'Accetta'],
   ['a consent refused', { outcome: 'declined', damage: null, effects: [] }, 'Effetto rifiutato', CONSENT, 'Rifiuta'],
-])('%s opens no listener and no form', async (_label, reply, outcomeText, extra, button) => {
-  const { show } = setup([defenseRequest('req-a', 'Bro', extra)], { answers: [reply] });
+])('%s has a dismissible receipt until cancellation and no damage form', async (_label, reply, outcomeText, extra, button) => {
+  const request = defenseRequest('req-a', 'Bro', extra);
+  const { show } = setup([request], { answers: [reply] });
   fireEvent.click(screen.getByRole('button', { name: button }));
   show([]);
   expect(await screen.findByText(outcomeText)).toBeInTheDocument();
-  expect(onWatchDamage).not.toHaveBeenCalled();
+  expect(damageForm('Bro')).not.toBeInTheDocument();
   expect(screen.queryByText('Recupero il danno da confermare…')).not.toBeInTheDocument();
+  emit(request, { ...request, status: 'cancelled' });
+  expect(screen.queryByText(outcomeText)).not.toBeInTheDocument();
 });
 
 test('an accepted effect with a numeric damage on this pawn gets the form too', async () => {
@@ -404,24 +422,26 @@ test('a queue keeps the prompt focused and each receipt keeps its sent amount an
   expect(amountOf('Bro')).toHaveValue('10');
   expect(within(damageForm('Bro')).getByRole('alert')).toHaveTextContent('Conferma non ricevuta.');
   expect(within(reopened).getByRole('spinbutton', { name: 'Difesa' })).toHaveFocus();
-  expect(onWatchDamage).toHaveBeenCalledTimes(1);
+  expect(onWatchDamage.mock.calls.filter(([requestId]) => requestId === first.id)).toHaveLength(1);
   expect(watches[0].stop).not.toHaveBeenCalled();
 });
 
-test('each private listener ends with its receipt: closed, pushed out of the four kept, user changed or popup gone', async () => {
+test('a private listener stays with a deferred receipt until it settles or the account changes', async () => {
   const requests = ['req-a', 'req-b', 'req-c', 'req-d', 'req-e'].map(id => defenseRequest(id, 'Bro ' + id));
   const { answer, show, unmount } = setup(requests, { answers: requests.map(() => HIT) });
   for (let index = 0; index < requests.length; index += 1) await answer(requests[index], requests.slice(index + 1));
   expect(onWatchDamage.mock.calls.map(([requestId]) => requestId)).toEqual(['req-a', 'req-b', 'req-c', 'req-d', 'req-e']);
-  // At most the four receipts kept: the oldest left with its listener.
+  expect(watches.every(watch => !watch.stop.mock.calls.length)).toBe(true);
+  expect(screen.queryByText('Bro req-a · Spada')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+  emit(requests[0], ownerCopy(requests[0], { damageApplied: { amount: 9 } }));
   expect(watches[0].stop).toHaveBeenCalledTimes(1);
-  expect(watches.slice(1).every(watch => !watch.stop.mock.calls.length)).toBe(true);
 
   const feed = screen.getAllByRole('status')[0];
   // Newest first in the corner's DOM: the second button closes the receipt of req-d.
   fireEvent.click(within(feed).getAllByRole('button', { name: 'Chiudi esito difesa' })[1]);
-  expect(watches[3].stop).toHaveBeenCalledTimes(1);
-  expect(watches.filter(watch => !watch.stop.mock.calls.length).map(watch => watch.requestId)).toEqual(['req-b', 'req-c', 'req-e']);
+  expect(screen.getByRole('button', { name: 'Danni da confermare · 1' })).toBeVisible();
+  expect(watches.filter(watch => !watch.stop.mock.calls.length).map(watch => watch.requestId)).toEqual(['req-b', 'req-c', 'req-d', 'req-e']);
 
   show([], { currentUserId: 'lia-user' });
   expect(watches.every(watch => watch.stop.mock.calls.length === 1)).toBe(true);
@@ -504,4 +524,67 @@ test('without the damage host the receipts read as before', async () => {
   expect(await screen.findByText('9 danni proposti')).toBeInTheDocument();
   expect(screen.queryByRole('form', { name: /Applica danno/ })).not.toBeInTheDocument();
   expect(screen.queryByText('Recupero il danno da confermare…')).not.toBeInTheDocument();
+});
+
+test('cancellation of a held send frees the next defense and ignores a late answer', async () => {
+  const first = defenseRequest('req-a');
+  const sibling = defenseRequest('req-b', 'Kai', { combatId: first.combatId });
+  const next = defenseRequest('req-c', 'Lia');
+  const last = defenseRequest('req-d', 'Eva');
+  const late = deferred();
+  const ongoing = deferred();
+  const { onRespond, show } = setup([first, sibling, next, last], { answers: [] });
+  onRespond.mockReturnValueOnce(late.promise).mockReturnValueOnce(ongoing.promise);
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  show([sibling, next, last]);
+  emit(first, { ...first, status: 'cancelled' });
+
+  expect(screen.getByText('Nyx → Lia')).toBeVisible();
+  expect(screen.getByRole('spinbutton', { name: 'Difesa' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Invia Difesa' }));
+  await act(async () => late.resolve(HIT));
+  expect(screen.queryByText('Bro · Spada')).not.toBeInTheDocument();
+  expect(screen.getByText('Invio della risposta…')).toBeInTheDocument();
+  expect(onRespond).toHaveBeenCalledTimes(2);
+  expect(onRespond).toHaveBeenLastCalledWith(next, { defense: 2 });
+
+  show([{ ...first, round: 2 }, sibling, last]);
+  await act(async () => ongoing.resolve({ outcome: 'resisted' }));
+  expect(screen.getByText('Nyx → Eva')).toBeVisible();
+});
+
+test('cancellation removes visible and dismissed receipts of the same combat while keeping another damage draft', async () => {
+  const first = defenseRequest('req-a');
+  const sibling = defenseRequest('req-b', 'Kai', { combatId: first.combatId });
+  const other = defenseRequest('req-c', 'Lia');
+  const late = deferred();
+  const onApplyDamage = jest.fn(() => late.promise);
+  const { answer, show } = setup([first, sibling, other], {
+    answers: [HIT, { outcome: 'hit', damagePending: true }, HIT], onApplyDamage,
+  });
+  await answer(first, [sibling, other]);
+  emit(first, ownerCopy(first));
+  await answer(sibling, [other]);
+  emit(sibling, { ...sibling, status: 'done', damagePending: true });
+  const dialog = screen.getByRole('dialog', { name: 'Difesa' });
+  const [, closeSibling] = within(dialog).getAllByRole('button', { name: 'Chiudi esito difesa' });
+  fireEvent.click(closeSibling);
+  await answer(other, []);
+  emit(other, ownerCopy(other));
+  fireEvent.change(amountOf('Lia'), { target: { value: '12' } });
+  fireEvent.click(within(damageForm('Bro')).getByRole('button', { name: 'Applica danno' }));
+
+  const [watch] = live(sibling.id);
+  emit(sibling, { ...sibling, status: 'cancelled' });
+  expect(screen.queryByText('Bro · Spada')).not.toBeInTheDocument();
+  expect(damageForm('Bro')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Danni da confermare/ })).not.toBeInTheDocument();
+  expect(amountOf('Lia')).toHaveValue('12');
+
+  await act(async () => late.resolve({ amount: 9 }));
+  act(() => watch.next({ id: sibling.id, data: ownerCopy(sibling), fromCache: true }));
+  show([first, sibling]);
+  expect(screen.queryByText('Danno applicato · 9')).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(amountOf('Lia')).toHaveValue('12');
 });

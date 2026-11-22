@@ -7,6 +7,10 @@ import './grigliataCombat.css';
 
 const REQUESTS = 'grigliata_combat_requests';
 const errorCode = error => error?.code?.split('/').pop();
+const CANCELLED = { status: 'cancelled' };
+// The callable can refuse a stale submission before the private request listener sees the cancellation.
+const cancelledError = error => error?.details?.status === 'cancelled'
+  || (errorCode(error) === 'failed-precondition' && error?.message === "L'azione è stata annullata.");
 // A lost or broken reply leaves the outcome unknown, and its raw text ("internal") says nothing: a retry is safe because
 // the server keeps the first application and answers any later one with it.
 const UNCONFIRMED = ['internal', 'unavailable', 'deadline-exceeded', 'unknown'];
@@ -27,18 +31,16 @@ export default function GrigliataCombatInbox({ uid, isManager = false }) {
   useEffect(() => {
     let active = true;
     const pending = query(collection(db,REQUESTS),where('ownerUid','==',uid),where('status','in',['waiting','damagePending']));
-    // Metadata changes included: a damage first read from the cache opens once the server's own snapshot confirms it.
+    // Keep the last server list while offline. Cached requests may already be settled or cancelled.
     const unsubscribe = onSnapshot(labelFirestoreTarget(pending,'grigliata.combat-requests.pending.subscribe.v1','shell'), { includeMetadataChanges: true }, snapshot => {
-      if (!active) return;
+      if (!active || snapshot.metadata?.fromCache) return;
       setConnectionError(false);
       const all = snapshot.docs.map(entry => ({...entry.data(), id:entry.id})).sort((a,b) => (a.createdAt?.seconds || 0)-(b.createdAt?.seconds || 0));
-      const fresh = !snapshot.metadata?.fromCache;
-      setInbox(before => ({
+      setInbox({
         uid,
         waiting: all.filter(entry => entry.status === 'waiting'),
-        // A cached copy may be damage already applied: the last server list stands until the server answers again.
-        damage: fresh ? all.filter(entry => entry.status === 'damagePending') : before.uid === uid ? before.damage : [],
-      }));
+        damage: all.filter(entry => entry.status === 'damagePending'),
+      });
     }, () => {
       if (active) setConnectionError(true);
     });
@@ -83,16 +85,15 @@ export async function sendDefense(request, values) {
       ...values, command: 'defend', combatId: request.combatId, targetPlacementId: request.target.placementId, round: request.round,
     });
   } catch (error) {
+    if (cancelledError(error)) return CANCELLED;
     if (UNCONFIRMED.includes(errorCode(error))) throw unconfirmedDefense();
     throw new Error(error?.message || 'Risposta non inviata. Riprova.');
   }
-  if (!reply?.data?.outcome) throw unconfirmedDefense();
+  if (!reply?.data?.outcome && reply?.data?.status !== 'cancelled') throw unconfirmedDefense();
   return reply.data;
 }
 
-// The private request of one answered defense, or of a damage that asked none, read only while its receipt shows damage
-// to confirm; the popup checks that it belongs to this owner, action and pawn. Metadata changes included: the receipt
-// waits for the server's own copy, not a cached one from before the answer. It stays readable once applied.
+// The popup follows the owner's private document for a retained reply or receipt, including after it leaves the query.
 export function watchReceiptDamage(requestId, { next, error }) {
   const target = labelFirestoreTarget(doc(db, REQUESTS, requestId), 'grigliata.combat-requests.receipt-damage.subscribe.v1', 'shell');
   return onSnapshot(target, { includeMetadataChanges: true }, snapshot => next({
@@ -116,8 +117,10 @@ export async function applyReceiptDamage({ combatId, targetPlacementId, amount, 
   try {
     reply = await getCallable('mutateGrigliataCombat')({ command: 'applyDamage', combatId, targetPlacementId, amount, criticalScore });
   } catch (error) {
+    if (cancelledError(error)) return CANCELLED;
     throw new Error(damageErrorText(error));
   }
+  if (reply?.data?.status === 'cancelled') return CANCELLED;
   const recorded = reply?.data?.damageApplied?.amount;
   if (!Number.isSafeInteger(recorded) || recorded < 0) throw new Error(RETRY_SAFE);
   return { amount: recorded };

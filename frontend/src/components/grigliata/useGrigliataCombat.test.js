@@ -27,6 +27,7 @@ const JOURNAL = 'grigliata.combat-actions.public.subscribe.v1';
 const OWNED = 'grigliata.combat-actions.actor.subscribe.v1';
 const SCENE = 'grigliata.combat-actions.manager.subscribe.v1';
 const MANAGER_PENDING = 'grigliata.combat-actions.manager-pending.subscribe.v1';
+const MANAGER_CANCELLED = 'grigliata.combat-actions.manager-cancelled.subscribe.v1';
 const PENDING = 'grigliata.combat-actions.actor-pending.subscribe.v1';
 const OWNER_DAMAGE = 'grigliata.combat-requests.owner-damage.subscribe.v1';
 const pawn = (tokenId, col, extra) => ({ tokenId, label: tokenId, ownerUid: tokenId === 'nyx' ? uid : 'other', col, row: 0, sizeSquares: 1, ...extra });
@@ -251,7 +252,7 @@ test('the first guided critical uses the chosen score in the tray and a score ed
 test('player pending is actor-scoped and manager pending covers only unresolved actions on the selected map', () => {
   const pendingQuery = {
     source: 'grigliata_combat_actions', label: PENDING,
-    constraints: [['backgroundId', '==', 'map'], ['actorUid', '==', uid], ['status', 'in', ['waiting', 'retry', 'awaitingDamage']]],
+    constraints: [['backgroundId', '==', 'map'], ['actorUid', '==', uid], ['status', 'in', ['waiting', 'retry', 'awaitingDamage', 'awaitingConfirmation']]],
   };
   const ownQuery = {
     source: 'grigliata_combat_actions', label: OWNED,
@@ -273,12 +274,15 @@ test('player pending is actor-scoped and manager pending covers only unresolved 
 
   listeners.clear();
   renderHook(() => useGrigliataCombat(props({ isManager: true })));
-  expect([...listeners.keys()]).toEqual([SCENE, OWNED, MANAGER_PENDING]);
+  expect([...listeners.keys()]).toEqual([SCENE, OWNED, MANAGER_PENDING, MANAGER_CANCELLED]);
   expect(listeners.get(MANAGER_PENDING).target).toEqual({
     source: 'grigliata_combat_actions', label: MANAGER_PENDING,
-    constraints: [['backgroundId', '==', 'map'], ['status', 'in', ['waiting', 'retry', 'awaitingDamage']]],
+    constraints: [['backgroundId', '==', 'map'], ['status', 'in', ['waiting', 'retry', 'awaitingDamage', 'awaitingConfirmation']]],
   });
   expect(listeners.get(OWNED).target).toEqual(ownQuery);
+  expect(listeners.get(MANAGER_CANCELLED).target.constraints).toEqual([
+    ['backgroundId', '==', 'map'], ['status', '==', 'cancelled'], ['orderBy', 'updatedAt', 'desc'], ['limit', 40],
+  ]);
   expect(listeners.get(SCENE).target.constraints).toEqual([['backgroundId', '==', 'map'], ['orderBy', 'createdAt', 'desc'], ['limit', 40]]);
 });
 
@@ -927,6 +931,134 @@ test('the owner receipt survives an older full snapshot arriving after it', () =
   expect(merged.actor).toEqual(full.actor);
   expect(merged.targets[0]).toEqual(full.targets[0]);
   expect(merged.targets[1]).toMatchObject({ critical, damageApplied: { amount: 11 } });
+});
+
+test('the attacker confirms cancellation from the status card, sees the result and reloads the arsenal', async () => {
+  await show([sword], [pawn('nyx', 0)]);
+  const event = { ...entry('mine', 2, 'awaitingConfirmation'), actor: nyx, action: { name: 'Spada' } };
+  emit(PENDING, [event]);
+  const card = statusCards()[0];
+  expect(within(card).getByRole('status')).toHaveTextContent('In attesa della conferma del danno');
+  fireEvent.click(within(card).getByRole('button', { name: /^Annulla tiro/ }));
+  expect(within(card).getByRole('button', { name: 'Mantieni il tiro' })).toHaveFocus();
+  expect(mutate).not.toHaveBeenCalled();
+  fireEvent.click(within(card).getByRole('button', { name: 'Mantieni il tiro' }));
+  expect(within(card).getByRole('button', { name: /^Annulla tiro/ })).toHaveFocus();
+  fireEvent.click(within(card).getByRole('button', { name: /^Annulla tiro/ }));
+  mutate.mockResolvedValueOnce({ data: { combatId: event.id, status: 'cancelled', cancellation: { needsReview: true } } });
+  fireEvent.click(within(card).getByRole('button', { name: /^Conferma annullamento/ }));
+  await waitFor(() => expect(statusCards()[0]).toHaveTextContent('Annullata'));
+  expect(mutate).toHaveBeenCalledWith({ command: 'cancel', combatId: event.id });
+  expect(arsenal).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText('Effetti da verificare al tavolo.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Annulla tiro/ })).not.toBeInTheDocument();
+});
+
+test('only the newest confirmation takes a quick card, and the DM can cancel an older player event from Registro', async () => {
+  const { current } = playerView({ isManager: true });
+  const make = (key, time, status, actorUid = uid) => ({
+    ...entry(key, time, status), backgroundId: 'map', updatedAt: at(time), actorUid, action: { name: key },
+  });
+  const older = make('Tiro precedente', 1, 'awaitingConfirmation');
+  const latest = { ...make('Tiro nuovo', 80, 'awaitingConfirmation'), updatedAt: at(90) };
+  const laterLaunch = make('Tiro lanciato dopo', 83, 'awaitingConfirmation');
+  const player = make('Tiro di Orco', 2, 'awaitingConfirmation', 'orc-user');
+  serve([older, latest, laterLaunch, player, make('Difesa in corso', 4, 'waiting'), ...Array.from({ length: 42 }, (_, i) => (
+    make('Già risolta ' + i, 10 + i, 'done', 'orc-user')
+  ))]);
+  expect(statusCards().map(card => card.querySelector('strong').textContent)).toEqual(['Difesa in corso', 'Tiro nuovo']);
+  expect(ids(current.view.panel.events)).toEqual(expect.arrayContaining([older.id, player.id]));
+
+  openEntry(player.action.name);
+  fireEvent.click(screen.getByRole('button', { name: 'Annulla tiro · Tiro di Orco' }));
+  expect(screen.getByText('Annullare Tiro di Orco?')).toBeVisible();
+  mutate.mockResolvedValueOnce({ data: { combatId: player.id, status: 'cancelled', cancellation: { needsReview: true } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Conferma annullamento · Tiro di Orco' }));
+  expect(await screen.findByText('Effetti da verificare al tavolo.')).toBeVisible();
+  expect(mutate).toHaveBeenCalledWith({ command: 'cancel', combatId: player.id });
+  expect(mutate).toHaveBeenCalledTimes(1);
+  mutate.mockResolvedValueOnce({ data: { combatId: player.id, corrections: [{
+    reason: 'barrierCapacity', subject: { kind: 'character', id: 'orc-user' }, amounts: { barrieraCurrent: 3 },
+  }] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Mostra correzioni' }));
+  expect(await screen.findByText('3 punti barriera')).toBeVisible();
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'getCancellationDetails', combatId: player.id });
+});
+
+test('a remote cancellation of an older player roll closes the DM tray and keeps its review in Registro', () => {
+  const { result } = renderHook(() => useGrigliataCombat(props({ isManager: true })));
+  const old = { ...entry('old-roll', 1, 'awaitingDamage'), actorUid: 'another-player',
+    targets: [], pendingDamage: {expr: '1d4', round: 1} };
+  emit(SCENE, others(40, 100));
+  emit(MANAGER_PENDING, [old]);
+  act(() => result.current.panel.onRollDamage(old, null));
+  expect(result.current.tray).toMatchObject({ combatId: old.id, phase: 'ready' });
+  emit(MANAGER_PENDING, []);
+  emit(MANAGER_CANCELLED, [{...old, status: 'cancelled', cancellation: {needsReview: true}, updatedAt: at(200)}]);
+  expect(result.current.tray).toBeNull();
+  expect(result.current.panel.events.find(event => event.id === old.id)).toMatchObject({
+    status: 'cancelled', cancellation: {needsReview: true},
+  });
+});
+
+test('a cancellation invalidates a sending tray for that action and ignores its late reply', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const roll = { ...entry('roll', 1, 'awaitingDamage'), pendingDamage: { round: 1, expr: '1d4' } };
+  const other = { ...roll, id: 'other' };
+  emit(PENDING, [roll, other]);
+  act(() => result.current.panel.onRollDamage(roll, null));
+  let resolveRoll;
+  mutate.mockReturnValueOnce(new Promise(resolve => { resolveRoll = resolve; }));
+  act(() => { result.current.tray.throwDice(); });
+  expect(result.current.tray.phase).toBe('sending');
+  mutate.mockResolvedValueOnce({ data: { combatId: roll.id, status: 'cancelled' } });
+  await act(() => result.current.panel.onCancel(roll));
+  expect(result.current.tray).toBeNull();
+  expect(ids(result.current.panel.pending)).toEqual(['other']);
+  const otherTray = result.current.nextDamage;
+  act(() => otherTray.prepare());
+  await act(async () => resolveRoll({ data: { combatId: roll.id, damage: 4, rolls: [{ sides: 4, value: 4 }] } }));
+  expect(result.current.tray).toMatchObject({ combatId: other.id, phase: 'ready' });
+  emit(OWNED, [{ ...roll, status: 'cancelled' }]);
+  expect(result.current.tray).toMatchObject({ combatId: other.id, phase: 'ready' });
+  act(() => result.current.panel.onRollDamage(roll, null));
+  expect(result.current.tray).toMatchObject({ combatId: other.id, phase: 'ready' });
+});
+
+test('cancelling one action leaves another sending tray alone, and a remote cancellation retires a late error', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const roll = { ...entry('roll', 1, 'awaitingDamage'), pendingDamage: { round: 1, expr: '1d4' } };
+  const other = entry('other', 2, 'waiting');
+  emit(PENDING, [roll, other]);
+  act(() => result.current.panel.onRollDamage(roll, null));
+  let rejectRoll;
+  mutate.mockReturnValueOnce(new Promise((_, reject) => { rejectRoll = reject; }));
+  act(() => { result.current.tray.throwDice(); });
+  mutate.mockResolvedValueOnce({ data: { combatId: other.id, status: 'cancelled' } });
+  await act(() => result.current.panel.onCancel(other));
+  expect(result.current.tray).toMatchObject({ combatId: roll.id, phase: 'sending' });
+
+  emit(OWNED, [{ ...roll, status: 'cancelled' }]);
+  expect(result.current.tray).toBeNull();
+  await act(async () => rejectRoll(new Error('Tiro già annullato')));
+  expect(result.current.tray).toBeNull();
+  expect(result.current.panel.error).toBeUndefined();
+});
+
+test('a cancelled record and a cancelled private request suppress stale damage copies of that action', () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const full = mixedVolley();
+  const ownCopy = ownerCopy(full.id, 'lia', 'Lia', { outcome: 'hit', damage: 7 }, 30);
+  const hiddenCopy = ownerCopy('hidden', 'nyx', 'Nyx', { outcome: 'hit', damage: 6 }, 40);
+  emit(OWNER_DAMAGE, [ownCopy, hiddenCopy]);
+  emit(JOURNAL, [{ ...full, status: 'cancelled', updatedAt: at(20) }]);
+  expect(result.current.panel.events.find(event => event.id === full.id).status).toBe('cancelled');
+  emit(JOURNAL, []);
+  expect(ids(result.current.panel.events)).toEqual(['hidden']);
+  emit(OWNER_DAMAGE, [ownCopy, hiddenCopy, { ...hiddenCopy, id: 'terminal-request', status: 'cancelled', ownerDamage: undefined }]);
+  expect(result.current.panel.events).toEqual([]);
+  emit(OWNER_DAMAGE, [hiddenCopy]);
+  expect(result.current.panel.events).toEqual([]);
 });
 
 test('two same-name hidden pawns have distinct damage controls without coordinates', async () => {

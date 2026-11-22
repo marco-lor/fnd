@@ -166,6 +166,65 @@ const damageForm = name => screen.getByRole('form', { name: 'Applica danno a ' +
 const damageField = name => within(damageForm(name)).getByLabelText('Danno finale');
 const applyButton = name => within(damageForm(name)).getByRole('button', { name: /^(Applica danno|Applicazione…)$/ });
 
+test('the DM cancels someone else’s legacy action with a remaining proposal of zero', () => {
+  const onCancel = jest.fn();
+  const event = volley([struck({ damage: 0 })]);
+  const view = props => <GrigliataCombatHistory events={[event]} currentUserId="dm-user" onCancel={onCancel} {...props} />;
+  const { rerender } = render(view({}));
+  openLog();
+  expect(screen.queryByRole('button', { name: /^Annulla tiro/ })).not.toBeInTheDocument();
+  rerender(view({ isManager: true }));
+  fireEvent.click(screen.getByRole('button', { name: /^Annulla tiro/ }));
+  expect(screen.getByText('Annullare Spada · bro?')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /^Conferma annullamento/ }));
+  expect(onCancel).toHaveBeenCalledWith(event);
+
+  rerender(view({ isManager: true, events: [volley([struck({ damage: 0, damageApplied: { amount: 0 } })])] }));
+  expect(screen.queryByRole('button', { name: /^Annulla tiro|^Conferma annullamento/ })).not.toBeInTheDocument();
+});
+
+test('cancelled history retains the outcome and shows a review to the DM with no action controls', () => {
+  const command = jest.fn();
+  const event = volley([struck(), { ...lia, status: 'done', outcome: 'hit', pendingDamage: { expr: '1d6' } }], {
+    status: 'cancelled', cancellation: { needsReview: true }, pendingDamage: { expr: '1d4' },
+  });
+  render(<GrigliataCombatHistory events={[event]} currentUserId="orc-user" isManager onCritical={command}
+    onRollDamage={command} onApplyDamage={command} onCancel={command} />);
+  openLog();
+  expect(screen.getByText('Annullata')).toBeVisible();
+  expect(screen.getByText('Effetti da verificare al tavolo.')).toBeVisible();
+  expect(screen.queryByText('Critico da tabella')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  expect(screen.queryByText(/^In attesa del tiro di danno/)).not.toBeInTheDocument();
+});
+
+test('only the DM can request corrections, with the pawn names and the recorded amounts', async () => {
+  const event = volley([struck({ tokenId: 'bro-token' })], {
+    actor: { ...orc, ownerUid: 'orc-user', tokenId: 'orc-user' },
+    status: 'cancelled', cancellation: { needsReview: true },
+  });
+  const onCancellationDetails = jest.fn().mockResolvedValue([
+    { reason: 'legacyDamageUnknown', placementId: bro.placementId, agreedDamage: 7 },
+    { reason: 'legacyCostUnknown', subject: { ownerUid: 'orc-user', tokenId: 'orc-user' } },
+    { reason: 'barrierAmbiguous', subject: { kind: 'token', id: 'bro-token' }, amounts: { shieldCurrent: 2 } },
+  ]);
+  const view = isManager => <GrigliataCombatHistory events={[event]} isManager={isManager} onCancellationDetails={onCancellationDetails} />;
+  const { rerender } = render(view(false));
+  openLog();
+  expect(screen.queryByRole('button', { name: 'Mostra correzioni' })).not.toBeInTheDocument();
+  rerender(view(true));
+  expect(onCancellationDetails).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Mostra correzioni' }));
+  expect(onCancellationDetails).toHaveBeenCalledWith(event);
+  expect(await screen.findByText('Danno concordato · 7')).toBeVisible();
+  expect(screen.getAllByText('bro', { selector: '.gc-corrections strong' })).toHaveLength(2);
+  expect(screen.getByText('Orco', { selector: '.gc-corrections strong' })).toBeVisible();
+  expect(screen.getByText('2 punti scudo')).toBeVisible();
+  rerender(view(false));
+  expect(screen.queryByText('Danno concordato · 7')).not.toBeInTheDocument();
+});
+
 test('the DM gets one damage form per landed target, prefilled with the proposal, and may apply any whole number including 0', () => {
   const onApplyDamage = jest.fn();
   const event = volley([struck(), { ...lia, status: 'done', outcome: 'resisted', round: 1, damage: null }, { ...goblin, status: 'waiting', round: 1 }]);

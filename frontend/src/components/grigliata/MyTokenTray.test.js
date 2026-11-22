@@ -726,7 +726,7 @@ describe('MyTokenTray', () => {
         }),
       }),
       dadoAnima: 'd10',
-      stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 33, manaTotal: 20, shieldCurrent: 4 }),
+      stats: { hpCurrent: 84, manaCurrent: 33, shieldCurrent: 4 },
     }));
   });
 

@@ -63,6 +63,7 @@ import {
   stripUntrustedTask07InventoryMedia,
 } from "./task07ServerBoundary";
 import {assertActiveCaller} from "./callerAuthorization";
+import {readBarrierContinuity, writeBarrierContinuity} from "./barrierContinuity";
 
 const REGION = "europe-west8";
 const MAX_MUTATION_BYTES = 256 * 1024;
@@ -953,11 +954,14 @@ export const task05ConsumeTurnEffects = onCall(
           },
         } : consumption.effects;
         if (consumption.changed || barrierExpired || transitionState) {
+          const continuity = barrierExpired ? null :
+            await readBarrierContinuity(context.db, context.transaction, resources);
           const resourcesUpdate: UnknownRecord = {
             ...stateMetadata(context.actorUid),
             active_turn_effect: synchronizedEffects,
           };
           if (barrierExpired) {
+            resourcesUpdate.combatShieldActivation = null;
             resourcesUpdate.stats = {
               ...asRecord(resources.get("stats")),
               barrieraCurrent: 0,
@@ -965,6 +969,7 @@ export const task05ConsumeTurnEffects = onCall(
             };
           }
           context.transaction.set(resourcesRef, resourcesUpdate, {merge: true});
+          writeBarrierContinuity(context.transaction, continuity);
         }
         if (transitionState && grigliataTransition) {
           const startedAt = grigliataTransition.preserveStartedAt &&
@@ -1201,7 +1206,12 @@ export const task05UpdateResource = onCall(
           barriera: {remainingTurns, totalTurns},
         };
       }
+      const changesActivation = resource === "barriera" && (mode === "set" || totalValue !== null);
+      if (changesActivation) stateUpdate.combatShieldActivation = null;
+      const continuity = changesActivation ? null :
+        await readBarrierContinuity(context.db, context.transaction, resources);
       context.transaction.set(resourcesRef, stateUpdate, {merge: true});
+      writeBarrierContinuity(context.transaction, continuity);
       return {
         success: true,
         resource,
@@ -1221,24 +1231,23 @@ export const task05UpdateGrigliataCharacterResources = onCall(
   async (request: CallableRequest<BaseCommand & {
     backgroundId: string;
     tokenId: string;
-    resources: {
-      hpCurrent: number;
-      manaCurrent: number;
-      barrieraCurrent: number;
-    };
+    resources: Partial<Record<"hpCurrent" | "manaCurrent" | "barrieraCurrent", number>>;
     tokenPatch?: UnknownRecord;
   }>) => {
     const backgroundId = asTrimmedString(request.data?.backgroundId);
     const tokenId = asTrimmedString(request.data?.tokenId);
-    const resourceInput = asRecord(request.data?.resources);
-    const nextResources = Object.fromEntries([
-      "hpCurrent",
-      "manaCurrent",
-      "barrieraCurrent",
-    ].map((key) => [key, asFiniteNumber(resourceInput[key], Number.NaN)]));
-    if (!backgroundId || !tokenId || Object.values(nextResources).some(
-      (value) => !Number.isFinite(value) || value < 0
-    )) {
+    const resourceInput = request.data?.resources;
+    const resourceEntries = Object.entries(asRecord(resourceInput));
+    const allowedResources = new Set(["hpCurrent", "manaCurrent", "barrieraCurrent"]);
+    const nextResources = Object.fromEntries(resourceEntries.map(([key, value]) => (
+      [key, asFiniteNumber(value, Number.NaN)]
+    )));
+    if (
+      !backgroundId || !tokenId || !resourceInput || typeof resourceInput !== "object" ||
+      Array.isArray(resourceInput) || Object.entries(nextResources).some(([key, value]) => (
+        !allowedResources.has(key) || !Number.isFinite(value) || value < 0
+      ))
+    ) {
       fail("invalid-argument", "Valid board context and resources are required.");
     }
     const tokenPatch = asRecord(request.data?.tokenPatch);
@@ -1292,10 +1301,17 @@ export const task05UpdateGrigliataCharacterResources = onCall(
         ) {
           fail("failed-precondition", "The board token ownership is invalid.");
         }
-        context.transaction.set(resourcesRef, {
-          ...stateMetadata(context.actorUid),
-          stats: nextResources,
-        }, {merge: true});
+        if (resourceEntries.length) {
+          const changesActivation = nextResources.barrieraCurrent !== undefined;
+          const continuity = changesActivation ? null :
+            await readBarrierContinuity(context.db, context.transaction, await context.transaction.get(resourcesRef));
+          context.transaction.set(resourcesRef, {
+            ...stateMetadata(context.actorUid),
+            stats: nextResources,
+            ...(changesActivation && {combatShieldActivation: null}),
+          }, {merge: true});
+          writeBarrierContinuity(context.transaction, continuity);
+        }
         context.transaction.set(tokenRef, {
           ...cloneWithoutUndefined(tokenPatch) as UnknownRecord,
           ownerUid: access.targetUid,

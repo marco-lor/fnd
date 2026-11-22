@@ -1,4 +1,4 @@
-import {randomInt} from "crypto";
+import {randomInt, randomUUID} from "crypto";
 import {getApp} from "firebase-admin/app";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 import type {
@@ -26,6 +26,7 @@ import {
   combatHasDice,
   combatInRange,
   combatLaunchRolls,
+  combatNeedsConfirmation,
   combatOwnerDamageFloor,
   combatPendingDamage,
   combatRelationAllows,
@@ -61,6 +62,16 @@ import {
   MAX_COMBAT_TARGETS,
 } from "./grigliataCombatCore";
 import {
+  characterResourceIdentity,
+  combatBarrierMaximum,
+  combatDamageReceiptPath,
+  COMBAT_RECEIPTS,
+  debitCombatResources,
+  planCombatRefund,
+  tokenResourceIdentity,
+} from "./grigliataCombatReceipts";
+import {combatResourceVersion, readBarrierContinuity, readShieldActivation, writeBarrierContinuity} from "./barrierContinuity";
+import {
   asFiniteNumber,
   asRecord,
   asTrimmedString,
@@ -85,8 +96,9 @@ type Fields = Record<string, unknown>;
 type CharacterState = {
   profile: CombatProfile;
   resources: CombatResources;
-  resourcesRef: DocumentReference;
+  resourceSnapshot: DocumentSnapshot;
   character: boolean;
+  resourceIdentity: Parameters<typeof debitCombatResources>[0];
   summary: Fields;
   inventory: Fields;
 };
@@ -119,6 +131,13 @@ type CombatEvent = {
 const fail = (code: ConstructorParameters<typeof HttpsError>[0], message: string): never => {
   throw new HttpsError(code, message);
 };
+
+const assertNotCancelled = (snapshot: DocumentSnapshot): void => {
+  if (snapshot.get("status") === "cancelled") fail("failed-precondition", "L'azione è stata annullata.");
+};
+
+const eventStatus = (targets: CombatTarget[], effects: CombatEffect[], pendingDamage: unknown = null) =>
+  combatStatus(targets, pendingDamage, combatNeedsConfirmation(targets, effects));
 
 const requiredUid = (value: unknown): string =>
   asTrimmedString(value) || fail("unauthenticated", "Accedi per usare la Grigliata.");
@@ -259,7 +278,8 @@ const readCharacterState = async (
         level: asFiniteNumber(stats.level, 1),
       },
       resources: combatResources(stats),
-      resourcesRef: token.ref,
+      resourceSnapshot: token,
+      resourceIdentity: tokenResourceIdentity(token),
       summary: asRecord(token.data()),
       inventory: asRecord(token.get("equipped")),
     };
@@ -286,7 +306,8 @@ const readCharacterState = async (
       parametri: asRecord(progression.get("Parametri") ?? summary.Parametri),
     },
     resources: combatResources({...stats, ...asRecord(resources.get("stats"))}),
-    resourcesRef: resources.ref,
+    resourceSnapshot: resources,
+    resourceIdentity: characterResourceIdentity(owner, resources),
     summary,
     inventory: asRecord(equipment.get("slots") ?? equipment.get("equipped") ?? summary.equipped),
   };
@@ -626,12 +647,15 @@ const attackRoll = (action: CombatAction, advantage: boolean): CombatRoll | null
 // revision; other pawns keep them on the token.
 const storeResources = (
   {uid, transaction}: Context,
-  target: {resourcesRef: DocumentReference; character: boolean},
-  stats: Record<string, number>
+  target: {resourceSnapshot: DocumentSnapshot; character: boolean},
+  stats: Record<string, number>,
+  continuity: Parameters<typeof writeBarrierContinuity>[1],
+  shieldActivation: string | null = null
 ): void => {
   if (!Object.keys(stats).length) return;
-  transaction.set(target.resourcesRef, {
+  transaction.set(target.resourceSnapshot.ref, {
     stats,
+    ...(shieldActivation !== null && {combatShieldActivation: shieldActivation}),
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: uid,
     ...(target.character ? {
@@ -639,18 +663,21 @@ const storeResources = (
       revision: FieldValue.increment(1),
     } : {}),
   }, {merge: true});
+  writeBarrierContinuity(transaction, continuity);
 };
 
-const storeCost = (
-  context: Context,
-  state: CharacterState,
-  cost: ReturnType<typeof combatCost>
-): void => {
-  const stats: Record<string, number> = {};
-  (["hp", "mana", "essenza"] as const).forEach((key) => {
-    if (cost[key] > 0) stats[`${key}Current`] = (state.resources[key] ?? 0) - cost[key];
-  });
-  storeResources(context, state, stats);
+const storeCombatDebit = async (
+  context: Context, target: Parameters<typeof storeResources>[1], stats: Parameters<typeof storeResources>[2],
+  barrierDebited = false
+): Promise<string | null> => {
+  if (!Object.keys(stats).length) return null;
+  const {db, transaction} = context;
+  const continuity = await readBarrierContinuity(db, transaction, target.resourceSnapshot, barrierDebited);
+  // Shield replacements clear this marker. Ordinary resource edits preserve it.
+  const shieldActivation = barrierDebited ?
+    readShieldActivation(target.resourceSnapshot.get("combatShieldActivation")) ?? randomUUID() : null;
+  storeResources(context, target, stats, continuity, shieldActivation);
+  return shieldActivation;
 };
 
 const launchCombat = async (context: Context, input: Fields) => {
@@ -696,6 +723,7 @@ const launchCombat = async (context: Context, input: Fields) => {
     if (existing.get("actorUid") !== uid || existing.get("requestHash") !== requested) {
       return fail("already-exists", "Questo identificativo appartiene a un'altra azione.");
     }
+    assertNotCancelled(existing);
     const stored = existing.data() as CombatEvent;
     return {combatId, rolls: combatLaunchRolls(Array.isArray(stored.targets) ? stored.targets : [], stored.attack)};
   }
@@ -800,7 +828,7 @@ const launchCombat = async (context: Context, input: Fields) => {
   }
   const attack = attacks[0]?.target.attack ?? (attacks.length ? null : attackRoll(action, false));
   const targets = attacks.map(({target}) => target);
-  const status = combatStatus(targets, pendingDamage);
+  const status = eventStatus(targets, effects, pendingDamage);
   const areaTargets = await readAffectedPawns(
     context, backgroundId, actor, action, point, targetPawns.map(({pawn}) => pawn),
     board.get("fogOfWarEnabled") !== false
@@ -808,7 +836,13 @@ const launchCombat = async (context: Context, input: Fields) => {
   const actorSummary = {...actor.pawn, ...actorState.resources};
   const now = FieldValue.serverTimestamp();
   const shared = actor.visible && areaTargets.visible && targetPawns.every((pawn) => pawn.visible);
-  storeCost(context, actorState, cost);
+  const {stats, debit} = debitCombatResources(actorState.resourceIdentity, [
+    {field: "hpCurrent", before: actorState.resources.hp, amount: cost.hp},
+    {field: "manaCurrent", before: actorState.resources.mana, amount: cost.mana},
+    {field: "essenzaCurrent", before: actorState.resources.essenza, amount: cost.essenza},
+  ]);
+  await storeCombatDebit(context, actorState, stats);
+  transaction.create(db.doc(`${COMBAT_RECEIPTS}/${combatId}`), {cost: debit});
   transaction.create(actionRef, {
     schemaVersion: 1, backgroundId, actorUid: uid, actor: actor.pawn, kind, point, targets, status,
     // The tray of a guided journal knows beforehand whether a critical has dice to throw.
@@ -953,7 +987,7 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
   const authorizedUid: unknown = request.get("ownerUid");
   const canAct = command === "defend" ? authorizedUid === uid : eventSnapshot.get("actorUid") === uid;
   // Damage-only copies are not defenses. Private requests are absent for anyone outside the command's scope.
-  if (!eventSnapshot.exists || !request.exists || !request.get("defense") ||
+  if (!eventSnapshot.exists || !request.exists || (!request.get("defense") && eventSnapshot.get("status") !== "cancelled") ||
     (!canAct && eventSnapshot.get("shared") !== true)) {
     return fail("not-found", "Richiesta di combattimento non disponibile.");
   }
@@ -962,6 +996,7 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
       ? "Può rispondere solo chi controlla il bersaglio."
       : "Può rilanciare solo chi controlla l'attore.");
   }
+  assertNotCancelled(eventSnapshot);
   const event = eventSnapshot.data() as CombatEvent;
   const target = event.targets.find((item) => item.placementId === placementId);
   if (!target || target.ownerUid !== authorizedUid) {
@@ -1014,7 +1049,7 @@ const targetCombat = async (context: Context, input: Fields, command: "defend" |
     if (item.placementId === placementId) return next;
     return item.placementId === healed ? {...item, outcome: "applied" as const} : item;
   });
-  const status = combatStatus(targets);
+  const status = eventStatus(targets, effects, event.pendingDamage);
   transaction.update(eventRef, {
     targets, status, effects, attack: targets[0]?.attack ?? null,
     updatedAt: now, resolvedAt: status === "done" ? now : null,
@@ -1050,6 +1085,7 @@ const confirmCritical = async (context: Context, input: Fields) => {
   if (!ownsAction) {
     return fail("permission-denied", "Può confermare il critico solo chi controlla l'attore.");
   }
+  assertNotCancelled(snapshot);
   const event = snapshot.data() as CombatEvent;
   const target = event.targets.find((value) => value.placementId === placementId);
   if (target?.pendingDamage?.kind === "weapon") {
@@ -1114,6 +1150,7 @@ const rollDamage = async (context: Context, input: Fields) => {
   if (!canThrow) {
     return fail("permission-denied", "Può tirare il danno solo chi controlla l'attore, o il DM.");
   }
+  assertNotCancelled(snapshot);
   const event = snapshot.data() as CombatEvent;
   const {targets, effects} = event;
   // A journal this server did not write whole answers with a code, never an internal error.
@@ -1148,7 +1185,7 @@ const rollDamage = async (context: Context, input: Fields) => {
   }
   const nextTargets = targets.map((value) => value === target && next ? next : value);
   // A targetless action has no target left to wait for once its own damage is thrown.
-  const status = combatStatus(nextTargets);
+  const status = eventStatus(nextTargets, nextEffects, target ? event.pendingDamage : null);
   const now = FieldValue.serverTimestamp();
   transaction.update(eventRef, {
     targets: nextTargets, effects: nextEffects, status,
@@ -1212,9 +1249,11 @@ const readDamageTarget = async (context: Context, backgroundId: string, recorded
     }
     return {
       character: false,
-      resourcesRef: token.ref,
+      resourceSnapshot: token,
+      resourceIdentity: tokenResourceIdentity(token),
       balances: combatDamageBalances(token.get("stats"), false),
-      barrierField: "shieldCurrent",
+      barrierField: "shieldCurrent" as const,
+      barrierMaximum: combatBarrierMaximum(false, token.get("stats")),
     };
   }
   const [owner, deletion, resources] = await transaction.getAll(
@@ -1229,7 +1268,8 @@ const readDamageTarget = async (context: Context, backgroundId: string, recorded
   const canonicalStats = asRecord(resources.get("stats"));
   return {
     character: true,
-    resourcesRef: resources.ref,
+    resourceSnapshot: resources,
+    resourceIdentity: characterResourceIdentity(owner, resources),
     balances: combatDamageBalances({
       ...legacyStats,
       ...canonicalStats,
@@ -1237,7 +1277,8 @@ const readDamageTarget = async (context: Context, backgroundId: string, recorded
       barrieraCurrent: canonicalStats.barrieraCurrent ?? canonicalStats.barriera ??
         legacyStats.barrieraCurrent ?? legacyStats.barriera,
     }, true),
-    barrierField: "barrieraCurrent",
+    barrierField: "barrieraCurrent" as const,
+    barrierMaximum: combatBarrierMaximum(true, canonicalStats, legacyStats),
   };
 };
 
@@ -1265,6 +1306,7 @@ const applyDamage = async (context: Context, input: Fields) => {
     return fail("permission-denied", "Puoi applicare il danno solo a una pedina che controlli.");
   }
   if (!event) return fail("not-found", "Combattimento non disponibile.");
+  assertNotCancelled(snapshot);
   if (!target) return fail("failed-precondition", "Il bersaglio non fa parte di questa azione.");
   // The first application is the receipt: a retry never touches resources again.
   if (target.damageApplied) return {combatId, damageApplied: target.damageApplied};
@@ -1286,18 +1328,80 @@ const applyDamage = async (context: Context, input: Fields) => {
   const current = await readDamageTarget(context, event.backgroundId, target);
   const request = await ownerDamageRequest(context, combatId, event, placementId);
   const split = combatDamageSplit(amount, current.balances);
-  const stats: Record<string, number> = {};
-  if (split.barrier > 0) stats[current.barrierField] = (current.balances.barrier ?? 0) - split.barrier;
-  if (split.hp > 0) stats.hpCurrent = (current.balances.hp ?? 0) - split.hp;
-  storeResources(context, current, stats);
+  const {stats, debit} = debitCombatResources(current.resourceIdentity, [
+    {field: current.barrierField, before: current.balances.barrier, amount: split.barrier},
+    {field: "hpCurrent", before: current.balances.hp, amount: split.hp},
+  ], current.barrierMaximum);
+  const shieldActivation = await storeCombatDebit(context, current, stats, stats[current.barrierField] !== undefined);
+  transaction.create(db.doc(combatDamageReceiptPath(combatId, placementId)), {
+    ...debit, previousResourceVersion: combatResourceVersion(current.resourceSnapshot),
+    ...(shieldActivation !== null && {shieldActivation}),
+  });
   const damageApplied = {amount};
   const next = {...target, damageApplied};
+  const nextTargets = targets.map((value) => value === target ? next : value);
+  const status = eventStatus(nextTargets, event.effects, event.pendingDamage);
+  const now = FieldValue.serverTimestamp();
   transaction.update(eventRef, {
-    targets: targets.map((value) => value === target ? next : value),
-    updatedAt: FieldValue.serverTimestamp(),
+    targets: nextTargets, status, updatedAt: now,
+    resolvedAt: status === "done" ? now : null,
   });
   projectOwnerDamage(context, request, combatId, event, next);
   return {combatId, damageApplied};
+};
+
+const cancelCombat = async (context: Context, input: Fields) => {
+  const {db, transaction, uid, manager} = context;
+  const combatId = docId(input.combatId, "Combattimento");
+  const event = await transaction.get(db.doc(`${ACTIONS}/${combatId}`));
+  const canCancel = manager || event.get("actorUid") === uid;
+  if (!event.exists || (!canCancel && event.get("shared") !== true)) {
+    return fail("not-found", "Combattimento non disponibile.");
+  }
+  if (!canCancel) return fail("permission-denied", "Può annullare l'azione solo chi l'ha avviata, o il DM.");
+  const reply = (needsReview: boolean) => ({combatId, status: "cancelled" as const, cancellation: {needsReview}});
+  const status = event.get("status");
+  if (status === "cancelled") return reply(event.get("cancellation.needsReview") === true);
+
+  const data = event.data() as CombatEvent;
+  const targets = (Array.isArray(data.targets) ? data.targets : []).filter((target) =>
+    isValidFirestoreDocumentId(asRecord(target).placementId));
+  if (status !== "waiting" && status !== "retry" && status !== "awaitingDamage" &&
+    !combatNeedsConfirmation(targets, data.effects)) {
+    return fail("failed-precondition", "Si possono annullare solo le azioni ancora aperte.");
+  }
+
+  const [receipt, ...requests] = await transaction.getAll(
+    db.doc(`${COMBAT_RECEIPTS}/${combatId}`),
+    ...targets.map(({placementId}) => db.doc(`${REQUESTS}/${defenseRequestId(combatId, placementId)}`))
+  );
+  const {writes, refunds, corrections} = await planCombatRefund(db, transaction, event, receipt,
+    targets.filter((target) => target.damageApplied));
+  const result = reply(corrections.length > 0);
+  const now = FieldValue.serverTimestamp();
+  for (const write of writes) storeResources(context, write, write.stats, write.continuity);
+  transaction.set(receipt.ref, {cancellation: {cancelledBy: uid, cancelledAt: now, refunds, corrections}}, {merge: true});
+  transaction.update(event.ref, {status: result.status, cancellation: result.cancellation, updatedAt: now, resolvedAt: now});
+  for (const request of requests) {
+    if (!request.exists) continue;
+    transaction.set(request.ref, {
+      combatId, status: "cancelled",
+      backgroundId: request.get("backgroundId") ?? data.backgroundId ?? null,
+      ownerUid: request.get("ownerUid") ?? null,
+      createdAt: request.get("createdAt") ?? now,
+      updatedAt: now,
+    });
+  }
+  return result;
+};
+
+const getCancellationDetails = async ({db, transaction, manager}: Context, input: Fields) => {
+  if (!manager) return fail("permission-denied", "Solo il DM può consultare le correzioni di annullamento.");
+  const combatId = docId(input.combatId, "Combattimento");
+  const receipt = await transaction.get(db.doc(`${COMBAT_RECEIPTS}/${combatId}`));
+  const corrections: unknown = receipt.get("cancellation.corrections");
+  if (!Array.isArray(corrections)) return fail("not-found", "Annullamento non disponibile.");
+  return {combatId, corrections};
 };
 
 export const mutateGrigliataCombat = onCall(
@@ -1319,6 +1423,10 @@ export const mutateGrigliataCombat = onCall(
         return rollDamage(context, input);
       case "applyDamage":
         return applyDamage(context, input);
+      case "cancel":
+        return cancelCombat(context, input);
+      case "getCancellationDetails":
+        return getCancellationDetails(context, input);
       default:
         return fail("invalid-argument", "Comando di combattimento sconosciuto.");
       }

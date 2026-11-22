@@ -139,13 +139,15 @@ const turnBatch = (state, {uid = actors.dm, turnCounter = 1, placementPatch = {}
     ...placementPatch,
   }, {merge: true});
   if (expireShield) batch.set(doc(db, 'grigliata_tokens', state.tokenId), {
-    stats: {shieldCurrent: 0, shieldTotal: 0}, updatedAt: serverTimestamp(), updatedBy: uid,
+    combatShieldActivation: deleteField(), stats: {shieldCurrent: 0, shieldTotal: 0},
+    updatedAt: serverTimestamp(), updatedBy: uid,
   }, {merge: true});
   return batch.commit();
 };
 
 for (const count of Array.from({length: 13}, (_, index) => index)) test(`custom-token start and advance batches accept ${count} effects on a complete video map`, async () => {
-  const state = await fixture(`count-${count}`, effects(count));
+  const state = await fixture(`count-${count}`, effects(count), {},
+    count ? {combatShieldActivation: 'server-issued'} : {});
   await assertSucceeds(turnBatch(state));
   await assertSucceeds(turnBatch(state, {turnCounter: 2,
     placementPatch: {turnEffects: count
@@ -164,8 +166,36 @@ for (const count of Array.from({length: 13}, (_, index) => index)) test(`custom-
   const expired = (await getDoc(doc(client(), 'grigliata_token_placements', state.placementId))).data();
   assert.equal(expired.turnCounter, 3);
   assert.equal(expired.turnEffects, undefined);
-  if (count > 0) assert.deepEqual((await getDoc(doc(client(), 'grigliata_tokens', state.tokenId))).data().stats,
-    {shieldCurrent: 0, shieldTotal: 0});
+  if (count > 0) {
+    const token = (await getDoc(doc(client(), 'grigliata_tokens', state.tokenId))).data();
+    assert.deepEqual(token.stats, {shieldCurrent: 0, shieldTotal: 0});
+    assert.equal(token.combatShieldActivation, undefined);
+  }
+});
+
+test('token owners can retain or clear shield continuity but cannot assign it', async () => {
+  const {tokenId} = await fixture('shield-continuity', [], {}, {combatShieldActivation: 'server-issued'});
+  const db = client(actors.owner);
+  const ref = doc(db, 'grigliata_tokens', tokenId);
+  const patch = (data) => setDoc(ref, {...data, updatedAt: serverTimestamp(), updatedBy: actors.owner}, {merge: true});
+  await assertSucceeds(patch({notes: 'Updated notes', stats: {hpCurrent: 6, manaCurrent: 5}}));
+  assert.equal((await getDoc(ref)).get('combatShieldActivation'), 'server-issued');
+  for (const field of ['shieldCurrent', 'shieldTotal']) {
+    await assertFails(patch({stats: {[field]: 4}}));
+  }
+  await assertFails(patch({combatShieldActivation: 'client-issued'}));
+  await assertSucceeds(patch({combatShieldActivation: deleteField(), stats: {shieldCurrent: 4}}));
+  await assertSucceeds(patch({stats: {shieldCurrent: 5}}));
+  await assertFails(patch({combatShieldActivation: 'server-issued'}));
+
+  const templateId = 'task14g-shield-continuity-create';
+  seededPaths.add(`grigliata_tokens/${templateId}`);
+  const profile = {
+    ...(await getDoc(ref)).data(), customTokenRole: 'template', customTemplateId: templateId,
+  };
+  const template = doc(db, 'grigliata_tokens', templateId);
+  await assertFails(setDoc(template, {...profile, combatShieldActivation: 'server-issued'}));
+  await assertSucceeds(setDoc(template, profile));
 });
 
 test('effect identifiers and kinds preserve all nonempty strings', async () => {
