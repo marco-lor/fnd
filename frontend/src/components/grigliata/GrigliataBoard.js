@@ -126,6 +126,8 @@ import {
 import { sortTokensByLayerOrder } from './tokenLayering';
 import GrigliataCombatAim from './GrigliataCombatAim';
 import GrigliataCombatDiceTray, { CombatMapDamage, CombatMapDice } from './GrigliataCombatDice';
+import GrigliataTokenStackControls from './GrigliataTokenStackControls';
+import { buildTokenStackCells, isTokenStackPointVisible } from './tokenStacks';
 import {
   buildBackgroundMap,
   buildInitialNarrationPlacement,
@@ -187,6 +189,7 @@ const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
 const EMPTY_FOG_CLIP_POLYGONS = Object.freeze([]);
+const EMPTY_TOKEN_STACK_CELLS = new Map();
 const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
@@ -2436,6 +2439,8 @@ export default function GrigliataBoard({
   });
   const [isDropActive, setIsDropActive] = useState(false);
   const [selectedTokenIds, setSelectedTokenIds] = useState([]);
+  // Local, explicit choice of which token the next drag from a stack moves.
+  const [stackTargetChoice, setStackTargetChoice] = useState(null);
   const [selectionBox, setSelectionBox] = useState(null);
   const [tokenDragState, setTokenDragState] = useState(null);
   const [measurementState, setMeasurementState] = useState(null);
@@ -5219,6 +5224,7 @@ export default function GrigliataBoard({
       if (activeInteraction.type === 'token-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
+        setStackTargetChoice(null);
         clearPingHoldTimer();
         const draggedOriginToken = activeInteraction.originTokens.find(
           (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
@@ -5841,6 +5847,42 @@ export default function GrigliataBoard({
     schedulePingHoldForActiveInteraction('selection-candidate');
   };
 
+  const clearNonTokenSelection = useCallback(() => {
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedWallId('');
+  }, []);
+
+  const getChosenStackTokenAt = (nativeEvent, hitTokenId) => {
+    const choice = stackTargetChoice;
+    if (!choice || selectedTokenIds.length !== 1 || selectedTokenIds[0] !== choice.tokenId) return null;
+
+    const chosenToken = tokenItemsById.get(choice.tokenId);
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!chosenToken?.canMove || !pointerWorld || choice.backgroundId !== activeBackgroundId) return null;
+
+    const pointerCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+    const stack = tokenStackCells.get(`${pointerCell.col}:${pointerCell.row}`);
+    if (
+      stack?.badgeCellKey !== choice.badgeCellKey
+      || !stack.tokenIds.includes(choice.tokenId)
+      || (hitTokenId && !stack.tokenIds.includes(hitTokenId))
+      || !isTokenStackPointVisible({
+        point: pointerWorld,
+        token: chosenToken,
+        grid: normalizedGrid,
+        aboveFogTokens: visibleRenderedTokensAboveFog,
+        fogOfWar,
+        isFogViewerManager: resolvedIsFogViewerManager,
+      })
+    ) {
+      return null;
+    }
+
+    return chosenToken;
+  };
+
   const handleTokenMouseDown = (token, event) => {
     const nativeEvent = event.evt;
     event.cancelBubble = true;
@@ -5879,6 +5921,18 @@ export default function GrigliataBoard({
 
     if (!isPrimaryMouseButton(nativeEvent)) return;
 
+    beginPrimaryTokenPress(getChosenStackTokenAt(nativeEvent, token.tokenId) || token, nativeEvent);
+  };
+
+  const handleChosenBadgeMouseDown = (nativeEvent) => {
+    if (!isPrimaryMouseButton(nativeEvent)) return;
+    // The badge can cover a narrow fog opening. A click still opens the picker,
+    // while movement past the normal drag threshold moves the chosen token.
+    const chosen = getChosenStackTokenAt(nativeEvent);
+    if (chosen) beginPrimaryTokenPress(chosen, nativeEvent, false);
+  };
+
+  const beginPrimaryTokenPress = (token, nativeEvent, allowPing = true) => {
     const shouldMoveTokenWhileMeasuring = !!(
       isRulerEnabled
       && isRulerTokenMovementEnabled
@@ -5899,10 +5953,7 @@ export default function GrigliataBoard({
 
     setMeasurementState(null);
     setAoEPreviewState(null);
-    setSelectedAoEFigureId('');
-    setSelectedLightId('');
-    setSelectedDarknessId('');
-    setSelectedWallId('');
+    clearNonTokenSelection();
     clearActiveSharedInteraction();
 
     if (!token?.canMove) {
@@ -5937,7 +5988,7 @@ export default function GrigliataBoard({
         y: nativeEvent.clientY,
       },
       startWorld: pointerWorld,
-      canTriggerPing: !isRulerEnabled,
+      canTriggerPing: allowPing && !isRulerEnabled,
       pingWorld: tokenPingWorld,
       measurementSource: shouldMoveTokenWhileMeasuring ? 'token-drag' : null,
       originTokens: nextSelectedTokenIds
@@ -5959,7 +6010,7 @@ export default function GrigliataBoard({
         })),
     };
 
-    if (!isRulerEnabled) {
+    if (allowPing && !isRulerEnabled) {
       schedulePingHoldForActiveInteraction('token-candidate');
     }
   };
@@ -6411,6 +6462,49 @@ export default function GrigliataBoard({
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
+  const activeBackgroundId = resolvedBackground?.id || '';
+  // Built from the already fog-filtered layers; skipped while a drag preview moves tokens.
+  const tokenStackCells = useMemo(
+    () => (tokenDragState ? EMPTY_TOKEN_STACK_CELLS : buildTokenStackCells({
+      belowFogTokens: visibleRenderedTokensBelowFog,
+      aboveFogTokens: visibleRenderedTokensAboveFog,
+      grid: normalizedGrid,
+      fogOfWar,
+      isFogViewerManager: resolvedIsFogViewerManager,
+    })),
+    [fogOfWar, normalizedGrid, resolvedIsFogViewerManager, tokenDragState, visibleRenderedTokensAboveFog, visibleRenderedTokensBelowFog]
+  );
+  const tokenStackBadges = useMemo(
+    () => [...tokenStackCells.values()].filter((stack) => stack.anchor && stack.tokenIds.length > 1),
+    [tokenStackCells]
+  );
+  useEffect(() => {
+    if (!stackTargetChoice || tokenDragState) return;
+
+    const isChoiceCurrent = stackTargetChoice.backgroundId === activeBackgroundId
+      && selectedTokenIds.length === 1
+      && selectedTokenIds[0] === stackTargetChoice.tokenId
+      && !!tokenItemsById.get(stackTargetChoice.tokenId)?.canMove
+      && tokenStackBadges.some((stack) => (
+        stack.badgeCellKey === stackTargetChoice.badgeCellKey
+        && stack.tokenIds.includes(stackTargetChoice.tokenId)
+      ));
+    if (!isChoiceCurrent) setStackTargetChoice(null);
+  }, [activeBackgroundId, selectedTokenIds, stackTargetChoice, tokenDragState, tokenItemsById, tokenStackBadges]);
+  const handleChooseStackToken = useCallback((stack, tokenId) => {
+    clearNonTokenSelection();
+    setSelectedTokenIds([tokenId]);
+    setStackTargetChoice({ backgroundId: activeBackgroundId, badgeCellKey: stack.badgeCellKey, tokenId });
+  }, [activeBackgroundId, clearNonTokenSelection]);
+  const isTokenStackUiVisible = tokenStackBadges.length > 0
+    && isMouseSelectionActive
+    && !isNarrationPresentationActive
+    && !combatAim?.selection?.picking
+    && !selectionBox;
+  const visibleTokensById = useMemo(
+    () => new Map([...visibleRenderedTokensBelowFog, ...visibleRenderedTokensAboveFog].map((token) => [token.tokenId, token])),
+    [visibleRenderedTokensAboveFog, visibleRenderedTokensBelowFog]
+  );
   const imageLimits = useSyncExternalStore(
     subscribeImageAssetRuntimeLimits,
     getCurrentImageAssetRuntimeLimits,
@@ -7298,6 +7392,19 @@ export default function GrigliataBoard({
               )}
             </Layer>
           </Stage>
+        )}
+
+        {isTokenStackUiVisible && (
+          <GrigliataTokenStackControls
+            stacks={tokenStackBadges}
+            tokensById={visibleTokensById}
+            viewport={viewport}
+            stageSize={stageSize}
+            grid={normalizedGrid}
+            choice={stackTargetChoice}
+            onChoose={handleChooseStackToken}
+            onChosenBadgeMouseDown={handleChosenBadgeMouseDown}
+          />
         )}
 
         {visibleSelectedTokenHud && selectedTokenDetails && (

@@ -60,6 +60,10 @@ const buildCurrentVisibleCellSet = (fogOfWar) => {
   return new Set(normalizedCells);
 };
 
+export const buildCurrentVisiblePolygons = (fogOfWar) => (
+  normalizeRenderableFogPolygons(fogOfWar?.currentVisiblePolygons) || []
+);
+
 const getPolygonSearchBounds = (ring) => {
   let minX = Infinity;
   let minY = Infinity;
@@ -88,7 +92,7 @@ const getPolygonSearchBounds = (ring) => {
 };
 
 const buildCurrentVisibility = (fogOfWar) => {
-  const currentPolygons = normalizeRenderableFogPolygons(fogOfWar?.currentVisiblePolygons) || [];
+  const currentPolygons = buildCurrentVisiblePolygons(fogOfWar);
   return {
     currentPolygons,
     polygonSearchBounds: currentPolygons.map(([outerRing]) => getPolygonSearchBounds(outerRing)),
@@ -180,7 +184,7 @@ const pointIsOnSegment = (point, start, end) => {
   return dot <= squaredLength + GEOMETRY_EPSILON;
 };
 
-const pointIsInRing = (point, ring = []) => {
+const pointIsInRing = (point, ring = [], includeBoundary = true) => {
   let isInside = false;
 
   for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index, index += 1) {
@@ -188,7 +192,7 @@ const pointIsInRing = (point, ring = []) => {
     const end = ring[index];
 
     if (pointIsOnSegment(point, start, end)) {
-      return true;
+      return includeBoundary;
     }
 
     const intersects = (
@@ -204,14 +208,16 @@ const pointIsInRing = (point, ring = []) => {
   return isInside;
 };
 
-const pointIsInFogPolygon = (point, polygon = []) => {
+const pointIsInFogPolygon = (point, polygon = [], includeBoundary = true) => {
   const outerRing = polygon?.[0];
-  if (!Array.isArray(outerRing) || outerRing.length < 3 || !pointIsInRing(point, outerRing)) {
+  if (!Array.isArray(outerRing) || outerRing.length < 3 || !pointIsInRing(point, outerRing, includeBoundary)) {
     return false;
   }
 
   return !polygon.slice(1).some((holeRing) => pointIsInRing(point, holeRing));
 };
+
+export const pointIsInsideFogPolygon = (point, polygon) => pointIsInFogPolygon(point, polygon, false);
 
 const pointIsInBounds = (point, bounds) => (
   point.x >= bounds.minX - GEOMETRY_EPSILON
