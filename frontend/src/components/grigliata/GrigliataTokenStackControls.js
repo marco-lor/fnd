@@ -129,8 +129,9 @@ export default function GrigliataTokenStackControls({
 
   const getLayout = (stack) => getTokenStackBadgeLayout({ stack, grid, viewport, stageSize });
 
+  // Keep the wrapper out of the stacking order so only the open picker rises above the board rails.
   return (
-    <div className="pointer-events-none absolute inset-0 z-[19] overflow-hidden" onKeyDown={handleKeyDown}>
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" onKeyDown={handleKeyDown}>
       {stacks.map((stack) => {
         const layout = getLayout(stack);
         if (!layout) return null;
@@ -155,7 +156,7 @@ export default function GrigliataTokenStackControls({
             aria-controls={isOpen ? pickerId : undefined}
             onMouseDown={isChosenStack ? (event) => onChosenBadgeMouseDown?.(event.nativeEvent) : undefined}
             onClick={() => setOpenKey(isOpen ? '' : stack.badgeCellKey)}
-            className={`group pointer-events-auto absolute flex items-center justify-center rounded-full border font-bold leading-none text-slate-50 shadow-sm shadow-black/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
+            className={`group pointer-events-auto absolute z-[19] flex items-center justify-center rounded-full border font-bold leading-none text-slate-50 shadow-sm shadow-black/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
               isChosenStack ? 'border-amber-300' : 'border-slate-100/90'
             } ${
               layout.isCompact ? 'bg-amber-400 hover:bg-amber-200' : 'bg-slate-950/90 text-[11px] hover:bg-slate-800'
@@ -203,7 +204,7 @@ export default function GrigliataTokenStackControls({
             role="dialog"
             aria-label="Pedine sovrapposte"
             data-testid="token-stack-picker"
-            className="pointer-events-auto absolute max-h-72 overflow-y-auto rounded-xl border border-slate-700/90 bg-slate-950/96 p-1.5 text-xs text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
+            className="pointer-events-auto absolute z-[31] max-h-72 overflow-y-auto rounded-xl border border-slate-700/90 bg-slate-950/96 p-1.5 text-xs text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
             style={{
               width: PICKER_WIDTH_PX,
               left: clamp(

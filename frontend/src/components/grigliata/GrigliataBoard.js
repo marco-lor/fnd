@@ -2140,7 +2140,7 @@ const TurnOrderPanel = ({
   }, [activeTurnTokenId, entries, prefersReducedMotion]);
 
   return (
-    <div ref={panelRef} className="pointer-events-auto relative flex h-full min-h-0 w-full flex-col overflow-visible">
+    <div ref={panelRef} className="pointer-events-none relative flex h-full min-h-0 w-full flex-col overflow-visible">
       {hoveredEntryTooltip && (
         <div
           data-testid={`turn-order-tooltip-${hoveredEntryTooltip.tokenId}`}
@@ -2160,7 +2160,7 @@ const TurnOrderPanel = ({
         ref={scrollContainerRef}
         data-testid="turn-order-scroll-container"
         onScroll={() => setHoveredEntryTooltip(null)}
-        className="custom-scroll relative flex h-full min-h-0 flex-1 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto overscroll-contain pb-8 pl-3 pr-1 pt-1 [scrollbar-gutter:stable]"
+        className="custom-scroll pointer-events-auto relative flex max-h-full min-h-0 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto overscroll-contain pb-8 pl-3 pr-1 pt-1 [scrollbar-gutter:stable]"
       >
         {entries.length > 0 && (
           <motion.div

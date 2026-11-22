@@ -7474,11 +7474,10 @@ describe('GrigliataBoard', () => {
     expect(turnOrderScrollContainer.className).toContain('overflow-x-hidden');
     expect(turnOrderScrollContainer).toHaveAttribute('data-testid', 'turn-order-scroll-container');
     expect(turnOrderScrollContainer.className).toContain('custom-scroll');
-    expect(turnOrderScrollContainer.className).toContain('flex-1');
+    expect(turnOrderScrollContainer).toHaveClass('pointer-events-auto', 'max-h-full');
     expect(turnOrderScrollContainer.className).toContain('min-h-0');
     expect(turnOrderScrollContainer.className).toContain('overscroll-contain');
     expect(turnOrderScrollContainer.className).toContain('[scrollbar-gutter:stable]');
-    expect(turnOrderScrollContainer.className).not.toContain('max-h-');
 
     fireEvent.mouseEnter(chip);
     expect(screen.getByTestId('turn-order-tooltip-user-1')).toBeInTheDocument();
@@ -7555,7 +7554,7 @@ describe('GrigliataBoard', () => {
     const scrollContainer = screen.getByTestId('turn-order-scroll-container');
     expect(scrollContainer).toContainElement(screen.getByTestId('turn-order-entry-token-1'));
     expect(scrollContainer).toContainElement(screen.getByTestId('turn-order-entry-token-40'));
-    expect(scrollContainer.className).toContain('h-full');
+    expect(scrollContainer).toHaveClass('max-h-full');
     expect(scrollContainer.className).toContain('overflow-y-auto');
     expect(screen.getByTestId('turn-order-panel').className).toContain('flex-1');
   });
