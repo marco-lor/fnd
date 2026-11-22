@@ -208,7 +208,7 @@ import useGrigliataFogOfWar, {
   useGrigliataFogRasterMemory,
 } from './useGrigliataFogOfWar';
 import useGrigliataFogOfWarPersistence, {
-  buildViewerFogCurrentVisibility,
+  useViewerFogCurrentVisibility,
 } from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { logGrigliataFogDebug } from './fogDebug';
@@ -223,15 +223,16 @@ import {
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
 import {
-  buildFogRasterTilePayload,
-  countFogRasterMaskBits,
   GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
   mergeFogRasterMemoryTiles,
-  mergeFogRasterTileMasks,
-  normalizeFogRasterMemoryTileDoc,
-  rasterizeFogPolygonsToTiles,
-  subtractFogRasterTileMasks,
 } from './fogRasterMemory';
+import {
+  buildFogBrushQueueKey,
+  drainFogBrushQueue,
+  getFogWriteRetryDelayMs,
+  isRetryableFogWriteError,
+  persistFogBrushQueueEntry,
+} from './fogRasterTilePersistence';
 import {
   filterFogVisibleTokens,
   filterFogVisibleTurnOrderEntries,
@@ -306,15 +307,6 @@ const FIRESTORE_BATCH_SIZE = 450;
 const PLACEMENT_RULE_SAFE_BATCH_SIZE = 6;
 const PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE = 4;
 const PLACEMENT_DELETE_BATCH_SIZE = 3;
-const EMPTY_VIEW_AS_FOG_VISIBILITY = {
-  currentVisibleCells: [],
-  currentVisiblePolygons: [],
-  currentPersistencePolygons: [],
-  currentTokenVisionPolygons: [],
-  contributingTokenIds: [],
-  skippedTokens: [],
-};
-
 const normalizeViewAsPlayerUid = (value) => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -447,22 +439,6 @@ const normalizeSceneLightingSettings = (scene = {}) => {
 const deleteGrigliataCustomTokenCallable = getCallable('deleteGrigliataCustomToken');
 const spawnGrigliataCustomTokenInstanceCallable = getCallable('spawnGrigliataCustomTokenInstance');
 const updateGrigliataCustomTokenTemplateCallable = getCallable('updateGrigliataCustomTokenTemplate');
-
-const buildFogBrushQueueKey = ({
-  backgroundId,
-  mode,
-  cellSizePx,
-  offsetXPx,
-  offsetYPx,
-  ownerUids = [],
-} = {}) => JSON.stringify([
-  backgroundId,
-  mode,
-  cellSizePx,
-  offsetXPx,
-  offsetYPx,
-  ownerUids,
-]);
 
 const isLegacyHiddenPlacementToken = ({ tokenId, ownerUid }) => tokenId === ownerUid;
 const isPermissionDeniedError = (error) => (
@@ -803,6 +779,10 @@ export default function GrigliataPage() {
   const fogBrushQueueRef = useRef([]);
   const fogBrushFlushPromiseRef = useRef(null);
   const isFogBrushFlushActiveRef = useRef(false);
+  const fogBrushRetryTimeoutRef = useRef(null);
+  const fogBrushRetryAttemptRef = useRef(0);
+  const flushFogBrushQueueRef = useRef(null);
+  const isFogBrushSessionActiveRef = useRef(false);
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
   const [isTurnOrderResetPending, setIsTurnOrderResetPending] = useState(false);
@@ -995,6 +975,7 @@ export default function GrigliataPage() {
   });
   const {
     fogOfWar,
+    isFogOfWarReady,
   } = useGrigliataFogOfWar({
     backgroundId: activeBackgroundId,
     currentUserId,
@@ -1617,34 +1598,14 @@ export default function GrigliataPage() {
     ownerUid: viewAsPlayerUid,
     enabled: isViewAsPlayerSelected && isFogOfWarEnabled && !!activeBackgroundId,
   });
-  const viewAsPlayerCurrentVisibility = useMemo(() => {
-    if (
-      !isViewAsPlayerPreviewActive
-      || !isFogOfWarEnabled
-      || !fogLightingRenderInput
-      || !viewAsPlayerUid
-    ) {
-      return EMPTY_VIEW_AS_FOG_VISIBILITY;
-    }
-
-    return buildViewerFogCurrentVisibility({
-      tokens: viewAsPlayerBoardTokens,
-      currentUserId: viewAsPlayerUid,
-      isManager: false,
-      backgroundId: activeBackgroundId,
-      grid: normalizedFogGrid,
-      lightingRenderInput: fogLightingRenderInput,
-      includeCurrentVisibleCells: false,
-    });
-  }, [
-    activeBackgroundId,
-    fogLightingRenderInput,
-    isFogOfWarEnabled,
-    isViewAsPlayerPreviewActive,
-    normalizedFogGrid,
-    viewAsPlayerBoardTokens,
-    viewAsPlayerUid,
-  ]);
+  const viewAsPlayerCurrentVisibility = useViewerFogCurrentVisibility({
+    tokens: viewAsPlayerBoardTokens,
+    currentUserId: viewAsPlayerUid,
+    backgroundId: activeBackgroundId,
+    grid: normalizedFogGrid,
+    lightingRenderInput: fogLightingRenderInput,
+    isEnabled: isViewAsPlayerPreviewActive && isFogOfWarEnabled && !!viewAsPlayerUid,
+  });
   const playerFog = useGrigliataFogOfWarPersistence({
     backgroundId: activeBackgroundId,
     currentUserId,
@@ -1653,6 +1614,7 @@ export default function GrigliataPage() {
     tokens: visibleBoardTokens,
     lightingRenderInput: fogLightingRenderInput,
     fogOfWar,
+    isFogMemoryReady: isFogOfWarReady,
     isEnabled: isFogOfWarEnabled && !isNarrationOverlayActive,
   });
   useEffect(() => {
@@ -1703,19 +1665,20 @@ export default function GrigliataPage() {
   ]);
   const { currentVisibleCells, currentVisiblePolygons, currentTokenVisionPolygons } =
     isViewAsPlayerPreviewActive ? viewAsPlayerCurrentVisibility : playerFog;
-  const boardFogOfWar = useMemo(() => showBoardFog ? {
+  const boardFogSight = useMemo(
+    () => (showBoardFog ? { currentVisibleCells, currentVisiblePolygons } : null),
+    [currentVisibleCells, currentVisiblePolygons, showBoardFog]
+  );
+  const boardFogOfWar = useMemo(() => boardFogSight ? {
+    ...boardFogSight,
     exploredCells: [],
     exploredPolygons: [],
     memoryTiles: boardMemoryTiles,
-    currentVisibleCells,
-    currentVisiblePolygons,
     currentTokenVisionPolygons,
   } : null, [
+    boardFogSight,
     boardMemoryTiles,
     currentTokenVisionPolygons,
-    currentVisibleCells,
-    currentVisiblePolygons,
-    showBoardFog,
   ]);
   const boardFogViewerUserId = isViewAsPlayerPreviewActive ? viewAsPlayerUid : currentUserId;
   const boardFogViewerIsManager = isViewAsPlayerPreviewActive ? false : isManager;
@@ -1728,10 +1691,10 @@ export default function GrigliataPage() {
       currentUserId: boardFogViewerUserId,
       isManager: boardFogViewerIsManager,
       grid: normalizedFogGrid,
-      fogOfWar: boardFogOfWar,
+      fogOfWar: boardFogSight,
     }),
     [
-      boardFogOfWar,
+      boardFogSight,
       boardFogViewerIsManager,
       boardFogViewerUserId,
       boardTokenRenderCandidates,
@@ -1752,10 +1715,8 @@ export default function GrigliataPage() {
       entries: turnOrderEntries,
       tokens: boardRenderTokens,
       isManager: boardFogViewerIsManager,
-      fogOfWar: boardFogOfWar,
     }),
     [
-      boardFogOfWar,
       boardFogViewerIsManager,
       boardRenderTokens,
       turnOrderEntries,
@@ -1775,16 +1736,16 @@ export default function GrigliataPage() {
     [boardRenderTokens]
   );
   const boardRenderSelectedTokenDetails = useMemo(() => {
-    if (!boardFogOfWar || boardFogViewerIsManager || !selectedTokenDetails?.tokenId) {
+    if (!showBoardFog || boardFogViewerIsManager || !selectedTokenDetails?.tokenId) {
       return selectedTokenDetails;
     }
 
     return boardRenderTokenIdSet.has(selectedTokenDetails.tokenId)
       ? selectedTokenDetails
       : null;
-  }, [boardFogOfWar, boardFogViewerIsManager, boardRenderTokenIdSet, selectedTokenDetails]);
+  }, [boardFogViewerIsManager, boardRenderTokenIdSet, selectedTokenDetails, showBoardFog]);
   useEffect(() => {
-    if (!boardFogOfWar || boardFogViewerIsManager) {
+    if (!showBoardFog || boardFogViewerIsManager) {
       return;
     }
 
@@ -1796,7 +1757,7 @@ export default function GrigliataPage() {
       const nextTokenIds = currentTokenIds.filter((tokenId) => boardRenderTokenIdSet.has(tokenId));
       return nextTokenIds.length === currentTokenIds.length ? currentTokenIds : nextTokenIds;
     });
-  }, [boardFogOfWar, boardFogViewerIsManager, boardRenderTokenIdSet]);
+  }, [boardFogViewerIsManager, boardRenderTokenIdSet, showBoardFog]);
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
@@ -5845,127 +5806,97 @@ export default function GrigliataPage() {
     setFogBrushRadiusSquares(normalizeFogBrushRadiusSquares(nextRadiusSquares));
   }, []);
 
-  const persistFogBrushQueueEntry = useCallback(async (entry) => {
-    if (
-      !entry?.backgroundId
-      || !entry?.updatedBy
-      || !Array.isArray(entry?.ownerUids)
-      || entry.ownerUids.length < 1
-      || !Array.isArray(entry?.brushPolygons)
-      || entry.brushPolygons.length < 1
-    ) {
-      return false;
-    }
-
-    const brushGrid = normalizeGridConfig({
-      cellSizePx: entry.cellSizePx,
-      offsetXPx: entry.offsetXPx,
-      offsetYPx: entry.offsetYPx,
-    });
-    const updatedAt = serverTimestamp();
-    const writeResults = await Promise.all(entry.ownerUids.map(async (ownerUid) => {
-      const brushTiles = rasterizeFogPolygonsToTiles({
+  const persistFogBrushQueueEntryForPage = useCallback((entry) => persistFogBrushQueueEntry({
+    db,
+    entry,
+    shouldContinue: () => isFogBrushSessionActiveRef.current,
+    onOwnerResult: ({ ownerUid, inputTileCount, didWriteTile }) => {
+      logGrigliataFogDebug('raster-brush-write', {
         backgroundId: entry.backgroundId,
         ownerUid,
-        grid: brushGrid,
-        polygons: entry.brushPolygons,
+        mode: entry.mode,
+        inputTileCount,
+        didWriteTile,
       });
-      if (brushTiles.length < 1) return false;
+    },
+  }), []);
 
-      return runTransaction(db, async (transaction) => {
-        const reads = await Promise.all(brushTiles.map(async (brushTile) => {
-          const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, brushTile.id);
-          const tileSnapshot = await transaction.get(tileRef);
-          const existingTile = tileSnapshot.exists()
-            ? normalizeFogRasterMemoryTileDoc({
-              id: tileSnapshot.id,
-              ...tileSnapshot.data(),
-            })
-            : null;
-          return { brushTile, tileRef, existingTile };
-        }));
-
-        let didWriteTile = false;
-        reads.forEach(({ brushTile, tileRef, existingTile }) => {
-          if (entry.mode === 'hide' && !existingTile) {
-            return;
-          }
-
-          const nextMaskBytes = entry.mode === 'hide'
-            ? subtractFogRasterTileMasks(existingTile.maskBytes, brushTile.maskBytes)
-            : mergeFogRasterTileMasks(existingTile?.maskBytes, brushTile.maskBytes);
-          const nextBitCount = countFogRasterMaskBits(nextMaskBytes);
-
-          if (entry.mode === 'hide' && nextBitCount < 1) {
-            transaction.delete(tileRef);
-            didWriteTile = true;
-            return;
-          }
-
-          if (nextBitCount < 1) {
-            return;
-          }
-
-          transaction.set(tileRef, buildFogRasterTilePayload({
-            ...brushTile,
-            grid: brushGrid,
-            maskBytes: nextMaskBytes,
-            updatedAt,
-            updatedBy: entry.updatedBy,
-          }), { merge: true });
-          didWriteTile = true;
-        });
-
-        logGrigliataFogDebug('raster-brush-write', {
-          backgroundId: entry.backgroundId,
-          ownerUid,
-          mode: entry.mode,
-          inputTileCount: brushTiles.length,
-          didWriteTile,
-        });
-        return didWriteTile;
-      });
-    }));
-
-    return writeResults.some(Boolean);
-  }, []);
-
+  // Retry transient failures in stroke order. A permanent rejection for one
+  // owner is surfaced to the manager while the rest of the queue proceeds.
   const flushFogBrushQueue = useCallback(() => {
     if (isFogBrushFlushActiveRef.current) {
       return fogBrushFlushPromiseRef.current || Promise.resolve(false);
     }
 
+    if (fogBrushRetryTimeoutRef.current) {
+      window.clearTimeout(fogBrushRetryTimeoutRef.current);
+      fogBrushRetryTimeoutRef.current = null;
+    }
     isFogBrushFlushActiveRef.current = true;
     setIsFogBrushMutationPending(true);
 
     const flushPromise = (async () => {
-      let didWrite = false;
-
       try {
-        while (fogBrushQueueRef.current.length > 0) {
-          const queuedEntries = fogBrushQueueRef.current.splice(0, fogBrushQueueRef.current.length);
-
-          for (const queuedEntry of queuedEntries) {
-            const didWriteEntry = await persistFogBrushQueueEntry(queuedEntry);
-            didWrite = didWrite || didWriteEntry;
-          }
-        }
-
+        const didWrite = await drainFogBrushQueue({
+          queue: fogBrushQueueRef.current,
+          persistEntry: persistFogBrushQueueEntryForPage,
+          shouldContinue: () => isFogBrushSessionActiveRef.current,
+          onPermanentFailure: (error, ownerUid) => {
+            console.error('Fog brush change could not be saved for player:', ownerUid, error);
+            if (isFogBrushSessionActiveRef.current) setBoardError('Some fog brush changes could not be saved.');
+          },
+        });
+        fogBrushRetryAttemptRef.current = 0;
         return didWrite;
       } catch (error) {
         console.error('Failed to paint Grigliata fog brush:', error);
-        setBoardError('Unable to update fog of war right now.');
+        if (isFogBrushSessionActiveRef.current) setBoardError('Unable to update fog of war right now.');
+        if (
+          isFogBrushSessionActiveRef.current
+          && isRetryableFogWriteError(error)
+          && fogBrushQueueRef.current.length > 0
+        ) {
+          fogBrushRetryAttemptRef.current += 1;
+          fogBrushRetryTimeoutRef.current = window.setTimeout(() => {
+            fogBrushRetryTimeoutRef.current = null;
+            if (!isFogBrushSessionActiveRef.current) return;
+            void flushFogBrushQueueRef.current?.().catch(() => {});
+          }, getFogWriteRetryDelayMs(fogBrushRetryAttemptRef.current));
+        }
         throw error;
       } finally {
         isFogBrushFlushActiveRef.current = false;
         fogBrushFlushPromiseRef.current = null;
-        setIsFogBrushMutationPending(false);
+        if (isFogBrushSessionActiveRef.current) setIsFogBrushMutationPending(false);
       }
     })();
 
     fogBrushFlushPromiseRef.current = flushPromise;
     return flushPromise;
-  }, [persistFogBrushQueueEntry]);
+  }, [persistFogBrushQueueEntryForPage]);
+
+  useEffect(() => {
+    flushFogBrushQueueRef.current = flushFogBrushQueue;
+  }, [flushFogBrushQueue]);
+
+  // Brush session guard: strokes queued by this board instance are applied
+  // only while it is mounted. After unmount neither the in-flight drain nor a
+  // backoff retry may apply them, since a newly opened board could already
+  // have made later edits to the same tiles.
+  useEffect(() => {
+    const queue = fogBrushQueueRef.current;
+    isFogBrushSessionActiveRef.current = true;
+    return () => {
+      isFogBrushSessionActiveRef.current = false;
+      if (queue.length || isFogBrushFlushActiveRef.current) {
+        console.warn('Board closed with pending fog brush changes. Some changes may be incomplete.');
+      }
+      if (fogBrushRetryTimeoutRef.current) {
+        window.clearTimeout(fogBrushRetryTimeoutRef.current);
+        fogBrushRetryTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const handlePaintFogBrush = useCallback(async ({
     point = {},
@@ -7319,6 +7250,7 @@ export default function GrigliataPage() {
                 activeViewers={activePageViewers}
                 lightingRenderInput={enabledLightingRenderInput}
                 lightingDebugMetadata={lightingMetadata}
+                lightingDebugRenderInput={effectiveLightingRenderInput}
                 showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
                 lightSourceControls={isManager && !isNarrationOverlayActive ? {
                   isLightToolActive,

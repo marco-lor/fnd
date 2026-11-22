@@ -183,6 +183,43 @@ describe('fogPolygonGeometry', () => {
     );
   });
 
+  test('applies the polygon count limit to legacy memory and its Firestore encoder', () => {
+    const polygons = Array.from({ length: 9 }, (_, index) => (
+      square(index * 20, 0, (index * 20) + 10, 10)[0]
+    ));
+
+    expect(normalizeRenderableFogPolygons(polygons)).toHaveLength(9);
+    expect(normalizeFogMemoryPolygons(polygons.slice(0, 8))).toHaveLength(8);
+    expect(normalizeFogMemoryPolygons(polygons)).toBeNull();
+    expect(encodeFogMemoryPolygonsForFirestore(polygons)).toEqual([]);
+  });
+
+  test('applies the aggregate legacy budget independently of polygon count', () => {
+    const ring = (centerX, radius, points) => Array.from({ length: points }, (_, index) => {
+      const angle = (2 * Math.PI * index) / points;
+      return { x: centerX + (radius * Math.cos(angle)), y: radius * Math.sin(angle) };
+    });
+    const polygons = [0, 300, 600].map((centerX) => [100, 75, 50].map((radius) => (
+      ring(centerX, radius, 384)
+    )));
+
+    expect(normalizeRenderableFogPolygons(polygons).map((polygon) => polygon.map((entry) => (
+      entry.length
+    )))).toEqual([[384, 384, 384], [384, 384, 384], [384, 384, 384]]);
+    expect(normalizeFogMemoryPolygons(polygons.slice(0, 2))).toHaveLength(2);
+    expect(normalizeFogMemoryPolygons(polygons)).toBeNull();
+    expect(encodeFogMemoryPolygonsForFirestore(polygons)).toEqual([]);
+  });
+
+  test('finds bounds across more vertices than can be spread into a function call', () => {
+    const [left] = square(-20, -10, 0, 0);
+    const [right] = square(0, 0, 10, 30);
+    const polygons = Array(40000).fill(left);
+    polygons.push(right);
+
+    expect(getFogPolygonBounds(polygons)).toEqual({ minX: -20, minY: -10, maxX: 10, maxY: 30 });
+  });
+
   test('encodes high-detail memory polygons without direct nested arrays', () => {
     const memoryPolygon = buildCircularFogMemoryPolygon({
       center: { x: 100, y: 100 },

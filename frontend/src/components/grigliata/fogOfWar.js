@@ -1,11 +1,9 @@
 import { normalizeGridConfig } from './boardUtils';
 import {
+  buildFogPolygonsFromLiveCasts,
   FOG_POLYGON_MAX_RING_POINTS,
-  FOG_POLYGON_MEMORY_MAX_RING_POINTS,
-  FOG_POLYGON_RENDER_MAX_RING_POINTS,
   normalizeFogMemoryPolygons,
   normalizeFogPolygons,
-  normalizeRenderableFogPolygons,
   simplifyFogRingToPointLimit,
 } from './fogPolygonGeometry';
 
@@ -86,7 +84,7 @@ export const normalizeFogCellKeys = (cellKeys) => {
   return [...normalizedKeys].sort(compareFogCells);
 };
 
-export const mergeFogCellKeys = (...cellKeySets) => {
+const mergeFogCellKeyLists = (cellKeySets) => {
   const mergedKeys = new Set();
 
   cellKeySets.forEach((cellKeys) => {
@@ -100,6 +98,8 @@ export const mergeFogCellKeys = (...cellKeySets) => {
 
   return [...mergedKeys].sort(compareFogCells);
 };
+
+export const mergeFogCellKeys = (...cellKeySets) => mergeFogCellKeyLists(cellKeySets);
 
 const isFinitePoint = (point) => (
   Number.isFinite(Number(point?.x))
@@ -159,12 +159,22 @@ export const polygonToFogCellKeys = ({
   polygon = [],
   grid,
 } = {}) => {
-  const normalizedPolygon = (Array.isArray(polygon) ? polygon : [])
-    .filter(isFinitePoint)
-    .map((point) => ({
-      x: Number(point.x),
-      y: Number(point.y),
-    }));
+  const normalizedPolygon = [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of Array.isArray(polygon) ? polygon : []) {
+    if (isFinitePoint(point)) {
+      const x = Number(point.x);
+      const y = Number(point.y);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      normalizedPolygon.push({ x, y });
+    }
+  }
 
   if (normalizedPolygon.length < 3) {
     return [];
@@ -172,10 +182,6 @@ export const polygonToFogCellKeys = ({
 
   const normalizedGrid = normalizeGridConfig(grid);
   const cellSizePx = normalizedGrid.cellSizePx;
-  const minX = Math.min(...normalizedPolygon.map((point) => point.x));
-  const maxX = Math.max(...normalizedPolygon.map((point) => point.x));
-  const minY = Math.min(...normalizedPolygon.map((point) => point.y));
-  const maxY = Math.max(...normalizedPolygon.map((point) => point.y));
   const minCol = Math.floor((minX - normalizedGrid.offsetXPx) / cellSizePx);
   const maxCol = Math.floor((maxX - normalizedGrid.offsetXPx) / cellSizePx);
   const minRow = Math.floor((minY - normalizedGrid.offsetYPx) / cellSizePx);
@@ -201,18 +207,16 @@ export const polygonToFogCellKeys = ({
 export const buildCurrentFogCellKeys = ({
   tokenVisionPolygons = [],
   grid,
-} = {}) => mergeFogCellKeys(
-  ...(Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
+} = {}) => mergeFogCellKeyLists(
+  (Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
     .map((vision) => polygonToFogCellKeys({
       polygon: vision?.polygon,
       grid,
     }))
 );
 
-const buildFogPolygonsFromVision = ({
+export const buildCurrentFogPolygons = ({
   tokenVisionPolygons = [],
-  maxRingPoints = FOG_POLYGON_MAX_RING_POINTS,
-  normalizePolygons = normalizeFogPolygons,
 } = {}) => {
   const fogPolygons = (Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
     .map((vision) => {
@@ -220,37 +224,19 @@ const buildFogPolygonsFromVision = ({
         return null;
       }
 
-      const ring = simplifyFogRingToPointLimit(vision.polygon, maxRingPoints);
+      const ring = simplifyFogRingToPointLimit(vision.polygon, FOG_POLYGON_MAX_RING_POINTS);
       return ring.length >= 3 ? [ring] : null;
     })
     .filter(Boolean);
 
-  return normalizePolygons(fogPolygons) || [];
+  return normalizeFogPolygons(fogPolygons) || [];
 };
-
-export const buildCurrentFogPolygons = ({
-  tokenVisionPolygons = [],
-} = {}) => buildFogPolygonsFromVision({
-  tokenVisionPolygons,
-  maxRingPoints: FOG_POLYGON_MAX_RING_POINTS,
-  normalizePolygons: normalizeFogPolygons,
-});
 
 export const buildCurrentFogRenderPolygons = ({
   tokenVisionPolygons = [],
-} = {}) => buildFogPolygonsFromVision({
-  tokenVisionPolygons,
-  maxRingPoints: FOG_POLYGON_RENDER_MAX_RING_POINTS,
-  normalizePolygons: normalizeRenderableFogPolygons,
-});
+} = {}) => buildFogPolygonsFromLiveCasts(Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : []);
 
-export const buildCurrentFogMemoryPolygons = ({
-  tokenVisionPolygons = [],
-} = {}) => buildFogPolygonsFromVision({
-  tokenVisionPolygons,
-  maxRingPoints: FOG_POLYGON_MEMORY_MAX_RING_POINTS,
-  normalizePolygons: normalizeFogMemoryPolygons,
-});
+export const buildCurrentFogMemoryPolygons = buildCurrentFogRenderPolygons;
 
 export const normalizeGrigliataFogOfWarDoc = (data) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {

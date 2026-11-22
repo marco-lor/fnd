@@ -112,7 +112,8 @@ import GrigliataDarknessControls, { GrigliataSelectedDarknessPanel } from './Gri
 import { normalizeEditableLightSources } from './lightSources';
 import { normalizeEditableDarknessSources } from './darknessSources';
 import { normalizeEditableWallSegments } from './wallSources';
-import { resolveViewerTokenVisionSources } from './lightingVisibility';
+import { DEFAULT_TOKEN_VISION_RADIUS_SQUARES, resolveViewerTokenVisionSources } from './lightingVisibility';
+import { useLightFootprints, useTokenSightFootprints } from './useGrigliataLightingGeometry';
 import {
   filterFogVisibleTokens,
   splitFogVisibleTokenRenderLayers,
@@ -185,6 +186,7 @@ const TURN_ORDER_PANEL_STORAGE_PREFIX = 'grigliata.turnOrderCollapsed';
 const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
+const EMPTY_FOG_CLIP_POLYGONS = Object.freeze([]);
 const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
@@ -2404,6 +2406,7 @@ export default function GrigliataBoard({
   onSharedInteractionChange,
   lightingRenderInput = null,
   lightingDebugMetadata = null,
+  lightingDebugRenderInput = null,
   showLightingDebugOverlay = false,
   fogOfWar = null,
   wallRuntimeSegments = null,
@@ -3414,15 +3417,21 @@ export default function GrigliataBoard({
     () => localPings.filter((ping) => (pingAnimationClock - ping.startedAtMs) < MAP_PING_VISIBLE_MS),
     [localPings, pingAnimationClock]
   );
+  const hasFog = !!fogOfWar;
+  const { currentVisibleCells, currentVisiblePolygons } = fogOfWar || {};
+  const fogSight = useMemo(
+    () => (hasFog ? { currentVisibleCells, currentVisiblePolygons } : null),
+    [currentVisibleCells, currentVisiblePolygons, hasFog]
+  );
   const fogVisibleRenderedTokens = useMemo(
     () => filterFogVisibleTokens({
       tokens: renderedTokens,
       currentUserId: resolvedFogViewerUserId,
       isManager: resolvedIsFogViewerManager,
       grid: normalizedGrid,
-      fogOfWar,
+      fogOfWar: fogSight,
     }),
-    [fogOfWar, normalizedGrid, renderedTokens, resolvedFogViewerUserId, resolvedIsFogViewerManager]
+    [fogSight, normalizedGrid, renderedTokens, resolvedFogViewerUserId, resolvedIsFogViewerManager]
   );
   const hasVisibleRemotePing = useMemo(
     () => renderedSharedInteractions.some((interaction) => interaction.kind === 'ping'),
@@ -6396,9 +6405,9 @@ export default function GrigliataBoard({
       currentUserId: resolvedFogViewerUserId,
       isManager: resolvedIsFogViewerManager,
       grid: normalizedGrid,
-      fogOfWar,
+      fogOfWar: fogSight,
     }),
-    [fogOfWar, normalizedGrid, resolvedFogViewerUserId, resolvedIsFogViewerManager, visibleRenderedTokens]
+    [fogSight, normalizedGrid, resolvedFogViewerUserId, resolvedIsFogViewerManager, visibleRenderedTokens]
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
@@ -6488,6 +6497,35 @@ export default function GrigliataBoard({
       resolvedIsFogViewerManager,
       visibleRenderedTokens,
     ]
+  );
+  const shouldShowLightingDebug = !isNarrationVisualActive && isManager && showLightingDebugOverlay
+    && !!lightingDebugMetadata;
+  const geometryInput = lightingRenderInput
+    || (shouldShowLightingDebug ? lightingDebugRenderInput || lightingDebugMetadata : null);
+  const lightClipPolygons = fogOfWar ? fogOfWar.currentVisiblePolygons || EMPTY_FOG_CLIP_POLYGONS : undefined;
+  const fogTokenSight = Array.isArray(fogOfWar?.currentTokenVisionPolygons)
+    ? fogOfWar.currentTokenVisionPolygons
+    : null;
+  const boardTokenSight = useTokenSightFootprints({
+    backgroundId: resolvedBackground?.id,
+    tokens: visibleTokenVisionSources,
+    visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
+    walls: geometryInput?.walls,
+    enabled: !isNarrationVisualActive && !fogTokenSight
+      && (geometryInput?.scene?.globalLight === true || shouldShowLightingDebug),
+  });
+  const tokenSight = fogTokenSight || boardTokenSight;
+  const lightFootprints = useLightFootprints({
+    metadata: geometryInput,
+    enabled: !isNarrationVisualActive
+      && (!!lightingRenderInput || (shouldShowLightingDebug && !!selectedLightId))
+      && (!lightClipPolygons || lightClipPolygons.length > 0),
+  });
+  const debugSelectedLight = useMemo(
+    () => (shouldShowLightingDebug && selectedLightId
+      ? lightingDebugMetadata.lights?.find((light) => light.id === selectedLightId) || selectedLight
+      : null),
+    [lightingDebugMetadata, selectedLight, selectedLightId, shouldShowLightingDebug]
   );
 
   return (
@@ -6977,10 +7015,9 @@ export default function GrigliataBoard({
                   bounds={boardBounds}
                   grid={normalizedGrid}
                   metadata={lightingRenderInput}
-                  tokens={visibleRenderedTokens}
-                  visionSources={visibleTokenVisionSources}
-                  precomputedTokenVisionPolygons={Array.isArray(fogOfWar?.currentTokenVisionPolygons) ? fogOfWar.currentTokenVisionPolygons : null}
-                  lightClipPolygons={fogOfWar ? fogOfWar.currentVisiblePolygons || [] : undefined}
+                  precomputedTokenVisionPolygons={tokenSight}
+                  precomputedLightFootprints={lightFootprints}
+                  lightClipPolygons={lightClipPolygons}
                 />
               </Layer>
             )}
@@ -7015,9 +7052,15 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {!isNarrationVisualActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
+              {shouldShowLightingDebug && (
                 <GrigliataLightingDebugOverlay
                   metadata={lightingDebugMetadata}
+                  effectiveWalls={geometryInput?.walls}
+                  tokenSight={tokenSight}
+                  selectedTokenIds={fogOfWar ? null : selectedTokenIdSet}
+                  selectedLight={debugSelectedLight}
+                  lightFootprints={lightFootprints}
+                  lightClipPolygons={lightClipPolygons}
                   viewportScale={viewport.scale}
                 />
               )}

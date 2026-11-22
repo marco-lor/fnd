@@ -39,7 +39,7 @@ const initializeAdmin = () => {
   bucket = getStorage(app).bucket();
 };
 
-const FIXTURE_VERSION = 'fnd-performance-v2-task05-runtime-retired-task07-media-codex-map';
+const FIXTURE_VERSION = 'fnd-performance-v3-grigliata-lighting';
 const FUNCTIONS_READINESS_TIMEOUT_MS = 180_000;
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
@@ -537,25 +537,41 @@ const buildDocuments = () => {
     });
   }
 
+  // The ten portrait rows occupy y=0..500. The player's 600 px sight still
+  // reaches these walls while the media probe can see its full set of portraits.
+  const wallFieldTop = 500;
   const walls = Array.from({ length: 200 }, (_, index) => ({
     id: `wall-${pad(index)}`,
     x1: (index % 20) * 200,
-    y1: Math.floor(index / 20) * 200,
+    y1: wallFieldTop + Math.floor(index / 20) * 200,
     x2: (index % 20) * 200 + 150,
-    y2: Math.floor(index / 20) * 200 + 100,
+    y2: wallFieldTop + Math.floor(index / 20) * 200 + 100,
     enabled: true,
     wallType: 'wall',
+    blocksVision: true,
+    blocksLight: true,
   }));
-  add('grigliata_wall_state/perf-map', { backgroundId: 'perf-map', walls, updatedAt: FIXED_TIME });
-  add('grigliata_background_lighting/perf-map', {
+  const lighting = {
     backgroundId: 'perf-map',
-    lights: Array.from({ length: 10 }, (_, index) => ({ id: `light-${index}`, x: 200 + index * 300, y: 500, brightRadiusSquares: 3, dimRadiusSquares: 6 })),
-    darknessSources: Array.from({ length: 10 }, (_, index) => ({ id: `dark-${index}`, x: 200 + index * 300, y: 1500, radiusSquares: 4 })),
+    scene: { globalLight: true, darkness: 0.5 },
+    walls,
+    lights: Array.from({ length: 10 }, (_, index) => ({
+      id: `light-${index}`, x: 200 + index * 300, y: 500,
+      brightRadiusPx: 150, dimRadiusPx: 300, color: '#FFAA55',
+    })),
+    darknessSources: Array.from({ length: 10 }, (_, index) => ({
+      id: `dark-${index}`, x: 200 + index * 300, y: 1500, radiusPx: 200, intensity: 0.5,
+    })),
     updatedAt: FIXED_TIME,
-  });
-  add('grigliata_lighting_render_inputs/perf-map', { walls, lights: [], darknessSources: [], updatedAt: FIXED_TIME });
+  };
+  add('grigliata_wall_state/perf-map', { backgroundId: 'perf-map', segments: {}, updatedAt: FIXED_TIME });
+  add('grigliata_background_lighting/perf-map', lighting);
+  add('grigliata_lighting_render_inputs/perf-map', lighting);
 
-  const fogMaskBase64 = Buffer.alloc(2048).toString('base64');
+  // Half of each 128 by 128 sample tile has been explored.
+  const fogMask = Buffer.alloc(2048);
+  fogMask.fill(0xff, 0, fogMask.length / 2);
+  const fogMaskBase64 = fogMask.toString('base64');
   for (let index = 0; index < 1024; index += 1) {
     const tileCol = index % 32;
     const tileRow = Math.floor(index / 32);

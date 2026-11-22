@@ -116,6 +116,58 @@ describe('fogVisibilityFiltering', () => {
     }).aboveFogTokens.map((token) => token.tokenId)).toEqual(['user-1']);
   });
 
+  test('keeps holes hidden and preserves edge contacts, large tokens and overlapping sight', () => {
+    const rect = (minX, minY, maxX, maxY) => [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ];
+    const tokens = [
+      ['touches-outer-edge', 100, 12, 4],
+      ['crosses-hole-edge', 26, 40, 8],
+      ['inside-hole', 40, 45, 5],
+      ['second-source-in-hole', 62, 55, 5],
+      ['encloses-footprint', -10, -10, 120],
+      ['disjoint', 101, 12, 4],
+    ].map(([tokenId, x, y, size]) => buildToken({
+      tokenId,
+      renderPosition: { x, y, size },
+    }));
+
+    expect(filterFogVisibleTokens({
+      tokens,
+      grid,
+      fogOfWar: {
+        currentVisiblePolygons: [
+          [rect(0, 0, 100, 100), rect(30, 30, 80, 80)],
+          [rect(60, 50, 85, 70)],
+        ],
+      },
+    }).map(({ tokenId }) => tokenId)).toEqual([
+      'touches-outer-edge',
+      'crosses-hole-edge',
+      'second-source-in-hole',
+      'encloses-footprint',
+    ]);
+  });
+
+  test('preserves line tolerance near a short polygon edge', () => {
+    const nearEdge = buildToken({ renderPosition: { x: 5.00005, y: 3, size: 1 } });
+    expect(filterFogVisibleTokens({
+      tokens: [nearEdge],
+      grid,
+      fogOfWar: {
+        currentVisiblePolygons: [[[
+          { x: 0, y: 0 },
+          { x: 5, y: 2.995 },
+          { x: 5, y: 3.005 },
+          { x: 0, y: 6 },
+        ]]],
+      },
+    })).toEqual([nearEdge]);
+  });
+
   test('does not treat explored memory cells as fallback when current polygons exist', () => {
     expect(filterFogVisibleTokens({
       tokens: [buildToken({ tokenId: 'memory-only', id: 'memory-only', col: 0, row: 0 })],

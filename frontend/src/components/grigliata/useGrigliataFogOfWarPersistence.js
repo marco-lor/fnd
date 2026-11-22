@@ -1,10 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-} from '../../performance/firestore';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { db } from '../firebaseConfig';
 import {
   getTokenPositionPx,
@@ -12,6 +6,8 @@ import {
 } from './boardUtils';
 import {
   buildTokenVisionPolygons,
+  createVisibilitySourceCache,
+  DEFAULT_TOKEN_VISION_RAY_COUNT,
   normalizeLightingWallSegments,
 } from './lightingGeometry';
 import {
@@ -20,24 +16,26 @@ import {
 } from './lightingVisibility';
 import {
   buildCurrentFogCellKeys,
-  buildCurrentFogMemoryPolygons,
   buildCurrentFogRenderPolygons,
   buildGrigliataFogOfWarDocId,
 } from './fogOfWar';
 import {
-  buildFogRasterTilePayload,
   countFogRasterMaskBits,
-  GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
   maskContainsFogRasterBits,
   mergeFogRasterMemoryTiles,
   mergeFogRasterTileMasks,
-  normalizeFogRasterMemoryTileDoc,
   rasterizeFogPolygonsToTiles,
 } from './fogRasterMemory';
+import {
+  buildFogRasterDiscoveryDeltaMask,
+  getFogWriteRetryDelayMs,
+  isRetryableFogWriteError,
+  persistFogRasterDiscoveryTiles,
+} from './fogRasterTilePersistence';
 import { logGrigliataFogDebug } from './fogDebug';
 
 export const GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS = 350;
-export const DEFAULT_FOG_VISION_RAY_COUNT = 256;
+export const DEFAULT_FOG_VISION_RAY_COUNT = DEFAULT_TOKEN_VISION_RAY_COUNT;
 
 const EMPTY_CURRENT_VISIBILITY = {
   currentVisibleCells: [],
@@ -60,19 +58,6 @@ const buildEmptyCurrentVisibility = (visibilityKey = '') => ({
   ...EMPTY_CURRENT_VISIBILITY,
   visibilityKey,
 });
-
-const isRetryableRasterFlushError = (error) => {
-  const code = String(error?.code || '').toLowerCase();
-  const name = String(error?.name || '').toLowerCase();
-  const message = String(error?.message || error || '').toLowerCase();
-
-  return code.includes('already-exists')
-    || code.includes('aborted')
-    || code.includes('failed-precondition')
-    || name.includes('already-exists')
-    || message.includes('already-exists')
-    || message.includes('conflict');
-};
 
 const tileMatchesGrid = (tile, grid) => (
   tile?.cellSizePx === grid.cellSizePx
@@ -97,56 +82,39 @@ const buildRenderableTokensForFog = ({ tokens = [], grid }) => (
 const buildVisionSourceKeyParts = (source = {}) => {
   const position = source?.renderPosition || source?.position || {};
   return [
-    source?.tokenId || source?.id || source?.ownerUid || '',
-    source?.ownerUid || '',
-    source?.backgroundId || '',
-    source?.tokenType || '',
-    source?.placed === false ? 'unplaced' : 'placed',
-    source?.isDead === true ? 'dead' : 'alive',
-    source?.isVisibleToPlayers === false ? 'hidden' : 'visible',
-    source?.visionEnabled === false ? 'vision-off' : 'vision-on',
-    roundVisibilityNumber(source?.visionRadiusSquares),
-    roundVisibilityNumber(source?.visionRadiusPx),
-    roundVisibilityNumber(position.x),
-    roundVisibilityNumber(position.y),
-    roundVisibilityNumber(position.size),
+    source.tokenId,
+    source.visionRadiusPx,
+    Number(position.x),
+    Number(position.y),
+    Number(position.size),
   ];
 };
 
 const buildWallSegmentKeyParts = (segment = {}) => [
   segment.id || '',
-  roundVisibilityNumber(segment.x1),
-  roundVisibilityNumber(segment.y1),
-  roundVisibilityNumber(segment.x2),
-  roundVisibilityNumber(segment.y2),
+  segment.x1,
+  segment.y1,
+  segment.x2,
+  segment.y2,
 ];
 
-const buildRenderableTokenVisionPolygons = (tokenVisionPolygons = []) => (
-  (Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
-    .map((vision) => {
-      const polygon = (Array.isArray(vision?.polygon) ? vision.polygon : [])
-        .filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
-        .map((point) => ({
-          x: roundVisibilityNumber(point.x),
-          y: roundVisibilityNumber(point.y),
-        }));
+const renderableSightByCast = new WeakMap();
+const renderPolygonsBySight = new WeakMap();
 
-      if (polygon.length < 3) {
-        return null;
-      }
+const buildRenderableTokenVisionPolygon = (vision) => {
+  const previous = renderableSightByCast.get(vision);
+  if (previous) return previous;
 
-      return {
-        tokenId: vision?.tokenId || '',
-        origin: {
-          x: roundVisibilityNumber(vision?.origin?.x),
-          y: roundVisibilityNumber(vision?.origin?.y),
-        },
-        radius: roundVisibilityNumber(vision?.radius),
-        polygon,
-      };
-    })
-    .filter(Boolean)
-);
+  const toPoint = ({ x, y }) => ({ x: roundVisibilityNumber(x), y: roundVisibilityNumber(y) });
+  const renderable = {
+    tokenId: vision.tokenId,
+    origin: toPoint(vision.origin),
+    radius: roundVisibilityNumber(vision.radius),
+    polygon: vision.polygon.map(toPoint),
+  };
+  renderableSightByCast.set(vision, renderable);
+  return renderable;
+};
 
 export const buildViewerFogVisibilityKey = ({
   tokens = [],
@@ -184,7 +152,7 @@ export const buildViewerFogVisibilityKey = ({
     cellSizePx: normalizedGrid.cellSizePx,
     backgroundId,
   });
-  const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls);
+  const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls, 'vision');
 
   return JSON.stringify({
     backgroundId,
@@ -196,7 +164,7 @@ export const buildViewerFogVisibilityKey = ({
       normalizedGrid.cellSizePx,
       normalizedGrid.offsetXPx,
       normalizedGrid.offsetYPx,
-    ].map(roundVisibilityNumber),
+    ],
     sources: visionSourceReport.sources.map(buildVisionSourceKeyParts),
     skipped: visionSourceReport.skippedTokens.map((skippedToken) => [
       skippedToken.tokenId || '',
@@ -221,6 +189,7 @@ export const buildViewerFogCurrentVisibility = ({
   rayCount,
   includeCurrentVisibleCells = true,
   visibilityKey = '',
+  sourceCache,
 } = {}) => {
   const resolvedVisibilityKey = visibilityKey || buildViewerFogVisibilityKey({
     tokens,
@@ -252,6 +221,7 @@ export const buildViewerFogCurrentVisibility = ({
   const visionSources = visionSourceReport.sources;
 
   if (!visionSources.length) {
+    if (sourceCache) buildTokenVisionPolygons({ cache: sourceCache });
     return {
       ...EMPTY_CURRENT_VISIBILITY,
       contributingTokenIds: [],
@@ -260,7 +230,7 @@ export const buildViewerFogCurrentVisibility = ({
     };
   }
 
-  const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls);
+  const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls, 'vision');
   const fogRayCount = Number.isFinite(Number(rayCount))
     ? rayCount
     : DEFAULT_FOG_VISION_RAY_COUNT;
@@ -269,7 +239,16 @@ export const buildViewerFogCurrentVisibility = ({
     visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
     segments: wallSegments,
     rayCount: fogRayCount,
+    cache: sourceCache,
   });
+  let renderPolygons = renderPolygonsBySight.get(tokenVisionPolygons);
+  if (!renderPolygons) {
+    renderPolygons = {
+      currentVisiblePolygons: buildCurrentFogRenderPolygons({ tokenVisionPolygons }),
+      currentTokenVisionPolygons: tokenVisionPolygons.map(buildRenderableTokenVisionPolygon),
+    };
+    renderPolygonsBySight.set(tokenVisionPolygons, renderPolygons);
+  }
 
   return {
     currentVisibleCells: includeCurrentVisibleCells
@@ -278,18 +257,54 @@ export const buildViewerFogCurrentVisibility = ({
         grid: normalizedGrid,
       })
       : [],
-    currentVisiblePolygons: buildCurrentFogRenderPolygons({
-      tokenVisionPolygons,
-    }),
-    currentPersistencePolygons: buildCurrentFogMemoryPolygons({
-      tokenVisionPolygons,
-    }),
-    currentTokenVisionPolygons: buildRenderableTokenVisionPolygons(tokenVisionPolygons),
+    ...renderPolygons,
+    currentPersistencePolygons: renderPolygons.currentVisiblePolygons,
     contributingTokenIds: visionSourceReport.contributingTokenIds,
     skippedTokens: visionSourceReport.skippedTokens,
     visibilityKey: resolvedVisibilityKey,
   };
 };
+
+export function useViewerFogCurrentVisibility({
+  backgroundId,
+  currentUserId,
+  isManager = false,
+  grid,
+  tokens,
+  lightingRenderInput,
+  isEnabled = true,
+  rayCount,
+}) {
+  const hasLightingInput = !!lightingRenderInput;
+  const sourceCache = useMemo(
+    createVisibilitySourceCache,
+    [backgroundId, currentUserId, hasLightingInput, isEnabled, isManager]
+  );
+  const lastVisibility = useRef(EMPTY_CURRENT_VISIBILITY);
+
+  return useMemo(() => {
+    if (!isEnabled) {
+      lastVisibility.current = EMPTY_CURRENT_VISIBILITY;
+      return buildEmptyCurrentVisibility('disabled');
+    }
+
+    const input = {
+      backgroundId,
+      currentUserId,
+      isManager,
+      grid,
+      tokens,
+      lightingRenderInput,
+      rayCount,
+      includeCurrentVisibleCells: false,
+    };
+    const visibilityKey = buildViewerFogVisibilityKey(input);
+    if (lastVisibility.current.visibilityKey !== visibilityKey) {
+      lastVisibility.current = buildViewerFogCurrentVisibility({ ...input, visibilityKey, sourceCache });
+    }
+    return lastVisibility.current;
+  }, [backgroundId, currentUserId, grid, isEnabled, isManager, lightingRenderInput, rayCount, sourceCache, tokens]);
+}
 
 export default function useGrigliataFogOfWarPersistence({
   backgroundId = '',
@@ -299,6 +314,10 @@ export default function useGrigliataFogOfWarPersistence({
   tokens = [],
   lightingRenderInput = null,
   fogOfWar = null,
+  // False while the player's stored raster memory for this scope is still
+  // loading. Discovery deltas are computed against that memory, so nothing
+  // is queued until it is known.
+  isFogMemoryReady = true,
   isEnabled = true,
   rayCount,
 }) {
@@ -308,68 +327,28 @@ export default function useGrigliataFogOfWarPersistence({
   const flushTimeoutRef = useRef(null);
   const flushInFlightRef = useRef(false);
   const flushAfterInFlightRef = useRef(false);
+  const isUnmountedRef = useRef(false);
+  const retryAttemptRef = useRef(0);
+  const flushPendingTilesRef = useRef(null);
   const movementSequenceRef = useRef(0);
   const importedLegacyFogDocIdsRef = useRef(new Set());
-  const visibilityCacheRef = useRef({
-    key: '',
-    visibility: buildEmptyCurrentVisibility(''),
-  });
   const lastQueuedVisibilityKeyRef = useRef('');
+  const previousExplorationRef = useRef(null);
   const [pendingMemoryTiles, setPendingMemoryTiles] = useState([]);
   const fogDocId = useMemo(
     () => buildGrigliataFogOfWarDocId(backgroundId, currentUserId),
     [backgroundId, currentUserId]
   );
-  const currentVisibility = useMemo(
-    () => {
-      if (!isEnabled) {
-        return buildEmptyCurrentVisibility('disabled');
-      }
-
-      const visibilityKey = buildViewerFogVisibilityKey({
-        tokens,
-        currentUserId,
-        isManager,
-        backgroundId,
-        grid: normalizedGrid,
-        lightingRenderInput,
-        rayCount,
-        includeCurrentVisibleCells: false,
-      });
-
-      if (visibilityCacheRef.current.key === visibilityKey) {
-        return visibilityCacheRef.current.visibility;
-      }
-
-      const nextVisibility = buildViewerFogCurrentVisibility({
-        tokens,
-        currentUserId,
-        isManager,
-        backgroundId,
-        grid: normalizedGrid,
-        lightingRenderInput,
-        rayCount,
-        includeCurrentVisibleCells: false,
-        visibilityKey,
-      });
-
-      visibilityCacheRef.current = {
-        key: visibilityKey,
-        visibility: nextVisibility,
-      };
-      return nextVisibility;
-    },
-    [
-      backgroundId,
-      currentUserId,
-      isEnabled,
-      isManager,
-      lightingRenderInput,
-      normalizedGrid,
-      rayCount,
-      tokens,
-    ]
-  );
+  const currentVisibility = useViewerFogCurrentVisibility({
+    backgroundId,
+    currentUserId,
+    isManager,
+    grid: normalizedGrid,
+    tokens,
+    lightingRenderInput,
+    isEnabled,
+    rayCount,
+  });
   const currentVisibleCells = currentVisibility.currentVisibleCells;
   const currentVisiblePolygons = currentVisibility.currentVisiblePolygons;
   const currentPersistencePolygons = currentVisibility.currentPersistencePolygons;
@@ -405,11 +384,16 @@ export default function useGrigliataFogOfWarPersistence({
     ]));
   }, []);
 
+  // Same-scope known memory: stored tiles are already filtered to this
+  // background/owner/grid; tile ids carry background and owner, so local
+  // in-flight and pending tiles only need the grid check.
   const getKnownTileMap = useCallback(() => buildTileMap([
     ...storedMemoryTiles,
-    ...inFlightTileMapRef.current.values(),
-    ...pendingTileMapRef.current.values(),
-  ]), [storedMemoryTiles]);
+    ...[
+      ...inFlightTileMapRef.current.values(),
+      ...pendingTileMapRef.current.values(),
+    ].filter((tile) => tileMatchesGrid(tile, normalizedGrid)),
+  ]), [normalizedGrid, storedMemoryTiles]);
 
   const pruneSettledPendingTiles = useCallback(() => {
     const storedTileMap = buildTileMap(storedMemoryTiles);
@@ -442,12 +426,33 @@ export default function useGrigliataFogOfWarPersistence({
       return;
     }
 
-    const tilesToFlush = [...pendingTileMapRef.current.values()];
+    // Resolve the queue against the current scope. Tiles queued for another
+    // map of this owner are still valid and flush as-is; tiles for this map
+    // from an earlier grid alignment, or for another account, can no longer
+    // be written correctly and are dropped.
+    const tilesToFlush = [];
+    let droppedTileCount = 0;
+    pendingTileMapRef.current.forEach((tile) => {
+      const isStaleScope = tile.ownerUid !== currentUserId
+        || (tile.backgroundId === backgroundId && !tileMatchesGrid(tile, normalizedGrid));
+      if (isStaleScope) {
+        droppedTileCount += 1;
+      } else {
+        tilesToFlush.push(tile);
+      }
+    });
     pendingTileMapRef.current.clear();
+    if (droppedTileCount > 0) {
+      logGrigliataFogDebug('raster-flush-drop-stale-scope', {
+        backgroundId,
+        currentUserId,
+        droppedTileCount,
+      });
+    }
 
     tilesToFlush.forEach((tile) => {
       const existingInFlightTile = inFlightTileMapRef.current.get(tile.id);
-      inFlightTileMapRef.current.set(tile.id, existingInFlightTile
+      inFlightTileMapRef.current.set(tile.id, existingInFlightTile && tileMatchesGrid(existingInFlightTile, tile)
         ? {
           ...tile,
           maskBytes: mergeFogRasterTileMasks(existingInFlightTile.maskBytes, tile.maskBytes),
@@ -473,92 +478,107 @@ export default function useGrigliataFogOfWarPersistence({
       totalBitCount,
     });
 
-    void Promise.all(tilesToFlush.map(async (tile) => {
-      const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, tile.id);
-      const snapshot = await getDoc(tileRef);
-      const existingTile = snapshot.exists()
-        ? normalizeFogRasterMemoryTileDoc({
-          id: snapshot.id,
-          ...snapshot.data(),
-        })
-        : null;
+    // Each tile is merged into the latest stored tile in its own transaction
+    // (bounded concurrency). Tiles settle independently: committed and
+    // already-contained tiles leave the in-flight map, failed tiles go back to
+    // pending without disturbing the rest of the batch.
+    let shouldRetryFailedTiles = false;
+    void persistFogRasterDiscoveryTiles({
+      db,
+      tiles: tilesToFlush,
+      updatedBy: currentUserId,
+    }).then((tileResults) => {
+      const failedResults = tileResults.filter((result) => result.status === 'failed');
+      const writtenTileCount = tileResults.filter((result) => result.status === 'written').length;
+      // 'stale-grid': the map was realigned after this delta was computed; the
+      // transaction discarded it rather than overwrite a current-grid tile.
+      const staleGridTileCount = tileResults.filter((result) => result.status === 'stale-grid').length;
 
-      const mergedMaskBytes = existingTile
-        ? mergeFogRasterTileMasks(existingTile.maskBytes, tile.maskBytes)
-        : tile.maskBytes;
+      tileResults.forEach(({ tile, status }) => {
+        inFlightTileMapRef.current.delete(tile.id);
+        if (status !== 'failed') {
+          return;
+        }
+        const pendingTile = pendingTileMapRef.current.get(tile.id);
+        if (!pendingTile) {
+          pendingTileMapRef.current.set(tile.id, tile);
+        } else if (tileMatchesGrid(pendingTile, tile)) {
+          pendingTileMapRef.current.set(tile.id, {
+            ...pendingTile,
+            maskBytes: mergeFogRasterTileMasks(pendingTile.maskBytes, tile.maskBytes),
+          });
+        }
+        // Otherwise a newer pending tile from a different grid supersedes it.
+      });
+      refreshPendingMemoryTiles();
 
-      if (existingTile && maskContainsFogRasterBits(existingTile.maskBytes, tile.maskBytes)) {
-        return false;
+      if (!failedResults.length) {
+        retryAttemptRef.current = 0;
+        logGrigliataFogDebug('raster-flush-ok', {
+          backgroundId,
+          currentUserId,
+          tileCount: tilesToFlush.length,
+          writtenTileCount,
+          staleGridTileCount,
+          totalBitCount,
+        });
+        return;
       }
 
-      await setDoc(
-        tileRef,
-        buildFogRasterTilePayload({
-          ...tile,
-          grid: {
-            cellSizePx: tile.cellSizePx,
-            offsetXPx: tile.offsetXPx,
-            offsetYPx: tile.offsetYPx,
-          },
-          maskBytes: mergedMaskBytes,
-          updatedAt: serverTimestamp(),
-          updatedBy: currentUserId,
-        }),
-        { merge: true }
-      );
-      return true;
-    })).then((writeResults) => {
-      tilesToFlush.forEach((tile) => {
-        inFlightTileMapRef.current.delete(tile.id);
-      });
-      refreshPendingMemoryTiles();
-      logGrigliataFogDebug('raster-flush-ok', {
-        backgroundId,
-        currentUserId,
-        tileCount: tilesToFlush.length,
-        writtenTileCount: writeResults.filter(Boolean).length,
-        totalBitCount,
-      });
-    }).catch((error) => {
-      const isRetryableConflict = isRetryableRasterFlushError(error);
-
-      tilesToFlush.forEach((tile) => {
-        const pendingTile = pendingTileMapRef.current.get(tile.id);
-        pendingTileMapRef.current.set(tile.id, pendingTile
-          ? {
-            ...tile,
-            maskBytes: mergeFogRasterTileMasks(pendingTile.maskBytes, tile.maskBytes),
-          }
-          : tile);
-        inFlightTileMapRef.current.delete(tile.id);
-      });
-      refreshPendingMemoryTiles();
-
-      if (isRetryableConflict) {
-        flushAfterInFlightRef.current = true;
-      } else {
-        console.error('Failed to persist Grigliata raster fog memory:', error);
+      const firstError = failedResults[0].error;
+      shouldRetryFailedTiles = failedResults.every((result) => isRetryableFogWriteError(result.error));
+      if (!shouldRetryFailedTiles) {
+        console.error('Failed to persist Grigliata raster fog memory:', firstError);
       }
 
       logGrigliataFogDebug('raster-flush-error', {
         backgroundId,
         currentUserId,
         tileCount: tilesToFlush.length,
-        code: error?.code || '',
-        message: error?.message || String(error),
-        willRetry: isRetryableConflict,
+        failedTileCount: failedResults.length,
+        writtenTileCount,
+        staleGridTileCount,
+        code: firstError?.code || '',
+        message: firstError?.message || String(firstError),
+        willRetry: shouldRetryFailedTiles,
       });
     }).finally(() => {
       flushInFlightRef.current = false;
+      const hasDeferredWork = flushAfterInFlightRef.current && pendingTileMapRef.current.size > 0;
+      flushAfterInFlightRef.current = false;
 
-      if (flushAfterInFlightRef.current) {
-        flushAfterInFlightRef.current = false;
-        if (pendingTileMapRef.current.size > 0) {
-          flushPendingTiles();
-        }
+      // Deferred drains and timers always use the latest flush: this
+      // callback's closure may predate a grid, map, or account change and
+      // would otherwise judge newly queued tiles by the stale scope.
+      if (hasDeferredWork) {
+        flushPendingTilesRef.current();
+        return;
+      }
+
+      // Transient failures (contention, offline) retry with capped backoff
+      // rather than immediately. Nothing is rescheduled after unmount.
+      if (
+        shouldRetryFailedTiles
+        && !isUnmountedRef.current
+        && !flushTimeoutRef.current
+        && pendingTileMapRef.current.size > 0
+      ) {
+        retryAttemptRef.current += 1;
+        const retryDelayMs = getFogWriteRetryDelayMs(retryAttemptRef.current);
+        logGrigliataFogDebug('raster-flush-retry-scheduled', {
+          backgroundId,
+          currentUserId,
+          attempt: retryAttemptRef.current,
+          retryDelayMs,
+          pendingTileCount: pendingTileMapRef.current.size,
+        });
+        flushTimeoutRef.current = window.setTimeout(() => {
+          flushTimeoutRef.current = null;
+          flushPendingTilesRef.current();
+        }, retryDelayMs);
       }
     });
-  }, [backgroundId, currentUserId, refreshPendingMemoryTiles]);
+  }, [backgroundId, currentUserId, normalizedGrid, refreshPendingMemoryTiles]);
 
   const scheduleRasterFlush = useCallback(() => {
     if (flushTimeoutRef.current) {
@@ -566,9 +586,34 @@ export default function useGrigliataFogOfWarPersistence({
     }
     flushTimeoutRef.current = window.setTimeout(() => {
       flushTimeoutRef.current = null;
-      flushPendingTiles();
+      flushPendingTilesRef.current();
     }, GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+  }, []);
+
+  // Layout effect: updated in the same task as the commit, before any timer
+  // or settled transaction can observe the previous scope's flush.
+  useLayoutEffect(() => {
+    flushPendingTilesRef.current = flushPendingTiles;
   }, [flushPendingTiles]);
+
+  // Switching map (or account) resolves discoveries queued for the previous
+  // scope right away instead of leaving them behind the debounce.
+  const persistenceScopeKey = JSON.stringify([backgroundId, currentUserId]);
+  const previousPersistenceScopeKeyRef = useRef(persistenceScopeKey);
+  useEffect(() => {
+    if (previousPersistenceScopeKeyRef.current === persistenceScopeKey) {
+      return;
+    }
+    previousPersistenceScopeKeyRef.current = persistenceScopeKey;
+    if (pendingTileMapRef.current.size < 1) {
+      return;
+    }
+    if (flushTimeoutRef.current) {
+      window.clearTimeout(flushTimeoutRef.current);
+      flushTimeoutRef.current = null;
+    }
+    flushPendingTiles();
+  }, [flushPendingTiles, persistenceScopeKey]);
 
   const queueRasterTiles = useCallback(({
     tiles = [],
@@ -592,24 +637,30 @@ export default function useGrigliataFogOfWarPersistence({
     let queuedTileCount = 0;
     let queuedBitCount = 0;
 
+    // Queue only bits that are new relative to this player's known memory.
+    // Re-sending already-known bits would let this write restore a bit a
+    // manager has hidden since the client last heard from Firestore.
     tiles.forEach((tile) => {
       const knownTile = knownTileMap.get(tile.id);
-      if (knownTile && maskContainsFogRasterBits(knownTile.maskBytes, tile.maskBytes)) {
+      const discoveryMaskBytes = buildFogRasterDiscoveryDeltaMask(tile.maskBytes, knownTile?.maskBytes);
+      const discoveryBitCount = countFogRasterMaskBits(discoveryMaskBytes);
+      if (discoveryBitCount < 1) {
         return;
       }
 
       const pendingTile = pendingTileMapRef.current.get(tile.id);
-      const nextTile = pendingTile
-        ? {
-          ...tile,
-          maskBytes: mergeFogRasterTileMasks(pendingTile.maskBytes, tile.maskBytes),
-        }
-        : tile;
-
-      pendingTileMapRef.current.set(tile.id, nextTile);
-      knownTileMap.set(tile.id, nextTile);
+      pendingTileMapRef.current.set(tile.id, {
+        ...tile,
+        maskBytes: pendingTile && tileMatchesGrid(pendingTile, tile)
+          ? mergeFogRasterTileMasks(pendingTile.maskBytes, discoveryMaskBytes)
+          : discoveryMaskBytes,
+      });
+      knownTileMap.set(tile.id, {
+        ...tile,
+        maskBytes: mergeFogRasterTileMasks(knownTile?.maskBytes, discoveryMaskBytes),
+      });
       queuedTileCount += 1;
-      queuedBitCount += countFogRasterMaskBits(tile.maskBytes);
+      queuedBitCount += discoveryBitCount;
     });
 
     logGrigliataFogDebug('raster-queue-add', {
@@ -689,6 +740,7 @@ export default function useGrigliataFogOfWarPersistence({
       || isManager
       || !fogDocId
       || !lightingRenderInput
+      || !isFogMemoryReady
       || currentPersistencePolygons.length < 1
     ) {
       logGrigliataFogDebug('persistence:skip', {
@@ -714,12 +766,17 @@ export default function useGrigliataFogOfWarPersistence({
                   : (
                     !lightingRenderInput
                       ? 'missing-lighting-render-input'
-                      : 'no-current-persistence-polygons'
+                      : (
+                        !isFogMemoryReady
+                          ? 'waiting-for-stored-memory'
+                          : 'no-current-persistence-polygons'
+                      )
                   )
               )
           ),
       });
       lastQueuedVisibilityKeyRef.current = '';
+      previousExplorationRef.current = null;
       return undefined;
     }
 
@@ -743,13 +800,24 @@ export default function useGrigliataFogOfWarPersistence({
 
     lastQueuedVisibilityKeyRef.current = currentVisibilityKey;
 
+    const gridScope = JSON.stringify([
+      backgroundId, currentUserId,
+      normalizedGrid.cellSizePx, normalizedGrid.offsetXPx, normalizedGrid.offsetYPx,
+    ]);
+    const previous = previousExplorationRef.current;
+    const changedPolygons = previous?.scope === gridScope
+      ? currentPersistencePolygons.filter((polygon) => !previous.polygons.has(polygon))
+      : currentPersistencePolygons;
+    previousExplorationRef.current = { scope: gridScope, polygons: new Set(currentPersistencePolygons) };
+    if (!changedPolygons.length) return undefined;
+
     const movementId = movementSequenceRef.current + 1;
     movementSequenceRef.current = movementId;
     const rasterTiles = rasterizeFogPolygonsToTiles({
       backgroundId,
       ownerUid: currentUserId,
       grid: normalizedGrid,
-      polygons: currentPersistencePolygons,
+      polygons: changedPolygons,
     });
 
     logGrigliataFogDebug('raster-visibility', {
@@ -786,6 +854,7 @@ export default function useGrigliataFogOfWarPersistence({
     contributingTokenIds,
     fogDocId,
     isEnabled,
+    isFogMemoryReady,
     isManager,
     lightingRenderInput,
     normalizedGrid,
@@ -839,12 +908,25 @@ export default function useGrigliataFogOfWarPersistence({
     pruneSettledPendingTiles();
   }, [pruneSettledPendingTiles]);
 
-  useEffect(() => () => {
-    if (flushTimeoutRef.current) {
-      window.clearTimeout(flushTimeoutRef.current);
-      flushTimeoutRef.current = null;
-    }
-    flushAfterInFlightRef.current = false;
+  useEffect(() => {
+    // The pending Map instance lives for the hook's lifetime (it is only
+    // mutated), so the cleanup reads this same instance.
+    const pendingTileMap = pendingTileMapRef.current;
+    isUnmountedRef.current = false;
+    return () => {
+      isUnmountedRef.current = true;
+      if (flushTimeoutRef.current) {
+        window.clearTimeout(flushTimeoutRef.current);
+        flushTimeoutRef.current = null;
+      }
+      // Navigating away resolves queued discoveries once instead of dropping
+      // them; an in-flight flush picks them up when it settles. No retries
+      // are scheduled after unmount.
+      flushAfterInFlightRef.current = false;
+      if (pendingTileMap.size > 0) {
+        flushPendingTilesRef.current?.();
+      }
+    };
   }, []);
 
   return {

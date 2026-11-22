@@ -23,7 +23,9 @@ jest.mock('react-konva', () => {
       });
 
       return (
-        <div {...domProps} data-konva-type={displayName}>
+        <div {...domProps} data-konva-type={displayName} ref={(node) => {
+          if (node) node.konvaProps = props;
+        }}>
           {children}
         </div>
       );
@@ -306,35 +308,53 @@ describe('GrigliataLightingMask', () => {
     expect(screen.queryByTestId('lighting-darkness-source-overlay')).not.toBeInTheDocument();
   });
 
-  test('casts only the wall clips used to draw lights in the active view', () => {
-    const cast = jest.spyOn(lightingGeometry, 'computeVisibilityPolygon');
+  test('clips each fog glow to its own wall footprint across viewer movement', () => {
     const props = {
       bounds,
       grid,
       metadata: {
         ...metadata,
+        walls: [{ ...metadata.walls[0], y1: -100, y2: 400 }],
         lights: [
           metadata.lights[0],
-          { ...metadata.lights[0], id: 'bright-only', dimRadiusPx: 0 },
+          { ...metadata.lights[0], id: 'bright-only', x: 230, y: 120, dimRadiusPx: 0 },
         ],
       },
       precomputedTokenVisionPolygons: [],
     };
-    try {
-      const { rerender } = render(<GrigliataLightingMask {...props} lightClipPolygons={[]} />);
-      expect(cast).not.toHaveBeenCalled();
+    const viewerClip = [[[{ x: 0, y: 0 }, { x: 220, y: 0 }, { x: 0, y: 220 }]]];
+    const { rerender } = render(<GrigliataLightingMask {...props} lightClipPolygons={viewerClip} />);
+    const viewerGroup = screen.getByTestId('lighting-light-clip-group');
+    const lights = within(viewerGroup).getAllByTestId('lighting-light-gradient');
+    const lightClips = lights.map((light) => light.konvaProps.clipFunc);
 
-      rerender(<GrigliataLightingMask {...props} />);
-      expect(cast.mock.calls.map(([input]) => input.radius)).toEqual([160, 80]);
-      expect(screen.getAllByTestId('lighting-light-gradient')).toHaveLength(2);
-
-      const viewerClip = [[[{ x: 0, y: 0 }, { x: 220, y: 0 }, { x: 0, y: 220 }]]];
-      rerender(<GrigliataLightingMask {...props} lightClipPolygons={viewerClip} />);
-      expect(cast).toHaveBeenCalledTimes(2);
-      expect(within(screen.getByTestId('lighting-light-clip-group'))
-        .getAllByTestId('lighting-light-gradient')).toHaveLength(2);
-    } finally {
-      cast.mockRestore();
+    const firstPoints = [];
+    const secondPoints = [];
+    for (const [clip, points] of [[lightClips[0], firstPoints], [lightClips[1], secondPoints]]) {
+      const addPoint = (x, y) => points.push({ x, y });
+      expect(clip).toEqual(expect.any(Function));
+      clip({ beginPath() {}, moveTo: addPoint, lineTo: addPoint, closePath() {} });
     }
+    expect(Math.max(...firstPoints.map(({ x }) => x))).toBeCloseTo(200);
+    expect(Math.min(...secondPoints.map(({ x }) => x))).toBeCloseTo(200);
+
+    const gradient = within(lights[0]).getByTestId('lighting-light-dim-polygon').konvaProps;
+    const firstViewerClip = viewerGroup.konvaProps.clipFunc;
+    rerender(<GrigliataLightingMask {...props} lightClipPolygons={viewerClip} metadata={{
+      ...props.metadata,
+      lights: props.metadata.lights.map((light) => ({ ...light })),
+      walls: props.metadata.walls.map((wall) => ({ ...wall })),
+      updatedAt: 'different-metadata-version',
+    }} />);
+    expect(viewerGroup.konvaProps.clipFunc).toBe(firstViewerClip);
+    expect(within(lights[0]).getByTestId('lighting-light-dim-polygon').konvaProps).toBe(gradient);
+
+    rerender(<GrigliataLightingMask {...props} lightClipPolygons={[
+      ...viewerClip,
+      [[{ x: 1, y: 1 }, { x: 221, y: 1 }, { x: 1, y: 221 }]],
+    ]} />);
+    expect(viewerGroup.konvaProps.clipFunc).not.toBe(firstViewerClip);
+    expect(lights.map((light) => light.konvaProps.clipFunc)).toEqual(lightClips);
+    expect(within(lights[0]).getByTestId('lighting-light-dim-polygon').konvaProps).toBe(gradient);
   });
 });

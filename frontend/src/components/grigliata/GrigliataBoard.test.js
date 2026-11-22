@@ -30,6 +30,7 @@ import {
   getPrivateMediaAssetCacheSnapshot,
 } from '../common/privateMediaAssets';
 import * as grigliataBoardTokenUiModule from './grigliataBoardTokenUi';
+import * as fogVisibilityFiltering from './fogVisibilityFiltering';
 import { TOKEN_PORTRAIT_MAX_DRAWABLE_EDGE } from './grigliataBoardTokenUi';
 import {
   getDecodedImageBytes,
@@ -2464,6 +2465,70 @@ describe('GrigliataBoard', () => {
     expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  test('updates remembered fog without refiltering or relayering board tokens', async () => {
+    const filter = jest.spyOn(fogVisibilityFiltering, 'filterFogVisibleTokens');
+    const splitLayers = jest.spyOn(fogVisibilityFiltering, 'splitFogVisibleTokenRenderLayers');
+    try {
+      const props = buildProps({
+        currentUserId: 'user-1',
+        isManager: false,
+        tokens: [0, 8].map((col, index) => ({
+          tokenId: `user-${index + 1}`,
+          ownerUid: `user-${index + 1}`,
+          tokenType: 'character',
+          label: `Token ${index + 1}`,
+          placed: true,
+          col,
+          row: 0,
+          isVisibleToPlayers: true,
+        })),
+      });
+      const sight = { currentVisibleCells: ['0:0'] };
+      const { rerender } = render(<GrigliataBoard {...props} fogOfWar={sight} />);
+      expect(await screen.findByTestId('token-node-user-1')).toBeInTheDocument();
+      expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+      expect(filter).toHaveBeenCalled();
+      expect(splitLayers).toHaveBeenCalled();
+      filter.mockClear();
+      splitLayers.mockClear();
+
+      rerender(<GrigliataBoard {...props} fogOfWar={{ ...sight, memoryTiles: [buildMemoryTile()] }} />);
+
+      expect(screen.getByTestId('fog-remembered-raster-overlay')).toBeInTheDocument();
+      expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+      expect(filter).not.toHaveBeenCalled();
+      expect(splitLayers).not.toHaveBeenCalled();
+
+      rerender(<GrigliataBoard {...props} fogOfWar={{ currentVisibleCells: ['8:0'] }} />);
+      expect(await screen.findByTestId('token-node-user-2')).toBeInTheDocument();
+      expect(filter).toHaveBeenCalled();
+      expect(splitLayers).toHaveBeenCalled();
+
+      const fixedSight = { currentVisiblePolygons: [[[
+        { x: 555, y: 0 },
+        { x: 625, y: 0 },
+        { x: 625, y: 70 },
+        { x: 555, y: 70 },
+      ]]] };
+      rerender(<GrigliataBoard {...props} fogOfWar={fixedSight} />);
+      expect(screen.getByTestId('token-node-user-2')).toBeInTheDocument();
+      const shiftedProps = { ...props, grid: { ...props.grid, offsetXPx: 350 } };
+      rerender(<GrigliataBoard {...shiftedProps} fogOfWar={fixedSight} />);
+      expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+
+      rerender(<GrigliataBoard {...shiftedProps} fogOfWar={fixedSight} fogViewerUserId="user-2" />);
+      expect(await screen.findByTestId('token-node-user-2')).toBeInTheDocument();
+      expect(screen.queryByTestId('token-node-user-1')).not.toBeInTheDocument();
+
+      rerender(<GrigliataBoard {...shiftedProps} fogOfWar={fixedSight} fogViewerUserId="user-2" isFogViewerManager />);
+      expect(await screen.findByTestId('token-node-user-1')).toBeInTheDocument();
+      expect(screen.getByTestId('token-node-user-2')).toBeInTheDocument();
+    } finally {
+      splitLayers.mockRestore();
+      filter.mockRestore();
+    }
+  });
+
   test('uses a separate fog viewer identity for DM view-as token filtering while keeping manager controls', async () => {
     render(
       <GrigliataBoard
@@ -2870,6 +2935,82 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-debug-overlay')).toBeInTheDocument();
+  });
+
+  test('shows actual View as player sight and the selected lamp clipped to sight and the effective door', () => {
+    const selectedLight = { id: 'torch', x: 40, y: 60, brightRadiusPx: 20, dimRadiusPx: 100 };
+    const authoredDoor = { id: 'door', wallType: 'door', x1: 60, y1: -100, x2: 60, y2: 300, blocksSight: true };
+    const { id, ...projectedLight } = selectedLight;
+    const sight = [
+      { x: 30, y: 30 }, { x: 80, y: 30 }, { x: 80, y: 90 }, { x: 30, y: 90 },
+    ];
+    const otherSight = sight.map(({ x, y }) => ({ x: x + 130, y }));
+    const props = buildProps({
+      isManager: true,
+      isFogViewerManager: false,
+      showLightingDebugOverlay: true,
+      lightingDebugMetadata: { walls: [authoredDoor], lights: [selectedLight] },
+      lightSourceControls: { lights: [selectedLight], selectedLightId: id },
+      fogOfWar: {
+        currentVisiblePolygons: [[sight], [otherSight]],
+        currentTokenVisionPolygons: [
+          { tokenId: 'left', polygon: sight },
+          { tokenId: 'right', polygon: otherSight },
+        ],
+      },
+    });
+    const input = { backgroundId: 'map-1', walls: [authoredDoor], lights: [projectedLight] };
+    const { rerender } = render(<GrigliataBoard {...props} lightingRenderInput={input} />);
+    expect(screen.getAllByTestId('lighting-debug-viewer-sight')).toHaveLength(2);
+    const footprintMaxX = () => {
+      const contour = screen.getByTestId('lighting-debug-lamp-footprint');
+      const points = JSON.parse(contour.getAttribute('data-points'));
+      return Math.max(...points.filter((_, index) => index % 2 === 0));
+    };
+    expect(footprintMaxX()).toBeCloseTo(60);
+
+    rerender(<GrigliataBoard {...props} lightingRenderInput={{
+      ...input,
+      walls: [{ ...authoredDoor, isOpen: true, blocksVision: false, blocksLight: false, blocksSight: false }],
+    }} />);
+    expect(footprintMaxX()).toBeCloseTo(80);
+  });
+
+  test('distinguishes debug blocker types and styles doors and windows using runtime state', () => {
+    const wall = { x1: 0, y1: 0, x2: 100, y2: 0, blocksSight: true };
+    const walls = [
+      { ...wall, id: 'sight', blocksVision: true, blocksLight: false },
+      { ...wall, id: 'light', y1: 20, y2: 20, blocksVision: false, blocksLight: true },
+      { ...wall, id: 'both', y1: 40, y2: 40, blocksVision: true, blocksLight: true },
+      { ...wall, id: 'door', y1: 60, y2: 60, wallType: 'door' },
+      { ...wall, id: 'window', y1: 80, y2: 80, wallType: 'window' },
+    ];
+    const props = buildProps({
+      isManager: true,
+      showLightingDebugOverlay: true,
+      lightingDebugMetadata: { walls },
+    });
+    const input = { backgroundId: 'map-1', walls };
+    const { rerender } = render(<GrigliataBoard {...props} lightingRenderInput={input} />);
+    const [visionOnly, lightOnly, both, door, window] = screen.getAllByTestId('lighting-debug-wall');
+    const stroke = (line) => line.getAttribute('data-stroke');
+    const dash = (line) => line.getAttribute('data-dash');
+    const blockers = [visionOnly, lightOnly, both];
+    expect(new Set(blockers.map(stroke)).size).toBe(3);
+    expect(new Set(blockers.map(dash)).size).toBe(3);
+    expect(stroke(door)).toBe(stroke(both));
+    expect(stroke(window)).toBe(stroke(both));
+    const closedDash = dash(door);
+
+    rerender(<GrigliataBoard {...props} lightingRenderInput={{
+      ...input,
+      walls: walls.map((segment) => (
+        segment.wallType ? { ...segment, isOpen: true } : segment
+      )),
+    }} />);
+    expect(stroke(door)).not.toBe(stroke(both));
+    expect(stroke(window)).toBe(stroke(door));
+    expect(dash(door)).not.toBe(closedDash);
   });
 
   test('renders DM wall runtime controls outside narration and forwards toggles', async () => {

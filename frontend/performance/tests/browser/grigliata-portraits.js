@@ -100,9 +100,8 @@ const waitForAllVisibleBoardPortraits = async (page, {
     }
     await page.waitForTimeout(100);
   }
-  throw new Error(
-    `Not every visible Grigliata token rendered its portrait: ${JSON.stringify(summarizeBoardPortraits(latest))}`
-  );
+  const observed = summarizeBoardPortraits(latest);
+  throw new Error(`Grigliata portraits did not settle at low zoom. ${JSON.stringify({expectedOnStage, ...observed})}`);
 };
 
 const assertAllVisibleBoardPortraits = (tokens, {role, limits}) => {

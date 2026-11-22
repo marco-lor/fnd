@@ -60,9 +60,41 @@ const buildCurrentVisibleCellSet = (fogOfWar) => {
   return new Set(normalizedCells);
 };
 
-const buildCurrentVisiblePolygons = (fogOfWar) => (
-  normalizeRenderableFogPolygons(fogOfWar?.currentVisiblePolygons) || []
-);
+const getPolygonSearchBounds = (ring) => {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let padding = GEOMETRY_EPSILON;
+  let previous = ring[ring.length - 1];
+  for (const point of ring) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+    const longestAxis = Math.max(Math.abs(point.x - previous.x), Math.abs(point.y - previous.y));
+    padding = Math.max(padding, (2 * GEOMETRY_EPSILON) / longestAxis);
+    previous = point;
+  }
+
+  // Segment tests allow epsilon in squared world units, so short edges
+  // need a wider margin than the coordinate comparison alone.
+  return {
+    minX: minX - padding,
+    minY: minY - padding,
+    maxX: maxX + padding,
+    maxY: maxY + padding,
+  };
+};
+
+const buildCurrentVisibility = (fogOfWar) => {
+  const currentPolygons = normalizeRenderableFogPolygons(fogOfWar?.currentVisiblePolygons) || [];
+  return {
+    currentPolygons,
+    polygonSearchBounds: currentPolygons.map(([outerRing]) => getPolygonSearchBounds(outerRing)),
+    currentCellSet: currentPolygons.length ? null : buildCurrentVisibleCellSet(fogOfWar),
+  };
+};
 
 const normalizeBounds = (bounds) => {
   if (!bounds || typeof bounds !== 'object') {
@@ -250,27 +282,48 @@ const ringIntersectsBounds = ({ ring = [], bounds }) => {
 };
 
 const boundsIntersectFogPolygon = ({ bounds, polygon }) => {
-  const normalizedBounds = normalizeBounds(bounds);
   const outerRing = polygon?.[0];
-  if (!normalizedBounds || !Array.isArray(outerRing) || outerRing.length < 3) {
+  if (!Array.isArray(outerRing) || outerRing.length < 3) {
     return false;
   }
 
-  if (getBoundsCorners(normalizedBounds).some((corner) => pointIsInFogPolygon(corner, polygon))) {
+  if (getBoundsCorners(bounds).some((corner) => pointIsInFogPolygon(corner, polygon))) {
     return true;
   }
 
-  return ringIntersectsBounds({ ring: outerRing, bounds: normalizedBounds });
+  return ringIntersectsBounds({ ring: outerRing, bounds });
 };
 
-const boundsIntersectVisiblePolygons = ({ bounds, currentPolygons }) => (
-  Array.isArray(currentPolygons)
-  && currentPolygons.some((polygon) => boundsIntersectFogPolygon({ bounds, polygon }))
+const boundsOverlap = (left, right, padding) => (
+  left.minX - padding <= right.maxX
+  && left.maxX + padding >= right.minX
+  && left.minY - padding <= right.maxY
+  && left.maxY + padding >= right.minY
 );
 
-const boundsIntersectCurrentVisibility = ({ bounds, grid, currentPolygons, currentCellSet }) => (
+const boundsIntersectVisiblePolygons = ({ bounds, currentPolygons, polygonSearchBounds }) => {
+  const normalizedBounds = normalizeBounds(bounds);
+  if (!normalizedBounds) {
+    return false;
+  }
+
+  const minExtent = Math.min(
+    normalizedBounds.maxX - normalizedBounds.minX,
+    normalizedBounds.maxY - normalizedBounds.minY
+  );
+  const padding = Math.max(GEOMETRY_EPSILON, (2 * GEOMETRY_EPSILON) / minExtent);
+  return currentPolygons.some((polygon, index) => {
+    const searchBounds = polygonSearchBounds?.[index];
+    return (!searchBounds || boundsOverlap(normalizedBounds, searchBounds, padding))
+      && boundsIntersectFogPolygon({ bounds: normalizedBounds, polygon });
+  });
+};
+
+const boundsIntersectCurrentVisibility = ({
+  bounds, grid, currentPolygons, polygonSearchBounds, currentCellSet,
+}) => (
   Array.isArray(currentPolygons) && currentPolygons.length > 0
-    ? boundsIntersectVisiblePolygons({ bounds, currentPolygons })
+    ? boundsIntersectVisiblePolygons({ bounds, currentPolygons, polygonSearchBounds })
     : boundsIntersectVisibleCells({ bounds, grid, currentCellSet })
 );
 
@@ -296,6 +349,7 @@ export const isFogVisibleToken = ({
   token,
   currentUserId = '',
   currentPolygons = [],
+  polygonSearchBounds,
   currentCellSet = null,
   grid,
 } = {}) => {
@@ -307,6 +361,7 @@ export const isFogVisibleToken = ({
     bounds: getTokenBounds({ token, grid }),
     grid,
     currentPolygons,
+    polygonSearchBounds,
     currentCellSet,
   });
 };
@@ -323,14 +378,12 @@ export const filterFogVisibleTokens = ({
   }
 
   const normalizedGrid = normalizeGridConfig(grid);
-  const currentPolygons = buildCurrentVisiblePolygons(fogOfWar);
-  const currentCellSet = buildCurrentVisibleCellSet(fogOfWar);
+  const currentVisibility = buildCurrentVisibility(fogOfWar);
 
   return asArray(tokens).filter((token) => isFogVisibleToken({
     token,
     currentUserId,
-    currentPolygons,
-    currentCellSet,
+    ...currentVisibility,
     grid: normalizedGrid,
   }));
 };
@@ -350,8 +403,7 @@ export const splitFogVisibleTokenRenderLayers = ({
   }
 
   const normalizedGrid = normalizeGridConfig(grid);
-  const currentPolygons = buildCurrentVisiblePolygons(fogOfWar);
-  const currentCellSet = buildCurrentVisibleCellSet(fogOfWar);
+  const currentVisibility = buildCurrentVisibility(fogOfWar);
   const belowFogTokens = [];
   const aboveFogTokens = [];
 
@@ -361,8 +413,7 @@ export const splitFogVisibleTokenRenderLayers = ({
       && !boundsIntersectCurrentVisibility({
         bounds: getTokenBounds({ token, grid: normalizedGrid }),
         grid: normalizedGrid,
-        currentPolygons,
-        currentCellSet,
+        ...currentVisibility,
       })
     ) {
       aboveFogTokens.push(token);

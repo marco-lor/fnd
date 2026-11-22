@@ -1,11 +1,13 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import useGrigliataFogOfWar, {
   useGrigliataFogRasterMemory,
 } from './useGrigliataFogOfWar';
 import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
+  buildFogRasterTileDocId,
+  buildFogRasterTilePayload,
   encodeFogRasterMaskBase64,
   createEmptyFogRasterMaskBytes,
 } from './fogRasterMemory';
@@ -28,34 +30,10 @@ jest.mock('firebase/firestore', () => ({
   doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
   query: jest.fn((base, ...constraints) => ({ kind: 'query', base, constraints })),
   where: jest.fn((field, op, value) => ({ kind: 'where', field, op, value })),
-  onSnapshot: jest.fn((target, onNext) => {
-    if (target?.kind === 'query') {
-      const items = mockCollectionData[target.base.path] || [];
-      const filteredItems = target.constraints.reduce((currentItems, constraint) => (
-        constraint?.kind === 'where' && constraint.op === '=='
-          ? currentItems.filter((item) => item?.[constraint.field] === constraint.value)
-          : currentItems
-      ), items);
-      onNext({
-        docs: filteredItems.map((item) => ({
-          id: item.id,
-          data: () => {
-            const { id, ...rest } = item;
-            return rest;
-          },
-        })),
-      });
-    } else {
-      onNext({
-        id: target.id,
-        exists: () => !!mockDocData[target.path],
-        data: () => mockDocData[target.path] || {},
-      });
-    }
-
-    return jest.fn();
-  }),
+  onSnapshot: jest.fn(),
 }));
+
+const addedDocuments = (docs) => ({ docChanges: () => docs.map((doc) => ({ type: 'added', doc })) });
 
 const HookProbe = ({ backgroundId = '', currentUserId = '', isManager = false }) => {
   const { fogOfWar, isFogOfWarReady } = useGrigliataFogOfWar({
@@ -110,15 +88,10 @@ describe('useGrigliataFogOfWar', () => {
             ? currentItems.filter((item) => item?.[constraint.field] === constraint.value)
             : currentItems
         ), items);
-        onNext({
-          docs: filteredItems.map((item) => ({
-            id: item.id,
-            data: () => {
-              const { id, ...rest } = item;
-              return rest;
-            },
-          })),
-        });
+        onNext(addedDocuments(filteredItems.map(({ id, ...data }) => ({
+          id,
+          data: () => data,
+        }))));
       } else {
         onNext({
           id: target.id,
@@ -293,6 +266,40 @@ describe('useGrigliataFogOfWar', () => {
     expect(screen.getByTestId('raster-memory-tile-count')).toHaveTextContent('0');
   });
 
+  test('decodes only changed tiles and preserves the order and identity of the rest', () => {
+    const scope = { backgroundId: 'map-1', ownerUid: 'player-1' };
+    const tileDoc = (tileCol, byte) => {
+      const maskBytes = createEmptyFogRasterMaskBytes();
+      maskBytes[0] = byte;
+      const payload = buildFogRasterTilePayload({
+        ...scope, tileCol, tileRow: 0, grid: { cellSizePx: 70 }, maskBytes,
+      });
+      return { id: buildFogRasterTileDocId(payload), data: jest.fn(() => payload) };
+    };
+    let emit;
+    firestore.onSnapshot.mockImplementation((_target, onNext) => {
+      emit = (changes) => act(() => onNext({ docChanges: () => changes }));
+      return jest.fn();
+    });
+    const { result } = renderHook(() => useGrigliataFogRasterMemory(scope));
+    const near = tileDoc(0, 1);
+    const far = tileDoc(4, 4);
+    emit([far, near].map((doc) => ({ type: 'added', doc })));
+    const previousFar = result.current.memoryTilesById[far.id];
+    const middle = tileDoc(2, 2);
+    const modified = tileDoc(0, 3);
+    emit([{ type: 'added', doc: middle }, { type: 'modified', doc: modified }]);
+
+    expect(result.current.memoryTiles.map((tile) => tile.tileCol)).toEqual([0, 2, 4]);
+    expect(result.current.memoryTiles[0].maskBytes[0]).toBe(3);
+    expect(result.current.memoryTiles[2]).toBe(previousFar);
+    expect(far.data).toHaveBeenCalledTimes(1);
+    expect(near.data).toHaveBeenCalledTimes(1);
+    emit([{ type: 'removed', doc: modified }]);
+    expect(result.current.memoryTiles.map((tile) => tile.tileCol)).toEqual([2, 4]);
+    expect(modified.data).toHaveBeenCalledTimes(1);
+  });
+
   test('normalizes malformed snapshots to null while becoming ready', async () => {
     mockDocData['grigliata_fog_of_war/map-1__user-1'] = {
       backgroundId: 'map-1',
@@ -332,27 +339,25 @@ describe('useGrigliataFogOfWar', () => {
         updatedBy: 'user-1',
       }),
     });
-    const buildRasterSnapshot = (backgroundId) => ({
-      docs: [{
-        id: `${backgroundId}__user-1__fog-raster-c8-s16-v1__0:0`,
-        data: () => ({
-          backgroundId,
-          ownerUid: 'user-1',
-          tileKey: '0:0',
-          tileCol: 0,
-          tileRow: 0,
-          rasterProfileId: FOG_RASTER_PROFILE_ID,
-          tileSizeCells: 8,
-          samplesPerCell: 16,
-          cellSizePx: 70,
-          offsetXPx: 0,
-          offsetYPx: 0,
-          maskEncoding: FOG_RASTER_MASK_ENCODING,
-          maskBase64: encodeFogRasterMaskBase64(maskBytes),
-          updatedBy: 'user-1',
-        }),
-      }],
-    });
+    const buildRasterSnapshot = (backgroundId) => addedDocuments([{
+      id: `${backgroundId}__user-1__fog-raster-c8-s16-v1__0:0`,
+      data: () => ({
+        backgroundId,
+        ownerUid: 'user-1',
+        tileKey: '0:0',
+        tileCol: 0,
+        tileRow: 0,
+        rasterProfileId: FOG_RASTER_PROFILE_ID,
+        tileSizeCells: 8,
+        samplesPerCell: 16,
+        cellSizePx: 70,
+        offsetXPx: 0,
+        offsetYPx: 0,
+        maskEncoding: FOG_RASTER_MASK_ENCODING,
+        maskBase64: encodeFogRasterMaskBase64(maskBytes),
+        updatedBy: 'user-1',
+      }),
+    }]);
     const findLegacyListener = (backgroundId) => listeners.find((listener) => (
       listener.target?.path === `grigliata_fog_of_war/${backgroundId}__user-1`
     ));

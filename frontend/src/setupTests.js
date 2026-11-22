@@ -4,8 +4,11 @@
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
 
-Object.defineProperties(window.HTMLMediaElement.prototype, {
-  play: { configurable: true, value: jest.fn().mockResolvedValue(undefined) },
-  pause: { configurable: true, value: jest.fn() },
-  load: { configurable: true, value: jest.fn() },
-});
+// Node-environment suites (e.g. local Firestore emulator tests) have no DOM.
+if (typeof window !== 'undefined') {
+  Object.defineProperties(window.HTMLMediaElement.prototype, {
+    play: { configurable: true, value: jest.fn().mockResolvedValue(undefined) },
+    pause: { configurable: true, value: jest.fn() },
+    load: { configurable: true, value: jest.fn() },
+  });
+}
