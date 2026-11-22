@@ -9,6 +9,9 @@ async function panPickerOverTurnOrder(page, badge, option) {
   const scrollBox = await page.getByTestId('turn-order-scroll-container').boundingBox();
   const optionBox = await option.boundingBox();
   const board = await page.locator('.konvajs-content').boundingBox();
+  expect(scrollBox, 'The expanded turn-order list must have a visible box').not.toBeNull();
+  expect(optionBox, 'The selected pawn option must have a visible box').not.toBeNull();
+  expect(board, 'The map canvas must have a visible box').not.toBeNull();
   const x = board.x + board.width * 0.4;
   const y = board.y + board.height / 2;
   const dx = scrollBox.x + 48 - (optionBox.x + optionBox.width / 2);
@@ -59,8 +62,15 @@ async function dragCoveredToken({ context, page, role }) {
 
     await installDeterministicFontRoutes(context);
     await installBootstrap(context, { id: 'grigliata-token-stacks', role }, 1);
+    await page.addInitScript(({ owner, collapsed }) => {
+      localStorage.setItem(`grigliata.turnOrderCollapsed.${owner}`, String(collapsed));
+    }, { owner, collapsed: role === 'player' });
     await page.goto('/grigliata');
     await waitForReadiness(page);
+    const drawerToggle = page.getByTestId('turn-order-rail-toggle');
+    if (await drawerToggle.getAttribute('aria-expanded') === 'false') await drawerToggle.click();
+    await expect(drawerToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('turn-order-scroll-container')).toBeVisible();
     const badge = page.getByRole('button', { name: /2 pedine sovrapposte/i });
     await badge.click();
     const picker = page.getByRole('dialog', { name: 'Pedine sovrapposte' });

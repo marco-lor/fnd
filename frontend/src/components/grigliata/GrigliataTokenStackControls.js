@@ -129,7 +129,8 @@ export default function GrigliataTokenStackControls({
 
   const getLayout = (stack) => getTokenStackBadgeLayout({ stack, grid, viewport, stageSize });
 
-  // Keep the wrapper out of the stacking order so only the open picker rises above the board rails.
+  // Turn entries receive clicks over closed badges. Collapsing the drawer exposes a covered badge.
+  // The wrapper has no stacking context so an open picker can receive clicks above the turn entries.
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" onKeyDown={handleKeyDown}>
       {stacks.map((stack) => {
