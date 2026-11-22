@@ -5,6 +5,37 @@ const { operationReceiptId } = require('../../../functions/lib/userDataV2');
 const { configureOwnedPerformanceEnvironment, projectId } = require('../../../scripts/performance/common');
 const { installBootstrap, installDeterministicFontRoutes, storageStateForRole, waitForReadiness } = require('./helpers');
 
+async function panPickerOverTurnOrder(page, badge, option) {
+  const scrollBox = await page.getByTestId('turn-order-scroll-container').boundingBox();
+  const optionBox = await option.boundingBox();
+  const board = await page.locator('.konvajs-content').boundingBox();
+  expect(scrollBox, 'The expanded turn-order list must have a visible box').not.toBeNull();
+  expect(optionBox, 'The selected pawn option must have a visible box').not.toBeNull();
+  expect(board, 'The map canvas must have a visible box').not.toBeNull();
+  const x = board.x + board.width * 0.4;
+  const y = board.y + board.height / 2;
+  const dx = scrollBox.x + 48 - (optionBox.x + optionBox.width / 2);
+  const dy = scrollBox.y + 42 - (optionBox.y + optionBox.height / 2);
+
+  await page.keyboard.press('Escape');
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(x + dx, y + dy, { steps: 8 });
+  await page.mouse.up({ button: 'right' });
+  await badge.click();
+
+  // Both controls occupy this pixel. The pointer must reach the visible option.
+  const hit = await option.evaluate(button => {
+    const box = button.getBoundingClientRect();
+    const elements = document.elementsFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return {
+      overTurnOrder: elements.includes(document.querySelector('[data-testid="turn-order-scroll-container"]')),
+      hitsOption: button.contains(elements[0]),
+    };
+  });
+  expect(hit).toEqual({ overTurnOrder: true, hitsOption: true });
+}
+
 async function dragCoveredToken({ context, page, role }) {
   configureOwnedPerformanceEnvironment();
   const app = initializeApp({ projectId }, `grigliata-token-stack-${role}`);
@@ -31,12 +62,22 @@ async function dragCoveredToken({ context, page, role }) {
 
     await installDeterministicFontRoutes(context);
     await installBootstrap(context, { id: 'grigliata-token-stacks', role }, 1);
+    await page.addInitScript(({ owner, collapsed }) => {
+      localStorage.setItem(`grigliata.turnOrderCollapsed.${owner}`, String(collapsed));
+    }, { owner, collapsed: role === 'player' });
     await page.goto('/grigliata');
     await waitForReadiness(page);
-    await page.getByRole('button', { name: /2 pedine sovrapposte/i }).click();
+    const drawerToggle = page.getByTestId('turn-order-rail-toggle');
+    if (await drawerToggle.getAttribute('aria-expanded') === 'false') await drawerToggle.click();
+    await expect(drawerToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('turn-order-scroll-container')).toBeVisible();
+    const badge = page.getByRole('button', { name: /2 pedine sovrapposte/i });
+    await badge.click();
     const picker = page.getByRole('dialog', { name: 'Pedine sovrapposte' });
     await expect(picker.getByTestId(`token-stack-option-${upperId}`)).toBeDisabled();
-    await picker.getByTestId(`token-stack-option-${lowerId}`).click();
+    const ownOption = picker.getByTestId(`token-stack-option-${lowerId}`);
+    await panPickerOverTurnOrder(page, badge, ownOption);
+    await ownOption.click();
 
     // Locate the shared cell in the rendered map. Mouse input still traverses
     // the DOM overlays and Konva's real hit canvas before it reaches the board.
