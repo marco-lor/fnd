@@ -7182,6 +7182,7 @@ export default function GrigliataPage() {
                 combatAim={combat.overlay}
                 combatTray={combat.tray}
                 combatNextDamage={combat.nextDamage}
+                combatNextRetry={combat.nextRetry}
                 combatResultStatus={combat.resultStatus}
                 combatResultOutcomes={combat.resultOutcomes}
                 activeBackground={displayBackground}

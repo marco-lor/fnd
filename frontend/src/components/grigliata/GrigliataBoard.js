@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Konva from 'konva/lib/index';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { installKonvaInstrumentation } from '../../performance/runtime';
@@ -125,7 +125,7 @@ import {
 } from './fogBrushEditing';
 import { sortTokensByLayerOrder } from './tokenLayering';
 import GrigliataCombatAim from './GrigliataCombatAim';
-import GrigliataCombatDiceTray, { CombatMapDamage, CombatMapDice } from './GrigliataCombatDice';
+import GrigliataCombatDiceTray, { CombatMapAction, CombatMapDice } from './GrigliataCombatDice';
 import GrigliataTokenStackControls from './GrigliataTokenStackControls';
 import { buildTokenStackCells, isTokenStackPointVisible } from './tokenStacks';
 import {
@@ -2333,6 +2333,7 @@ export default function GrigliataBoard({
   combatAim,
   combatTray,
   combatNextDamage,
+  combatNextRetry,
   combatResultStatus,
   combatResultOutcomes,
   activeBackground,
@@ -6596,6 +6597,13 @@ export default function GrigliataBoard({
       visibleRenderedTokens,
     ]
   );
+  const lastFocusedTray = useRef(null);
+  const combatStep = combatAim?.selection?.picking ? 'aim' : combatTray ? 'roll' : combatNextDamage ? 'damage' : null;
+  useLayoutEffect(() => {
+    const notify = () => window.dispatchEvent(new Event('grigliata-defense-stage-change'));
+    notify();
+    return notify;
+  }, [combatStep, isNarrationPresentationActive]);
   const shouldShowLightingDebug = !isNarrationVisualActive && isManager && showLightingDebugOverlay
     && !!lightingDebugMetadata;
   const geometryInput = lightingRenderInput
@@ -6655,11 +6663,10 @@ export default function GrigliataBoard({
         </div>
       </div>
 
-      {combatTray
-        ? <GrigliataCombatDiceTray tray={combatTray} nextDamage={combatNextDamage} resultStatus={combatResultStatus} resultOutcomes={combatResultOutcomes} />
-        : combatNextDamage && <div className="gc-dice-tray" data-kind="damage"><CombatMapDamage nextDamage={combatNextDamage} /></div>}
       <div
         ref={containerRef}
+        data-combat-map-viewport={isNarrationPresentationActive ? undefined : ''}
+        tabIndex={-1}
         className={`relative w-full flex-1 min-h-[480px] xl:min-h-0 transition-colors ${
           isDropActive ? 'bg-amber-500/10' : 'bg-slate-950/40'
         }`}
@@ -6670,7 +6677,14 @@ export default function GrigliataBoard({
       >
         {combatAim && <GrigliataCombatAim aim={combatAim} tokens={visibleRenderedTokens} viewport={viewport} grid={normalizedGrid}
           stageSize={stageSize} setViewport={setViewport} applyScale={applyScale} />}
-        {combatTray && <CombatMapDice tray={combatTray} visibleTokens={visibleRenderedTokens} grid={normalizedGrid} viewport={viewport} stageSize={stageSize} />}
+        {combatStep === 'roll' && <>
+          <CombatMapDice tray={combatTray} visibleTokens={visibleRenderedTokens} grid={normalizedGrid} viewport={viewport} stageSize={stageSize} />
+          <GrigliataCombatDiceTray tray={combatTray} lastFocusedTray={lastFocusedTray} nextDamage={combatNextDamage} nextRetry={combatNextRetry}
+            resultStatus={combatResultStatus} resultOutcomes={combatResultOutcomes} />
+        </>}
+        {combatStep === 'damage' && <div className="gc-map-step gc-dice-tray" data-kind="damage">
+          <CombatMapAction action={combatNextDamage} kind="damage" />
+        </div>}
         {isTokenDragActive && (
           <div
             data-testid="grigliata-board-drop-overlay"

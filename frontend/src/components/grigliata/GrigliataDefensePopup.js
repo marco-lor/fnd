@@ -5,12 +5,88 @@ import {
   formatCombatRoll,
 } from './combatPresentation';
 import { AppliedDamage, TargetDamage } from './GrigliataDamageConfirmation';
-import { CombatDiceCanvas, CombatDiceDrag, combatDiceFaces } from './GrigliataCombatDice';
+import { CombatDiceCanvas, CombatDieButton, combatDiceFaces } from './GrigliataCombatDice';
 import './grigliataCombat.css';
+import './grigliataDefenseOverlay.css';
 
 const requestKey = request => JSON.stringify([request.id || request.combatId, request.target?.placementId, request.round]);
 const RECEIPT_LIMIT = 4;
 const NONE = [];
+
+// A native modal lives in the top layer, outside the map's positioning context. Moving only its
+// coordinates keeps its form, focus, pending answer and receipt listeners alive across route changes.
+function useDefenseMapPosition(host, active) {
+  useLayoutEffect(() => {
+    if (!active) return undefined;
+    const root = host.current;
+    const visual = window.visualViewport;
+    let stage;
+    let step;
+    let frame;
+    const schedule = () => {
+      if (frame == null) frame = window.requestAnimationFrame(measure);
+    };
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    function measure() {
+      frame = null;
+      const map = document.querySelector('[data-combat-map-viewport]');
+      const actorStep = map?.querySelector('.gc-map-step');
+      if (map !== stage || actorStep !== step) {
+        observer?.disconnect();
+        stage = map;
+        step = actorStep;
+        if (stage) observer?.observe(stage);
+        if (step) observer?.observe(step);
+      }
+      const bounds = stage?.getBoundingClientRect();
+      const viewTop = visual?.offsetTop ?? 0;
+      const viewLeft = visual?.offsetLeft ?? 0;
+      const top = Math.max(bounds?.top ?? 0, viewTop);
+      const left = Math.max(bounds?.left ?? 0, viewLeft);
+      const viewBottom = viewTop + (visual?.height ?? window.innerHeight);
+      const bottom = Math.min(bounds?.bottom ?? 0, viewBottom);
+      const right = Math.min(bounds?.right ?? 0, viewLeft + (visual?.width ?? window.innerWidth));
+      // A sliver of board while reading the sidebar cannot hold a useful dialog. Use the global surface there.
+      if (!stage || right - left < 120 || bottom - top < 96) {
+        root.removeAttribute('data-map-defense');
+        return;
+      }
+      const baseline = bottom - 12;
+      const occupied = step?.getBoundingClientRect();
+      const intersects = occupied?.height > 0 && occupied.bottom > top && occupied.top < bottom;
+      const above = intersects ? Math.min(baseline, occupied.top - 8) : baseline;
+      // When scrolling leaves the actor's controls near the top, put the receipt immediately below them.
+      const below = intersects && above - viewTop < 84 && viewBottom - occupied.bottom > above - viewTop;
+      const receiptEdge = below ? occupied.bottom + 8 : above;
+      const receiptHeight = below ? viewBottom - receiptEdge : receiptEdge - (intersects ? viewTop : top);
+      root.style.setProperty('--gc-defense-center', (left + right) / 2 + 'px');
+      root.style.setProperty('--gc-defense-width', Math.floor((right - left) * 0.96) + 'px');
+      root.style.setProperty('--gc-defense-baseline', baseline + 'px');
+      root.style.setProperty('--gc-defense-height', baseline - top - 8 + 'px');
+      root.style.setProperty('--gc-receipt-baseline', receiptEdge + 'px');
+      root.style.setProperty('--gc-receipt-shift', below ? '0%' : '-100%');
+      root.style.setProperty('--gc-receipt-height', Math.max(0, receiptHeight - 8) + 'px');
+      root.setAttribute('data-map-defense', '');
+    }
+    measure();
+    window.addEventListener('grigliata-defense-stage-change', schedule);
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    visual?.addEventListener('resize', schedule);
+    visual?.addEventListener('scroll', schedule);
+    return () => {
+      window.removeEventListener('grigliata-defense-stage-change', schedule);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+      visual?.removeEventListener('resize', schedule);
+      visual?.removeEventListener('scroll', schedule);
+      observer?.disconnect();
+      if (frame != null) window.cancelAnimationFrame(frame);
+      root.removeAttribute('data-map-defense');
+    };
+  }, [active, host]);
+}
+
 // Keep each pawn's number for the session, including while its receipt is closed or queued.
 function rememberReceiptTargets(targets, receipts) {
   const next = new Map(targets);
@@ -58,7 +134,10 @@ const receiptDetails = request => ({
   target: { placementId: request.target?.placementId, name: request.target?.name || 'Difesa' },
   actionName: request.action?.name,
 });
-const lostFocus = () => !document.activeElement || document.activeElement === document.body;
+// Focus the viewer did not choose: the page, or a dialog's own box, where Safari puts a tapped button's focus and where
+// a tap on a disabled control leaves it.
+const lostFocus = () => !document.activeElement || document.activeElement === document.body
+  || document.activeElement.localName === 'dialog';
 
 // Focus inside a receipt's damage area is remembered as `{ id, name, element }`. A re-render that removes the focused
 // control (the receipt moving between the dialog and the corner, or a reload of its copy) leaves focus nowhere: the
@@ -223,7 +302,7 @@ function DefenseReceipts({ receipts, targets, onDismiss, renderDamage, feeds }) 
                   <code>{receipt.rolls.roll}</code>
                 </p>
               )}
-              {receipt.dice?.length > 0 && <CombatDiceCanvas rolls={receipt.dice} kind="defense" gesture={receipt.gesture} />}
+              {receipt.dice?.length > 0 && <CombatDiceCanvas rolls={receipt.dice} kind="defense" />}
               {receipt.waitingForDamage && !current && feed?.settlement !== 'proposal' && <p>{settledWithoutDamage(feed)
                 ? 'Nessun danno da applicare' : 'In attesa che l’attaccante tiri il danno.'}</p>}
               {proposal && <p>{proposal}</p>}
@@ -269,7 +348,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
     if (unconfirmed && lostFocus()) retryRef.current?.focus();
   }, [unconfirmed]);
 
-  function send(gesture) {
+  function send() {
     if (busy) return;
     if (unconfirmed) {
       onRespond(request, sent);
@@ -281,8 +360,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
       ...(rules.showDie ? { die: Number(die) } : {}),
       ...(rules.showReduction ? { reduction: Number(reduction) } : {}),
     };
-    if (gesture) onRespond(request, values, gesture);
-    else onRespond(request, values);
+    onRespond(request, values);
   }
 
   return (
@@ -328,15 +406,13 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
         )}
         {unconfirmed && rules.consent && <p className="gc-hint">Risposta inviata: {sent.consent ? 'Accetta' : 'Rifiuta'}.</p>}
         {error && <p className="gc-error" role="alert">{error.message || error}</p>}
-        {!rules.consent && rules.showDie && !unconfirmed && (
-          <div className="gc-defense-dice">
-            <CombatDiceDrag disabled={busy || !canRoll} kind="defense" notation={integerIn(die, 2, 100) ? 'd' + die : ''} onThrow={send} />
-            {integerIn(die, 2, 100) && <code>d{die}</code>}
-          </div>
-        )}
-        <div className="gc-dialog-buttons">
-          <button type="button" className="gc-secondary" onClick={onDefer}><FaClock aria-hidden="true" />Più tardi</button>
-          {unconfirmed ? (
+        <div className="gc-dialog-buttons" data-die-action={rules.showDie && !rules.consent ? '' : undefined}>
+          <button type="button" className="gc-secondary" onClick={() => onDefer()}><FaClock aria-hidden="true" />Più tardi</button>
+          {rules.showDie && !rules.consent ? (
+            <CombatDieButton type="submit" label={unconfirmed ? 'Riprova' : 'Tira ' + label}
+              notation={integerIn(die, 2, 100) ? 'd' + die : ''} buttonRef={unconfirmed ? retryRef : undefined}
+              disabled={busy || (!unconfirmed && !canRoll)} />
+          ) : unconfirmed ? (
             <button ref={retryRef} type="submit" className="gc-primary" disabled={busy}>Riprova</button>
           ) : rules.consent ? (
             <>
@@ -344,7 +420,7 @@ function DefensePrompt({ request, busy, error, sent, unconfirmed, onRespond, onD
               <button type="button" className="gc-primary" disabled={busy} onClick={() => onRespond(request, { consent: true })}>Accetta</button>
             </>
           ) : (
-            <button type="submit" className="gc-primary" disabled={busy || !canRoll}>{rules.showDie ? 'Tira ' : 'Invia '}{label}</button>
+            <button type="submit" className="gc-primary" disabled={busy || !canRoll}>Invia {label}</button>
           )}
         </div>
         {busy && <p className="gc-hint" role="status">Invio della risposta…</p>}
@@ -403,6 +479,7 @@ function DefenseInbox({
   const locks = useRef(new Set());
   const dialogRef = useRef(null);
   const feedRef = useRef(null);
+  const positionRef = useRef(null);
   const damageFocus = useRef(null);
   // A receipt control being edited in the corner when a prompt took the screen: focus goes back to it on close.
   const returnFocus = useRef(null);
@@ -442,6 +519,7 @@ function DefenseInbox({
   }, [confirmsDamage, damage, feeds, listedDamageIds]);
   const hiddenDamage = queuedReceipts.filter(receipt => stillPending(receipt)
     && (!receipt.immediate || activeDamageIds.has(receipt.damage.requestId)));
+  useDefenseMapPosition(positionRef, Boolean(queue.length || visibleReceipts.length || hiddenDamage.length));
 
   // Park other maps outside the visible slots. While someone edits a receipt, new arrivals join the queue.
   useLayoutEffect(() => {
@@ -566,9 +644,10 @@ function DefenseInbox({
     if (key) focusPrompt(dialogRef.current);
   }
 
-  function defer() {
+  function defer(all = false) {
     if (!key) return;
-    setDeferred(new Map(queue.map(entry => [requestKey(entry), entry.combatId]).filter(([id]) => id === key || deferred.has(id))));
+    setDeferred(new Map(queue.map(entry => [requestKey(entry), entry.combatId])
+      .filter(([id]) => all || id === key || deferred.has(id))));
   }
 
   function reopen() {
@@ -588,7 +667,7 @@ function DefenseInbox({
     setReceiptQueue(queue => showReceipts(queue, [receipt], stillPending));
   }
 
-  async function respond(answeredRequest, values, gesture) {
+  async function respond(answeredRequest, values) {
     const { combatId } = answeredRequest;
     if (answering.current || cancelled.current.has(combatId)) return;
     const answeredKey = requestKey(answeredRequest);
@@ -639,7 +718,6 @@ function DefenseInbox({
       dice: answeredRequest.defense?.showDie && !answeredRequest.defense?.consent
         ? combatDiceFaces(defense?.rolls?.map(value => ({ sides: defense.sides, value })))
         : NONE,
-      gesture,
       waitingForDamage: reply.damagePending === true,
       proposal: combatProposalLabel(reply.damage, reply.effects),
       effects: reply.effects || [],
@@ -725,7 +803,7 @@ function DefenseInbox({
   const watched = new Map(onWatchDamage ? scopes.filter(Boolean).map(scope => [scope.requestId, scope]) : []);
 
   return (
-    <>
+    <div className="gc-defense-position" ref={positionRef}>
       {Array.from(watched.values(), scope => (
         <RequestWatch
           key={scope.requestId}
@@ -759,9 +837,19 @@ function DefenseInbox({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         ref={dialogRef}
+        onKeyDown={event => {
+          // Leave Escape's native cancel action intact without dismissing a target picker underneath.
+          if (event.key === 'Escape') event.stopPropagation();
+        }}
         onCancel={event => {
           event.preventDefault();
           defer();
+        }}
+        onClose={() => {
+          // A close request the page may not refuse (Escape or Back again with no tap in between) still shuts the
+          // native dialog after `cancel` put off its prompt. The next prompt would stay hidden: put them all off so the
+          // launcher brings them back.
+          if (!dialogRef.current.open) defer(true);
         }}
       >
         {request && (
@@ -781,7 +869,7 @@ function DefenseInbox({
           </>
         )}
       </dialog>
-    </>
+    </div>
   );
 }
 

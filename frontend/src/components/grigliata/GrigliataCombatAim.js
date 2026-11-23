@@ -128,7 +128,7 @@ export default function GrigliataCombatAim({ aim, tokens, viewport, grid, stageS
       style={{left:viewport.x + marker.x*viewport.scale,top:viewport.y + marker.y*viewport.scale,width:markerSize || undefined,height:markerSize || undefined}}>
       {!box && <FiMapPin size={22}/>}
     </div>}
-    {picking && <div className="absolute bottom-3 left-1/2 z-[2] w-max max-w-[96%] -translate-x-1/2 cursor-auto rounded-xl border border-teal-400/60 bg-slate-950/95 px-2.5 py-2 text-sm text-slate-100 shadow-lg">
+    {picking && <div className="gc-map-step">
       <div className="flex items-center justify-center gap-2"><FiCrosshair className="text-teal-200" />
         <span>{caption}{rangeLabel && ' · ' + rangeLabel}</span>
         <button type="button" onClick={multi ? confirm : finish} aria-label={multi ? 'Conferma bersagli' : 'Chiudi mirino'} className="rounded p-1 hover:bg-slate-700">{multi ? <FiCheck/> : <FiX/>}</button>

@@ -259,7 +259,7 @@ function EffectValue({ effect, recipient }) {
   return summary || effect.description || 'Da applicare al tavolo';
 }
 
-function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState,
+function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState, isRollRecorded,
   onCancel, cancel, onCancellationDetails, isManager }) {
   const { actor, action, targets = [], affected = [], cost, effects = [] } = event;
   const cancelled = event.status === 'cancelled';
@@ -302,7 +302,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
             proposal={combatDamageProposal(event, target)}
             damage={cancelled ? undefined : damageState?.(event, target)}
             onApplyDamage={damageCommand(target)}
-            onRollDamage={rollDamage && (() => rollDamage(event, target))}
+            onRollDamage={rollDamage && !isRollRecorded?.(event, target) && (() => rollDamage(event, target))}
           />
         ))}
         <dl>
@@ -323,7 +323,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
             );
           })}
         </dl>
-        {event.pendingDamage && rollDamage && <button className="gc-secondary" type="button" disabled={busy}
+        {event.pendingDamage && rollDamage && !isRollRecorded?.(event, null) && <button className="gc-secondary" type="button" disabled={busy}
           onClick={() => rollDamage(event, null)}>Danno {event.pendingDamage.expr} · vai al tiro sulla mappa</button>}
         {instruction && <p className="gc-source">{instruction}</p>}
         {onCancel && <CancelCombat {...{ event, onCancel }} state={cancel} />}
@@ -335,7 +335,7 @@ function CombatHistoryEntry({ event, busy, onCritical, onApplyDamage, onRollDama
 // `isManager` is the signed-in DM: free damage amounts and the defense audit. Anyone else is held to each proposal.
 export function GrigliataCombatHistory({
   events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState,
-  onCancel, canCancel = combatCanCancel, cancelState, onCancellationDetails, isManager = false,
+  onCancel, canCancel = combatCanCancel, cancelState, onCancellationDetails, isManager = false, isRollRecorded,
 }) {
   const isOwner = event => currentUserId
     ? (event.actorUid || event.actor?.ownerUid) === currentUserId
@@ -351,7 +351,7 @@ export function GrigliataCombatHistory({
             return (
               <CombatHistoryEntry
                 key={event.id || event.combatId}
-                {...{ event, onApplyDamage, canApplyDamage, damageState, isManager, cancel, onCancellationDetails }}
+                {...{ event, onApplyDamage, canApplyDamage, damageState, isManager, cancel, onCancellationDetails, isRollRecorded }}
                 busy={busy || cancel?.busy}
                 onCritical={own ? onCritical : undefined}
                 onRollDamage={isManager && !own ? onRollDamage : undefined}
@@ -371,7 +371,7 @@ const confirmationTime = event => combatTime(event.updatedAt === undefined ? eve
 // Keep every open defense or roll in view, plus the newest damage confirmation. The journal carries the rest.
 // The selected pawn also keeps its latest terminal result, including an older launch resolved late.
 export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, onRollDamage, onCancel,
-  canCancel = combatCanCancel, cancelState, isManager }) {
+  canCancel = combatCanCancel, cancelState, isManager, isRollRecorded }) {
   const selected = actor?.placementId;
   const latest = selected && events.filter(event => event.actor?.placementId === selected && ['done', 'cancelled'].includes(event.status))
     .reduce((last, event) => (!last || resolvedTime(event) > resolvedTime(last) ? event : last), null);
@@ -395,7 +395,7 @@ export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, o
           </div>
         </div>
         {needsCancellationReview(event, isManager) && <p className="gc-hint gc-cancel-review">Effetti da verificare al tavolo.</p>}
-        {active && event.pendingDamage && onRollDamage && (
+        {active && event.pendingDamage && onRollDamage && !isRollRecorded?.(event, null) && (
           <button type="button" className="gc-secondary" disabled={working} onClick={() => onRollDamage(event, null)}>
             Danno {event.pendingDamage.expr} · vai al tiro sulla mappa
           </button>
@@ -408,7 +408,7 @@ export function GrigliataCombatStatus({ actor, pending, events, busy, onRetry, o
                   <strong>{combatTargetName(target, event.targets)}</strong>
                   {target.attack && <small>{target.attack.label} · {formatCombatRoll(target.attack)}</small>}
                 </div>
-                {target.pendingDamage && onRollDamage ? (
+                {isRollRecorded?.(event, target) ? <small>Tiro registrato</small> : target.pendingDamage && onRollDamage ? (
                   <button type="button" className="gc-secondary" disabled={working} onClick={() => onRollDamage(event, target)}>
                     Danno contro {combatTargetName(target, event.targets)} · vai al tiro sulla mappa
                   </button>

@@ -27,6 +27,7 @@ async function login(browser, player, mobile = false) {
   const context = await browser.newContext({
     viewport: mobile ? {width: 390, height: 844} : {width: 1500, height: 940},
     reducedMotion: mobile ? 'reduce' : 'no-preference',
+    hasTouch: mobile,
   });
   await context.addInitScript(() => { window.__FND_PERF_FORCE_FIRESTORE_LONG_POLLING__ = true; });
   await context.route(mapUrl, route => route.fulfill({path: mapVideo, contentType: 'video/mp4'}));
@@ -171,10 +172,30 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   await map.goto(origin + '/grigliata');
   const tab = map.getByRole('tab', {name: 'Combattimento'});
   const tray = map.locator('section.gc-dice-tray');
+  const viewport = map.locator('[data-combat-map-viewport]');
+  async function expectMapStep(step) {
+    await expect(step).toBeVisible();
+    let height;
+    // A breakpoint can move the board between two browser calls. Measure both boxes in the same layout.
+    await expect(async () => {
+      const {board, panel} = await step.evaluate(element => ({
+        board: element.ownerDocument.querySelector('[data-combat-map-viewport]').getBoundingClientRect().toJSON(),
+        panel: element.getBoundingClientRect().toJSON(),
+      }));
+      const positions = JSON.stringify({board, panel});
+      assert.ok(Math.abs((panel.x + panel.width / 2) - (board.x + board.width / 2)) <= 1, positions);
+      assert.ok(Math.abs(board.bottom - panel.bottom - 12) <= 1, positions);
+      assert.ok(panel.width <= board.width && panel.height < board.height);
+      height = board.height;
+    }).toPass({timeout: 5000});
+    return height;
+  }
   const projection = map.getByTestId('grigliata-board-dice-projection').locator('canvas');
   const aimAtReceiver = async () => {
     await map.getByRole('button', {name: /Scegli bersaglio sulla mappa/}).click();
+    const pickingHeight = await expectMapStep(viewport.locator('.gc-map-step'));
     await map.getByRole('button', {name: 'Bersaglio QA Combat Receiver', exact: true}).click();
+    assert.equal(await expectMapStep(tray), pickingHeight);
   };
   const journal = db.collection('grigliata_combat_actions').where('backgroundId', '==', board);
   await tab.click();
@@ -182,14 +203,19 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   await expect(sword).toBeVisible({timeout: 60_000}); // First callable starts the local Functions worker.
   await sword.click();
   await aimAtReceiver();
-  const drag = tray.locator('.gc-dice-drag');
-  await expect(drag.locator('canvas')).toBeVisible();
-  assert.equal((await journal.get()).size, 0);
-  const handle = await drag.boundingBox();
-  await map.mouse.move(handle.x + 8, handle.y + handle.height / 2);
+  const roll = tray.getByRole('button', {name: 'Tira i dadi', exact: true});
+  await expect(roll).toHaveCount(1);
+  await expect(roll).toBeFocused();
+  // Drag off the die as a player could with the old gesture. Releasing outside cancels the click.
+  const dieButton = await roll.boundingBox();
+  const dieY = dieButton.y + dieButton.height / 2;
+  await map.mouse.move(dieButton.x + dieButton.width / 2, dieY);
   await map.mouse.down();
-  await map.mouse.move(handle.x + handle.width - 8, handle.y + handle.height / 2, {steps: 6});
+  await map.mouse.move(dieButton.x + dieButton.width + 32, dieY, {steps: 6});
   await map.mouse.up();
+  await expect(roll).toBeEnabled();
+  assert.equal((await journal.get()).size, 0);
+  await roll.click();
   await expect(projection).toBeVisible({timeout: 25_000});
   await expect(tray.locator('.gc-dice-faces li')).toHaveCount(1, {timeout: 25_000});
   const launched = await journal.get();
@@ -200,7 +226,10 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   const dialog = home.getByRole('dialog');
   // Use the defender's editable modifier to guarantee a hit with any server RNG.
   await dialog.getByLabel('Difesa', {exact: true}).fill('-99');
-  await dialog.getByRole('button', {name: 'Tira Difesa'}).click();
+  const defenseRoll = dialog.getByRole('button', {name: 'Tira Difesa', exact: true});
+  await expect(defenseRoll).toHaveCount(1);
+  await expect(defenseRoll.locator('svg, img').first()).toBeVisible();
+  await defenseRoll.tap();
   await expect(home.getByText(/In attesa che l.attaccante tiri il danno/)).toBeVisible();
   assert.equal((await hit.get()).data().targets[0].pendingDamage.expr, '3d8');
   const resources = db.doc('users/' + defender.uid + '/state/resources');
@@ -208,7 +237,14 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   await Promise.all([map.reload(), home.reload()]);
   await tab.click();
   await map.getByRole('button', {name: /Tiro di danno · QA Combat Receiver/}).click();
-  await tray.getByRole('button', {name: 'Tira i dadi'}).press('Enter');
+  await expect(roll).toBeFocused();
+  await sword.click();
+  const aimLauncher = map.getByRole('button', {name: /Scegli bersaglio sulla mappa/});
+  await aimLauncher.click();
+  await expect(viewport.getByRole('button', {name: 'Bersaglio QA Combat Receiver', exact: true})).toBeVisible();
+  await map.keyboard.press('Escape');
+  await expect(aimLauncher).toBeFocused();
+  await roll.press('Enter');
   await expect(tray.locator('.gc-dice-faces li')).toHaveCount(3);
   await expect(projection).toBeVisible();
   const target = (await hit.get()).data().targets[0];
@@ -224,11 +260,17 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
   assert.equal(remaining.barrieraCurrent, Math.max(0, 10 - amount));
   assert.equal(remaining.hpCurrent, 9999 - Math.max(0, amount - 10));
 
+  // This defender answers the sword from Home, then the spell from their mobile map.
+  await home.goto(origin + '/grigliata');
+  const defenderViewport = home.locator('[data-combat-map-viewport]');
+  await expect(defenderViewport).toBeVisible();
+  await defenderViewport.evaluate(element => element.scrollIntoView({block: 'center'}));
   await map.getByRole('button', {name: 'Spell', exact: true}).click();
   await map.getByRole('button', {name: /Afferra.*Catena del Predatore/}).click();
   await aimAtReceiver();
   await tray.getByRole('button', {name: 'Tira i dadi'}).click();
   await expect(dialog).toBeVisible();
+  await expectMapStep(dialog);
   await dialog.getByRole('spinbutton').first().fill('999');
   await dialog.locator('button[type=submit]').click();
   await expect(dialog).toHaveCount(0, {timeout: 15_000});
@@ -275,14 +317,20 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
     await expect(tray.getByText('3d4', {exact: true})).toBeVisible();
 
     const endpoint = '**/mutateGrigliataCombat';
+    let damageRequests = 0;
     let allowDamage;
     const gate = new Promise(resolve => { allowDamage = resolve; });
     await map.route(endpoint, async route => {
-      if (route.request().method() === 'POST' && route.request().postDataJSON()?.data?.command === 'rollDamage') await gate;
+      if (route.request().method() === 'POST' && route.request().postDataJSON()?.data?.command === 'rollDamage') {
+        damageRequests++;
+        await gate;
+      }
       await route.continue();
     });
     try {
-      await tray.getByRole('button', {name: 'Tira i dadi'}).click();
+      await roll.press('Space');
+      await expect(roll).toBeDisabled();
+      await roll.press('Enter');
       await expect(projection).toBeVisible();
       await expectMovingDice(projection, 3);
       await expect.poll(async () => {
@@ -293,15 +341,15 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
     } finally {
       allowDamage();
     }
-    await expect(tray.locator('.gc-dice-faces li')).toHaveCount(3);
+    await expect(tray.locator('.gc-dice-faces li')).toHaveCount(3, {timeout: 25_000});
     await map.unroute(endpoint);
+    assert.equal(damageRequests, 1, 'A second activation while the damage throw is pending must not send another request');
     const event = (await journal.get()).docs.map(doc => doc.data()).find(entry => entry.action.name === 'Triplice Globo Fluttuante');
     const recorded = event.targets[0];
     assert.deepEqual(await tray.locator('.gc-dice-faces strong').allTextContents(), recorded.damageRoll.rolls.map(die => String(die.value)));
     await expect(tray.getByText(new RegExp(recorded.damage + ' danni proposti', 'i'))).toBeVisible();
     await expect(tray.getByText(/Colpo a segno/)).toBeVisible();
-    const strip = await tray.boundingBox();
-    assert.ok(strip.height <= 64, 'A single-target desktop result should fit in a compact strip, got ' + strip.height + 'px');
+    await expectMapStep(tray);
     let previous;
     await expect.poll(async () => {
       const {dice, offsetX, offsetY} = await readDiceFrame(projection);
@@ -315,11 +363,13 @@ test('two players throw on the fatin-test map, resume damage, and use weapon and
       return Math.max(...dice.map(die => die.y)) - Math.min(...dice.map(die => die.y)) <= 10
         && Math.abs(middle.x - (left.x + right.x) / 2) <= 8;
     }, {message: 'The three settled d4 must be stable in the center of the board viewport'}).toBe(true);
-    t.diagnostic('Desktop result ' + strip.width + ' × ' + strip.height + ' CSS px');
     await map.setViewportSize({width: 1366, height: 600});
+    await expectMapStep(tray);
     await expect.poll(async () => {
       const {dice, offsetX, offsetY} = await readDiceFrame(projection);
       return dice.length === 3 && Math.abs(offsetX) <= 12 && Math.abs(offsetY) <= 12;
     }, {message: 'The settled row must remain centered in the visible map on a short desktop'}).toBe(true);
+    await map.setViewportSize({width: 390, height: 844});
+    await expectMapStep(tray);
   });
 });

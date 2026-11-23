@@ -442,7 +442,7 @@ function Arsenal({
 export function GrigliataCombatPanel({
   actor, actions = [], equipped, targets = [], events = [], pending = [], turn, selection = {}, currentUserId,
   onSelectAction = () => {}, onBeginTargeting, onRemoveTarget, onLaunch, onPrepareLaunch, onRetry, onRollDamage, onCritical, onApplyDamage, canApplyDamage, damageState,
-  onCancel, canCancel, cancelState, onCancellationDetails,
+  onCancel, canCancel, cancelState, onCancellationDetails, isRollRecorded,
   busy = false, arsenalSync = 'ready', error, loading = false, isManager = false,
 }) {
   const headingId = useId();
@@ -464,12 +464,12 @@ export function GrigliataCombatPanel({
               busy={busy || loading}
             />
           )}
-          <GrigliataCombatStatus {...{ actor, pending, events, busy, onRetry, onRollDamage, onCancel, canCancel, cancelState, isManager }} />
+          <GrigliataCombatStatus {...{ actor, pending, events, busy, onRetry, onRollDamage, isRollRecorded, onCancel, canCancel, cancelState, isManager }} />
         </div>
       </section>
       <GrigliataCombatHistory
         {...{ events, actor, currentUserId, busy, onCritical, onApplyDamage, onRollDamage, canApplyDamage, damageState,
-          onCancel, canCancel, cancelState, onCancellationDetails, isManager }}
+          onCancel, canCancel, cancelState, onCancellationDetails, isManager, isRollRecorded }}
       />
     </div>
   );

@@ -842,7 +842,7 @@ describe('GrigliataBoard', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame;
   });
 
-  test('combat dice land inside the board viewport while the numerical result stays in the edge tray', async () => {
+  test('the dice projection and its numerical result both stay inside the board viewport', async () => {
     const props = buildProps({
       combatTray: {
         id: {}, phase: 'result', kind: 'attack', title: 'Spada', notation: 'd12',
@@ -854,8 +854,53 @@ describe('GrigliataBoard', () => {
     expect(projection).toHaveAttribute('aria-hidden', 'true');
     expect(projection.parentElement.querySelector('[data-konva-type="Stage"]')).toBeInTheDocument();
     const result = screen.getByRole('region', { name: 'Spada' });
+    const viewport = screen.getByTestId('grigliata-quick-controls').parentElement;
+    expect(viewport).toContainElement(result);
+    expect(result).toHaveClass('gc-map-step');
     expect(result).toHaveTextContent('d12 7');
     expect(result).not.toContainElement(projection);
+  });
+
+  test('targeting, the ready throw and pending damage take turns in one map overlay', () => {
+    const props = buildProps({
+      combatAim: {
+        pawn: { tokenId: 'caster', placementId: 'map-1__caster', col: 1, row: 1 },
+        action: { id: 'cone', kind: 'spell', mode: 'multiple', rangeFt: 30 },
+        selection: { picking: true, targetIds: [] },
+        candidates: [],
+        finish: jest.fn(),
+      },
+      combatTray: {
+        id: {}, phase: 'ready', kind: 'attack', title: 'Spada', notation: 'd12', throwDice: jest.fn(),
+      },
+      combatNextDamage: { label: 'Tiro di danno · Talpa', prepare: jest.fn() },
+    });
+    const { rerender } = render(<GrigliataBoard {...props} />);
+    const viewport = screen.getByTestId('grigliata-quick-controls').parentElement;
+    const aim = screen.getByRole('button', { name: 'Conferma bersagli' }).closest('.gc-map-step');
+    expect(viewport).toContainElement(aim);
+    expect(screen.queryByRole('button', { name: 'Tira i dadi' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: props.combatNextDamage.label })).not.toBeInTheDocument();
+
+    rerender(<GrigliataBoard {...props} combatAim={null} />);
+    const ready = within(viewport).getByRole('region', { name: 'Spada' });
+    expect(ready).toHaveClass('gc-map-step');
+    fireEvent.click(within(ready).getByRole('button', { name: 'Tira i dadi' }));
+    expect(props.combatTray.throwDice).toHaveBeenCalledTimes(1);
+
+    // Cancelling a new aim restores its launcher; the old throw must not take focus again.
+    rerender(<GrigliataBoard {...props} />);
+    const boardControl = screen.getByTestId('grigliata-quick-controls').querySelector('button');
+    boardControl.focus();
+    rerender(<GrigliataBoard {...props} combatAim={null} />);
+    expect(boardControl).toHaveFocus();
+    expect(within(viewport).getByRole('button', { name: 'Tira i dadi' })).toBeVisible();
+
+    rerender(<GrigliataBoard {...props} combatAim={null} combatTray={null} />);
+    const next = within(viewport).getByRole('button', { name: props.combatNextDamage.label });
+    expect(next.closest('.gc-map-step')).toBeInTheDocument();
+    fireEvent.click(next);
+    expect(props.combatNextDamage.prepare).toHaveBeenCalledTimes(1);
   });
 
   test('renders uniform subtle grid lines without major-line emphasis', async () => {

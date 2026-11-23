@@ -58,7 +58,7 @@ const renderSwordBattle = ({ weapon = readySword, mana = 5 } = {}) => {
     return <>
       {combat.overlay && <GrigliataCombatAim aim={combat.overlay} tokens={tokens} grid={{ cellSizePx: 35 }}
         stageSize={{ width: 400, height: 500 }} viewport={{ x: 0, y: 0, scale: 1 }} />}
-      {combat.tray && <GrigliataCombatDiceTray tray={combat.tray} nextDamage={combat.nextDamage}
+      {combat.tray && <GrigliataCombatDiceTray tray={combat.tray} nextDamage={combat.nextDamage} nextRetry={combat.nextRetry}
         resultStatus={combat.resultStatus} resultOutcomes={combat.resultOutcomes} />}
       <GrigliataCombatPanel {...combat.panel} />
     </>;
@@ -151,19 +151,95 @@ test('a tied melee attack keeps its recorded advantage for the next throw', asyn
   expect(mutate).not.toHaveBeenCalled();
 });
 
-test('the result strip shows an extra attack die disclosed by the server', async () => {
+test('a delayed snapshot cannot hide another tied target or offer a roll already recorded', async () => {
+  const volley = { ...readySword, id: 'volley', kind: 'spell', mode: 'multiple', minTargets: 2, maxTargets: 3, rangeFt: 15 };
+  const { result } = await mount([volley], [pawn('nyx', 0), pawn('foe', 1), pawn('other', 2), pawn('talpa', 3)]);
+  const target = { placementId: id('foe'), name: 'Guardia', col: 1, row: 0, status: 'retry', round: 1, attack: { sides: 12 } };
+  const second = { ...target, placementId: id('other'), col: 2 };
+  const hit = { ...target, placementId: id('talpa'), col: 3, name: 'Talpa', status: 'done', outcome: 'hit',
+    pendingDamage: { round: 1, expr: 'd6' } };
+  const event = { ...entry('tie', 2, 'retry'), targets: [target, second, hit] };
+  const other = { ...entry('earlier', 1, 'retry'), targets: [target] };
+  mutate.mockResolvedValueOnce({ data: { combatId: 'tie', rolls: [4, 7, 8].map(value => ({ sides: 12, value })) } })
+    .mockResolvedValue({ data: { combatId: 'tie', rolls: [{ sides: 12, value: 5 }] } });
+  emit(PENDING, [other]);
+  expect(result.current.nextRetry).toBeNull();
+  act(() => result.current.panel.onBeginTargeting(volley));
+  act(() => result.current.overlay.pickToken(id('foe')));
+  act(() => result.current.overlay.pickToken(id('other')));
+  act(() => result.current.overlay.pickToken(id('talpa')));
+  act(() => result.current.overlay.confirm());
+  act(() => result.current.panel.onPrepareLaunch(volley, { channel: 'TPC' }));
+  await act(() => result.current.tray.throwDice());
+  expect(mutate).toHaveBeenLastCalledWith(expect.objectContaining({ targetPlacementIds: [id('foe'), id('other'), id('talpa')] }));
+  expect(result.current.tray.rolls).toHaveLength(3);
+  emit(PENDING, [other, event]);
+  expect(result.current.nextRetry.label).toBe('Rilancia contro Guardia · 2, 1');
+  expect(result.current.nextDamage.label).toBe('Tiro di danno · Talpa');
+  act(() => result.current.nextRetry.prepare());
+  expect(result.current.tray.title).toBe('Rilancio contro Guardia · 2, 1');
+  expect(result.current.nextRetry).toBeNull();
+  await act(() => result.current.tray.throwDice());
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'retry', combatId: 'tie', targetPlacementId: id('foe'), round: 1 });
+  expect(result.current.panel.isRollRecorded(event, target)).toBe(true);
+  expect(result.current.panel.isRollRecorded(event, second)).toBe(false);
+  expect(result.current.nextRetry.label).toBe('Rilancia contro Guardia · 3, 1');
+  act(() => result.current.nextRetry.prepare());
+  await act(() => result.current.tray.throwDice());
+  expect(mutate).toHaveBeenLastCalledWith({ command: 'retry', combatId: 'tie', targetPlacementId: id('other'), round: 1 });
+  expect(result.current.nextRetry).toBeNull();
+  expect(result.current.resultStatus).toBe('waiting');
+  expect(result.current.nextDamage.label).toBe('Tiro di danno · Talpa');
+  emit(PENDING, [other, { ...event, targets: [{ ...target, round: 2 }, { ...second, status: 'waiting', round: 2 }, hit] }]);
+  expect(result.current.nextRetry.label).toBe('Rilancia contro Guardia · 2, 1');
+  expect(result.current.resultStatus).toBe('retry');
+});
+
+test('closing a damage receipt does not offer the same throw while its snapshot is delayed', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props()));
+  const event = { ...entry('spell', 1, 'awaitingDamage'), pendingDamage: { round: 1, expr: 'd6' } };
+  emit(PENDING, [event]);
+  mutate.mockResolvedValue({ data: { combatId: 'spell', damage: 3, rolls: [{ sides: 6, value: 3 }] } });
+  act(() => result.current.nextDamage.prepare());
+  await act(() => result.current.tray.throwDice());
+  expect(result.current.tray).toMatchObject({ phase: 'result', damage: 3 });
+  expect(result.current.panel.isRollRecorded(event, null)).toBe(true);
+  expect(result.current.resultStatus).toBeUndefined();
+  act(() => result.current.tray.close());
+  expect(result.current.tray).toBeNull();
+  expect(result.current.nextDamage).toBeUndefined();
+  act(() => result.current.panel.onRollDamage(event, null));
+  expect(result.current.tray).toBeNull();
+  expect(mutate).toHaveBeenCalledTimes(1);
+});
+
+test('a manager viewing another attacker’s damage result cannot continue their tie', async () => {
+  const { result } = renderHook(() => useGrigliataCombat(props({ isManager: true })));
+  const event = { ...entry('tie', 2, 'retry'), actorUid: 'another-attacker', pendingDamage: { expr: 'd4', round: 1 },
+    targets: [{ placementId: id('foe'), name: 'foe', status: 'retry', round: 1, attack: { sides: 12 } }] };
+  emit(SCENE, [event]);
+  mutate.mockResolvedValue({ data: { combatId: 'tie', damage: 2, rolls: [{ sides: 4, value: 2 }] } });
+  act(() => result.current.panel.onRollDamage(event, null));
+  await act(() => result.current.tray.throwDice());
+  expect(result.current.resultStatus).toBe('retry');
+  expect(result.current.nextRetry).toBeNull();
+});
+
+test('the map step shows an extra attack die disclosed by the server', async () => {
   mutate.mockResolvedValueOnce({ data: { combatId: 'advantage', rolls: [{ sides: 12, value: 8 }, { sides: 12, value: 3 }] } });
   renderSwordBattle();
   await aimSword();
-  expect(screen.getByText('d12', { selector: '.gc-dice-head code' })).toBeVisible();
+  expect(screen.getByText('d12', { selector: '.gc-dice-notation code' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
-  expect(await screen.findByText('2d12', { selector: '.gc-dice-head code' })).toBeVisible();
+  expect(await screen.findByText('2d12', { selector: '.gc-dice-notation code' })).toBeVisible();
 });
 
 test('clicking Spada’s map target opens the ready tray before mutation and a hit leads to its own map throw', async () => {
   mutate.mockResolvedValueOnce({ data: { combatId: 'hit', rolls: [{ sides: 12, value: 9 }] } })
     .mockResolvedValueOnce({ data: { combatId: 'hit', damage: 5, rolls: [{ sides: 4, value: 3 }, { sides: 4, value: 2 }] } });
   renderSwordBattle();
+  const origin = await screen.findByRole('button', { name: /Scegli bersaglio sulla mappa/ });
+  origin.focus();
   await aimSword();
   const throwButton = screen.getByRole('button', { name: 'Tira i dadi' });
   expect(throwButton).toHaveFocus();
@@ -178,6 +254,8 @@ test('clicking Spada’s map target opens the ready tray before mutation and a h
   fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
   expect(await screen.findByText('5 danni proposti')).toBeVisible();
   expect(mutate).toHaveBeenLastCalledWith({ command: 'rollDamage', combatId: 'hit', targetPlacementId: id('foe'), round: 1 });
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Chiudi il vassoio' }), { key: 'Escape' });
+  expect(origin).toHaveFocus();
 });
 
 test.each(['Rimuovi foe', 'Spendi 2 PF'])('changing %s retires an uncertain map retry with the old declaration', async control => {
