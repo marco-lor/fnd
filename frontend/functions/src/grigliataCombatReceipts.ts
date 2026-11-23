@@ -7,6 +7,7 @@ import {asRecord, asTrimmedString, isValidFirestoreDocumentId} from "./userDataV
 export const COMBAT_RECEIPTS = "grigliata_combat_receipts";
 
 const COST_FIELDS = {hp: "hpCurrent", mana: "manaCurrent", essenza: "essenzaCurrent"} as const;
+const TOTAL_FIELDS = {hpCurrent: "hpTotal", manaCurrent: "manaTotal", essenzaCurrent: "essenzaTotal"} as const;
 const RESOURCE_FIELDS = ["hpCurrent", "manaCurrent", "essenzaCurrent", "barrieraCurrent", "shieldCurrent"] as const;
 type ResourceField = typeof RESOURCE_FIELDS[number];
 type Amounts = Partial<Record<ResourceField, number>>;
@@ -22,7 +23,7 @@ type VersionedDebit = Debit & {
 };
 type Correction = {
   reason: "legacyCostUnknown" | "legacyDamageUnknown" | "entityUnavailable" | "balanceUnavailable" |
-    "barrierUnavailable" | "barrierAmbiguous" | "barrierCapacity";
+    "barrierUnavailable" | "barrierAmbiguous" | "barrierCapacity" | "resourceCapacity";
   subject: Pick<CombatPawn, "ownerUid" | "tokenId"> | ResourceIdentity;
   amounts?: Amounts;
   placementId?: string;
@@ -63,6 +64,11 @@ const readFiniteNumber = (value: unknown): number | null => {
   if (typeof value !== "number" && !(typeof value === "string" && value.trim())) return null;
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
+};
+
+const readMaximum = (value: unknown): number | null => {
+  const maximum = readFiniteNumber(value);
+  return maximum !== null && maximum >= 0 ? maximum : null;
 };
 
 export const combatBarrierMaximum = (character: boolean, stats: unknown, fallback?: unknown): number | null => {
@@ -219,7 +225,8 @@ export const planCombatRefund = async (
   for (const {destination, debits: entries} of groups.values()) {
     const {snapshot, character, fallback} = destination;
     const current = asRecord(snapshot.get("stats"));
-    const maximum = combatBarrierMaximum(character, current, fallback);
+    const barrierMaximum = combatBarrierMaximum(character, current, fallback);
+    const legacy = asRecord(fallback);
     const {identity} = entries[0];
     const stats: Amounts = {};
     const refunded: Amounts = {};
@@ -246,6 +253,8 @@ export const planCombatRefund = async (
       if (amount <= 0) continue;
       const balance = readFiniteNumber(current[field]);
       const barrier = field === "barrieraCurrent" || field === "shieldCurrent";
+      const maximum = barrier ? barrierMaximum :
+        readMaximum(current[TOTAL_FIELDS[field]]) ?? readMaximum(legacy[TOTAL_FIELDS[field]]);
       if (barrier && (balance === null || (maximum !== null && maximum <= 0) ||
         (maximum === null && entries.some((entry) => entry.amounts[field] && entry.barrierMaximum !== null)))) {
         corrections.push({subject: identity, amounts: {[field]: amount}, reason: "barrierUnavailable"});
@@ -263,13 +272,14 @@ export const planCombatRefund = async (
         corrections.push({subject: identity, amounts: {[field]: amount}, reason: "balanceUnavailable"});
         continue;
       }
-      const restored = barrier && maximum !== null ? Math.max(balance, Math.min(maximum, balance + amount)) : balance + amount;
+      const restored = maximum === null ? balance + amount : Math.max(balance, Math.min(maximum, balance + amount));
       if (restored > balance) {
         stats[field] = restored;
         refunded[field] = restored - balance;
       }
-      if (barrier && maximum !== null && balance + amount > maximum) {
-        corrections.push({subject: identity, amounts: {[field]: amount - (refunded[field] ?? 0)}, reason: "barrierCapacity"});
+      if (maximum !== null && balance + amount > maximum) {
+        corrections.push({subject: identity, amounts: {[field]: amount - (refunded[field] ?? 0)},
+          reason: barrier ? "barrierCapacity" : "resourceCapacity"});
       }
     }
     if (Object.keys(stats).length) {
