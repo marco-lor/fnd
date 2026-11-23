@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, queryByAttribute, render, screen, within } from '@testing-library/react';
 import GrigliataCombatDiceTray, {
   CombatMapDice, getCombatDiceMapPosition, getCombatDiceThrowSide, planCombatDice,
 } from './GrigliataCombatDice';
@@ -13,6 +13,12 @@ const dice = (count, sides, extra) => Array.from({ length: count }, () => ({ sid
 const faces = (sides, ...values) => values.map(value => ({ sides, value }));
 const BAND = { width: 640, height: 420 };
 const PHONE = { width: 336, height: 298 };
+
+test.each([['1d100', '%'], ['4d62 - 1d62', '62']])('the roll control identifies %s on its face', (notation, face) => {
+  render(<GrigliataCombatDiceTray tray={{ ...tray, notation }} />);
+  const button = screen.getByRole('button', { name: 'Tira i dadi' });
+  expect(within(button).getByText(face, { selector: 'text' })).toBeVisible();
+});
 
 const fakeContext = () => {
   const gradient = { addColorStop: jest.fn() };
@@ -64,23 +70,95 @@ const centreOf = frame => {
   ];
 };
 
-test('short movement and vertical scrolling stay inert; horizontal release or the button can throw', () => {
+test.each([
+  ['nextDamage', 'Tiro di danno · Talpa', 'awaitingDamage'],
+  ['nextRetry', 'Rilancia contro Talpa', 'retry'],
+])('moves focus to %s when the player is still interacting with the throw', (prop, label, status) => {
+  const followUp = { label, prepare: jest.fn() };
+  const { rerender } = render(<GrigliataCombatDiceTray tray={tray} />);
+  expect(screen.getByRole('button', { name: 'Tira i dadi' })).toHaveFocus();
+  const result = { ...tray, phase: 'result', rolls: [{ sides: 12, value: 7 }] };
+  rerender(<GrigliataCombatDiceTray tray={result} resultStatus={status} {...{ [prop]: followUp }} />);
+  const next = screen.getByRole('button', { name: label });
+  expect(next).toHaveFocus();
+  fireEvent.click(next);
+  expect(followUp.prepare).toHaveBeenCalledTimes(1);
+});
+
+test('a damage step arriving after the result can be followed without leaving the tray', () => {
+  const { rerender } = render(<GrigliataCombatDiceTray tray={tray} />);
+  const result = { ...tray, phase: 'result', rolls: [{ sides: 12, value: 7 }] };
+  rerender(<GrigliataCombatDiceTray tray={result} resultStatus="waiting" />);
+  expect(screen.getByRole('button', { name: 'Chiudi il vassoio' })).toHaveFocus();
+  const nextDamage = { label: 'Tiro di danno · Talpa', prepare: jest.fn() };
+  rerender(<GrigliataCombatDiceTray tray={result} resultStatus="awaitingDamage" nextDamage={nextDamage} />);
+  expect(screen.getByRole('button', { name: nextDamage.label })).toHaveFocus();
+});
+
+test('the result offers both a tie and damage when different targets are ready', () => {
+  const nextRetry = { label: 'Rilancia contro Guardia', prepare: jest.fn() };
+  const nextDamage = { label: 'Tiro di danno · Talpa', prepare: jest.fn() };
+  render(<GrigliataCombatDiceTray tray={{ ...tray, phase: 'result' }} resultStatus="retry"
+    nextRetry={nextRetry} nextDamage={nextDamage} />);
+  fireEvent.click(screen.getByRole('button', { name: nextDamage.label }));
+  expect(nextDamage.prepare).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: nextRetry.label })).toBeEnabled();
+});
+
+test('an incoming result leaves focus on a board control the player moved to', () => {
+  const nextDamage = { label: 'Tiro di danno · Talpa', prepare: jest.fn() };
+  const view = phase => <>
+    <button type="button">Zoom</button>
+    <GrigliataCombatDiceTray tray={{ ...tray, phase }} nextDamage={nextDamage} />
+  </>;
+  const { rerender } = render(view('ready'));
+  const zoom = screen.getByRole('button', { name: 'Zoom' });
+  zoom.focus();
+  rerender(view('sending'));
+  rerender(view('result'));
+  expect(screen.getByRole('button', { name: nextDamage.label })).toBeInTheDocument();
+  expect(zoom).toHaveFocus();
+});
+
+test('Escape closes only from within the tray and keeps a throw in flight open', () => {
+  const close = jest.fn();
+  const view = phase => <>
+    <button type="button">Zoom</button>
+    <GrigliataCombatDiceTray tray={{ ...tray, phase, close }} />
+  </>;
+  const { rerender } = render(view('ready'));
+  const zoom = screen.getByRole('button', { name: 'Zoom' });
+  zoom.focus();
+  expect(fireEvent.keyDown(zoom, { key: 'Escape' })).toBe(true);
+  expect(close).not.toHaveBeenCalled();
+
+  const dismiss = screen.getByRole('button', { name: 'Chiudi il vassoio' });
+  dismiss.focus();
+  fireEvent.keyDown(dismiss, { key: 'Escape' });
+  expect(close).toHaveBeenCalledTimes(1);
+  rerender(view('sending'));
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Chiudi il vassoio' }), { key: 'Escape' });
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+test.each([['ready', 'Tira i dadi'], ['error', 'Riprova il tiro']])('the %s die button throws once on activation and ignores swipes', (phase, label) => {
   const throwDice = jest.fn();
   const oldPointerEvent = window.PointerEvent;
   window.PointerEvent = MouseEvent;
   try {
-    render(<GrigliataCombatDiceTray tray={{ ...tray, throwDice }} />);
-    const handle = screen.getByText('Trascina per tirare');
-    fireEvent.pointerDown(handle, { clientX: 20, clientY: 20 });
-    fireEvent.pointerUp(handle, { clientX: 24, clientY: 20 });
-    fireEvent.pointerDown(handle, { clientX: 20, clientY: 20 });
-    fireEvent.pointerUp(handle, { clientX: 22, clientY: 85 });
+    const { rerender } = render(<GrigliataCombatDiceTray tray={{ ...tray, phase, throwDice }} />);
+    const roll = screen.getByRole('button', { name: label });
+    expect(roll.tagName).toBe('BUTTON');
+    expect(roll).toHaveFocus();
+    expect(screen.queryByText(/Trascina per tirare/i)).not.toBeInTheDocument();
+    fireEvent.pointerDown(roll, { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(roll, { clientX: 120, clientY: 20 });
     expect(throwDice).not.toHaveBeenCalled();
-    fireEvent.pointerDown(handle, { clientX: 90, clientY: 20 });
-    fireEvent.pointerUp(handle, { clientX: 30, clientY: 20 });
-    expect(throwDice).toHaveBeenCalledWith({ direction: -1, power: expect.any(Number) });
+    fireEvent.click(roll);
+    expect(throwDice).toHaveBeenCalledTimes(1);
+    rerender(<GrigliataCombatDiceTray tray={{ ...tray, phase: 'sending', throwDice }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Tira i dadi' }));
-    expect(throwDice).toHaveBeenCalledTimes(2);
+    expect(throwDice).toHaveBeenCalledTimes(1);
   } finally {
     window.PointerEvent = oldPointerEvent;
   }
@@ -569,9 +647,16 @@ describe('the map dice', () => {
 
   test('reduced motion leaves the map empty while the tray lists every signed face as text', async () => {
     window.matchMedia = query => ({ matches: query.includes('reduced-motion'), addEventListener() {}, removeEventListener() {} });
+    const ready = mapTray({ phase: 'ready', throwDice: jest.fn() });
+    const { rerender } = render(<>{mapDice(ready)}<GrigliataCombatDiceTray tray={ready} /></>);
+    const roll = screen.getByRole('button', { name: 'Tira i dadi' });
+    expect(roll).toBeVisible();
+    expect(queryByAttribute('class', roll, 'gc-die-icon')).toBeVisible();
+    fireEvent.click(roll);
+    expect(ready.throwDice).toHaveBeenCalledTimes(1);
     const rolls = [42, 1, 15, 62, 28].map((value, i) => ({ sides: 62, value, ...(i === 4 && { sign: -1 }) }));
     const result = mapTray({ phase: 'result', releasedAt: 0, rolls, notation: '4d62 - 1d62' });
-    render(<>{mapDice(result)}<GrigliataCombatDiceTray tray={result} /></>);
+    rerender(<>{mapDice(result)}<GrigliataCombatDiceTray tray={result} /></>);
     await flush();
     expect(projection()).toBeNull();
     expect(contexts).toHaveLength(0);

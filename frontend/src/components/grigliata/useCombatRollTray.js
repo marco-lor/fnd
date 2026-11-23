@@ -3,6 +3,8 @@ import { useLayoutEffect, useRef, useState } from 'react';
 export default function useCombatRollTray(context, isDefinitiveError, isCancelled, isCancelling) {
   const [state, setState] = useState(null);
   const current = useRef(null);
+  const originButton = useRef(null);
+  const focusAfterClose = useRef(null);
   const show = next => {
     current.current = next;
     setState(next);
@@ -17,21 +19,35 @@ export default function useCombatRollTray(context, isDefinitiveError, isCancelle
     if (isCancelled(current.current?.combatId)) show(null);
   });
 
+  useLayoutEffect(() => {
+    if (state || !focusAfterClose.current) return;
+    const { stage, origin, scope } = focusAfterClose.current;
+    focusAfterClose.current = null;
+    if (scope !== context) return;
+    // A follow-up button is recreated when its tray closes. Restore focus after that commit.
+    const next = stage?.querySelector('.gc-next-roll:enabled');
+    (next || (origin?.isConnected ? origin : stage))?.focus();
+  }, [state, context]);
+
   const prepare = (plan, origin = document.activeElement) => {
     if (!context || (current.current?.phase === 'sending' && !isCancelled(current.current.combatId))
       || isCancelled(plan.combatId) || isCancelling(plan.combatId)) return undefined;
     const id = {};
+    if (!current.current || !origin?.closest?.('.gc-dice-tray')) originButton.current = origin;
     let declarationChanged = false;
     const close = () => {
       if (current.current?.id !== id || current.current.phase === 'sending') return;
+      focusAfterClose.current = {
+        scope: context, origin: originButton.current,
+        stage: document.activeElement?.closest('[data-combat-map-viewport]') || origin?.closest?.('[data-combat-map-viewport]'),
+      };
       show(null);
-      if (origin?.isConnected) origin.focus();
     };
-    const throwDice = async gesture => {
+    const throwDice = async () => {
       const tray = current.current;
       if (tray?.id !== id || !['ready', 'error'].includes(tray.phase)
         || isCancelled(plan.combatId) || isCancelling(plan.combatId)) return;
-      const sent = { ...tray, phase: 'sending', error: undefined, gesture, releasedAt: performance.now() };
+      const sent = { ...tray, phase: 'sending', error: undefined, releasedAt: performance.now() };
       show(sent);
       try {
         const { data } = await plan.send();
@@ -41,7 +57,7 @@ export default function useCombatRollTray(context, isDefinitiveError, isCancelle
             show(null);
             return;
           }
-          show({ ...sent, phase: 'result', rolls: data?.rolls, gesture, combatId,
+          show({ ...sent, phase: 'result', rolls: data?.rolls, combatId,
             damage: plan.kind === 'damage' ? data?.damage : undefined });
         }
       } catch (error) {

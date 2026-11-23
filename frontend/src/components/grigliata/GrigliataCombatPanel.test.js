@@ -116,10 +116,14 @@ test('a hit offers the attacker its damage throw while another target awaits def
   const hit = { ...target, status: 'done', outcome: 'hit', round: 2, pendingDamage: { round: 2, expr: '2d4' } };
   const event = { id: 'mixed', actor, action: sword, kind: 'weapon', status: 'waiting',
     targets: [hit, { ...secondTarget, name: 'Nebbia', status: 'waiting', round: 1 }] };
-  render(<GrigliataCombatPanel actor={actor} pending={[event]} onRollDamage={onRollDamage} />);
+  const { rerender } = render(<GrigliataCombatPanel actor={actor} pending={[event]} onRollDamage={onRollDamage} />);
   expect(screen.getByText('Tocca al proprietario')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Danno contro bro · vai al tiro sulla mappa' }));
   expect(onRollDamage).toHaveBeenCalledWith(event, hit);
+  rerender(<GrigliataCombatPanel actor={actor} pending={[event]} onRollDamage={onRollDamage}
+    isRollRecorded={(action, pawn) => action === event && pawn === hit} />);
+  expect(screen.queryByRole('button', { name: /Danno contro bro/ })).not.toBeInTheDocument();
+  expect(screen.getByText('Tiro registrato')).toBeVisible();
 });
 
 test('shows per-target rolls and offers a retry from the pending list, never from the journal alone', () => {

@@ -1,0 +1,70 @@
+.gc-defense-position { display: contents; }
+
+[data-map-defense] > :is(.gc-dialog, .gc-defense-feed) {
+  --gc-teal: #99f6e4;
+  --gc-surface: rgb(2 6 23 / 95%);
+  --gc-border: rgb(45 212 191 / 60%);
+  --gc-text: #f1f5f9;
+  inset: auto;
+  left: var(--gc-defense-center);
+  width: min(21.375rem, var(--gc-defense-width));
+  max-width: none;
+  margin: 0;
+}
+
+[data-map-defense] > .gc-dialog {
+  top: var(--gc-defense-baseline);
+  transform: translate(-50%, -100%);
+  max-height: var(--gc-defense-height);
+  border-color: var(--gc-border);
+  border-radius: 0.75rem;
+  background: var(--gc-surface);
+}
+
+[data-map-defense] > .gc-dialog::backdrop { background: rgb(2 6 23 / 38%); }
+[data-map-defense] .gc-heading {
+  justify-content: center;
+  padding: 0.55rem 0.75rem 0.15rem;
+  border: none;
+  color: var(--gc-text);
+}
+[data-map-defense] .gc-heading > svg,
+[data-map-defense] .gc-defense-roll code { color: var(--gc-teal); }
+[data-map-defense] .gc-defense-request {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+[data-map-defense] .gc-dialog .gc-primary {
+  background: var(--gc-teal);
+  border-color: var(--gc-teal);
+  color: #0f172a;
+}
+[data-map-defense] :is(button, input):focus-visible { outline: 2px solid var(--gc-teal); outline-offset: 2px; }
+
+[data-map-defense] > .gc-defense-feed {
+  top: var(--gc-receipt-baseline);
+  transform: translate(-50%, var(--gc-receipt-shift));
+  max-height: min(48dvh, var(--gc-receipt-height));
+  justify-items: center;
+}
+[data-map-defense] .gc-defense-feed > .gc-defense-receipts { align-items: center; width: 100%; }
+[data-map-defense] .gc-defense-feed .gc-defense-receipt {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  justify-content: space-between;
+  border-radius: 0.75rem;
+}
+[data-map-defense] .gc-defense-launchers { justify-content: center; }
+[data-map-defense] .gc-defense-launcher {
+  border-color: var(--gc-border);
+  background: var(--gc-surface);
+  color: var(--gc-teal);
+}
+@media (pointer: coarse) {
+  [data-map-defense] :is(.gc-dialog-buttons button, .gc-defense-receipt > button, .gc-defense-launcher) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

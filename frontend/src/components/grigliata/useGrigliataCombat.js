@@ -15,6 +15,7 @@ const EMPTY = [];
 const initialSelection = { actionId: '', actionKind: '', targetIds: [], point: null, picking: false, aimCompletion: null };
 const records = (snap) => snap.docs.map(entry => ({ ...entry.data(), id: entry.id }));
 const byCreation = (a, b) => combatTime(a.createdAt) - combatTime(b.createdAt) || a.id.localeCompare(b.id);
+const followUpKey = (command, event, target) => JSON.stringify([command, event.id, target?.placementId ?? null]);
 const errorText = (error) => error?.message || 'Connessione interrotta. Riprova.';
 const errorCode = (error) => error?.code?.split('/').pop();
 const definitive = (error) => ['invalid-argument', 'permission-denied', 'failed-precondition', 'not-found', 'out-of-range', 'unauthenticated'].includes(errorCode(error));
@@ -183,6 +184,9 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   // Only the scope changes the map's identity. Closing the panel or retrying a listener keeps its terminal IDs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cancelled = useMemo(() => new Map(), [uid, backgroundId, isManager]);
+  // Remember callable receipts while the listeners still show the previous round or its pending damage.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const receivedRounds = useMemo(() => new Map(), [uid, backgroundId]);
   const isCancelled = id => cancelled.has(id);
   const activityKey = scope => JSON.stringify([uid, backgroundId, scope]);
   const cancelKey = id => ['cancel', id];
@@ -332,6 +336,22 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
   const attackState = activity[activityKey('attack')];
   const attack = !attackState || isCancelled(attackState.combatId) ? {} : attackState;
   const mutate = payload => getCallable('mutateGrigliataCombat')(payload);
+  const received = (command, event, target, round) => receivedRounds.get(followUpKey(command, event, target)) >= round;
+  const sendFollowUp = async (command, event, target, round) => {
+    const response = await mutate({ command, combatId: event.id, targetPlacementId: target?.placementId ?? null, round });
+    const key = followUpKey(command, event, target);
+    receivedRounds.set(key, Math.max(receivedRounds.get(key) || 0, round));
+    return response;
+  };
+  const pendingDamageFor = (event, target) => {
+    const damage = (target || event).pendingDamage;
+    return damage?.expr && !received('rollDamage', event, target, damage.round) ? damage : null;
+  };
+  const isRollRecorded = (event, target) => {
+    const damage = (target || event).pendingDamage;
+    return damage ? received('rollDamage', event, target, damage.round)
+      : target?.status === 'retry' && received('retry', event, target, target.round);
+  };
   const launchPayload = (used, options) => {
     if (!actorId || arsenalSync !== 'ready' || used.id !== action?.id || used.kind !== action?.kind) return null;
     // The version pins the definition shown here: a weapon action's id is only its slot, and the slot may be re-equipped elsewhere.
@@ -369,26 +389,26 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     }, trigger);
   };
   const onRetry = (event, target) => {
-    if (suspended || combatBlocked(event) || event.actorUid !== uid || attack.busy || tray?.phase === 'sending') return;
-    const send = () => mutate({command:'retry',combatId:event.id,targetPlacementId:target.placementId,round:target.round});
+    if (suspended || combatBlocked(event) || event.actorUid !== uid || attack.busy || tray?.phase === 'sending'
+      || received('retry', event, target, target.round)) return;
+    const send = () => sendFollowUp('retry', event, target, target.round);
     if (!target.attack?.sides) return run('attack', send, { combatId: event.id });
-    return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + target.name,
+    return prepareRoll({ kind: 'attack', title: 'Rilancio contro ' + combatTargetName(target, event.targets || EMPTY),
       notation: attackDiceNotation(target.attack.sides, target.advantage ? 2 : 1),
-      combatId: event.id, targetPlacementId: target.placementId, anchor: { backgroundId, targetIds: [target.placementId] }, send });
+      combatId: event.id, targetPlacementId: target.placementId,
+      anchor: { backgroundId, targetIds: [target.placementId] }, send });
   };
   const onRollDamage = (event, target) => {
     if (suspended || combatBlocked(event) || (!isManager && event.actorUid !== uid) || attack.busy) return;
-    const pendingDamage = (target || event).pendingDamage;
-    if (!pendingDamage?.expr) return;
+    const pendingDamage = pendingDamageFor(event, target);
+    if (!pendingDamage) return;
     const actionName = event.action?.name || 'Azione';
     const title = target ? actionName + ' · Danno contro ' + combatTargetName(target, event.targets || EMPTY) : 'Danno · ' + actionName;
     prepareRoll({
       kind: 'damage', title,
       notation: pendingDamage.expr, combatId: event.id, targetPlacementId: target?.placementId ?? null,
       anchor: { backgroundId, targetIds: target ? [target.placementId] : EMPTY, point: event.point },
-      send: () => mutate({
-        command:'rollDamage', combatId:event.id, targetPlacementId:target?.placementId ?? null, round:pendingDamage.round,
-      }),
+      send: () => sendFollowUp('rollDamage', event, target, pendingDamage.round),
     });
   };
   const damageKey = (event, target) => JSON.stringify([uid, backgroundId, 'damage', event.id, target.placementId]);
@@ -459,15 +479,24 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
       unavailable:!targetIsPresent(target)};
   };
   const resultEvent = tray?.phase === 'result' && feed.events?.find(event => event.id === tray.combatId && (isManager || event.actorUid === uid));
+  const resultTargets = resultEvent?.targets || EMPTY;
+  const ties = resultEvent?.status === 'retry' ? resultTargets.filter(target => target.status === 'retry'
+    && !target.pendingDamage && !received('retry', resultEvent, target, target.round)) : EMPTY;
+  const retryTarget = resultEvent?.status === 'retry' && resultEvent.actorUid === uid && !suspended && !combatBlocked(resultEvent)
+    && ties[0];
+  const nextRetry = retryTarget ? {
+    label: 'Rilancia contro ' + combatTargetName(retryTarget, resultEvent.targets),
+    prepare: () => onRetry(resultEvent, retryTarget),
+    disabled: Boolean(attack.busy),
+  } : null;
   const pending = feed.pending || EMPTY;
   const mapDamageEvents = suspended || (tray && tray.phase !== 'result') ? EMPTY
-    : (resultEvent ? [resultEvent, ...pending.filter(event => event.id !== resultEvent.id)] : pending)
+    : (resultEvent ? [resultEvent, ...(nextRetry ? EMPTY : pending.filter(event => event.id !== resultEvent.id))] : pending)
       .filter(event => event.status !== 'awaitingConfirmation' && !combatBlocked(event));
   const readyDamage = mapDamageEvents.flatMap(event => [
-    ...((event.targets || EMPTY).filter(target => target.pendingDamage).map(target => ({ event, target }))),
-    ...(event.pendingDamage ? [{ event, target: null }] : EMPTY),
-  ]).find(({ event, target }) => !(tray?.kind === 'damage' && event.id === tray.combatId
-    && (target?.placementId ?? null) === tray.targetPlacementId));
+    ...((event.targets || EMPTY).filter(target => pendingDamageFor(event, target)).map(target => ({ event, target }))),
+    ...(pendingDamageFor(event, null) ? [{ event, target: null }] : EMPTY),
+  ])[0];
   const nextDamage = readyDamage && {
     label: [
       'Tiro di danno',
@@ -477,7 +506,12 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     prepare: () => onRollDamage(readyDamage.event, readyDamage.target),
     disabled: Boolean(attack.busy),
   };
-  const resultOutcomes = (resultEvent?.targets || EMPTY).flatMap(target => {
+  // A round the callable has recorded is already past its old prompt, even if the journal is behind.
+  let resultStatus = resultEvent?.status;
+  if (resultStatus === 'retry' && !ties.length) resultStatus = 'waiting';
+  if (resultStatus === 'awaitingDamage' && !pendingDamageFor(resultEvent, null)
+    && !resultTargets.some(target => pendingDamageFor(resultEvent, target))) resultStatus = undefined;
+  const resultOutcomes = resultTargets.flatMap(target => {
     const label = combatOutcomeLabel(target.outcome, resultEvent.kind, resultEvent.action?.hands);
     return label ? [{ name: combatTargetName(target, resultEvent.targets), label, id: target.placementId }] : EMPTY;
   });
@@ -487,13 +521,13 @@ export default function useGrigliataCombat({ uid, backgroundId, enabled, open, i
     if (feed.error) retryFeed();
   };
   return {
-    actors, pawn, setActor:setPreferredId, reload, tray, nextDamage, resultStatus: resultEvent?.status, resultOutcomes,
+    actors, pawn, setActor:setPreferredId, reload, tray, nextDamage, nextRetry, resultStatus, resultOutcomes,
     panel: {
       actor:current.data?.actor, actions, equipped:current.data?.equipped, selection, targets:candidates,
       events:feed.events || EMPTY, pending, currentUserId:uid,
       turn:{name:board.find(t => t.tokenId === activeTurnTokenId)?.name, isCurrent:pawn?.tokenId === activeTurnTokenId,
         canAct:!activeTurnTokenId || pawn?.tokenId === activeTurnTokenId},
-      onSelectAction:selectAction, onBeginTargeting:beginAim,
+      onSelectAction:selectAction, onBeginTargeting:beginAim, isRollRecorded,
       onRemoveTarget:id => update({targetIds:removeTarget(id)}), onLaunch, onPrepareLaunch, onRetry, onRollDamage,
       onCritical,
       // The DM for every target, a player for their own pawns; nobody from the narration overlay or the player preview.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, queryByAttribute, render, screen, waitFor, within } from '@testing-library/react';
 import { GrigliataDefensePopup, receiptOwnerDamage } from './GrigliataDefensePopup';
 
 const uid = 'bro-user';
@@ -62,6 +62,174 @@ function setup(requests, { answers = [HIT], onApplyDamage = jest.fn() } = {}) {
   };
   return { ...view, props, onRespond, onApplyDamage, show, answer };
 }
+
+test('Escape defers the native defense dialog without cancelling a map picker behind it', () => {
+  const mapShortcut = jest.fn();
+  window.addEventListener('keydown', mapShortcut);
+  try {
+    setup([defenseRequest('req-escape')]);
+    const dialog = screen.getByRole('dialog', { name: 'Difesa' });
+    expect(fireEvent.keyDown(within(dialog).getByRole('spinbutton'), { key: 'Escape' })).toBe(true);
+    expect(mapShortcut).not.toHaveBeenCalled();
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Difesa · 1' }));
+    expect(screen.getByRole('dialog', { name: 'Difesa' })).toBe(dialog);
+  } finally {
+    window.removeEventListener('keydown', mapShortcut);
+  }
+});
+
+test('a close the browser will not let the page refuse puts off the whole queue behind its launcher', () => {
+  const { show } = setup([defenseRequest('req-q1'), defenseRequest('req-q2', 'Kai'), defenseRequest('req-q3', 'Lia')]);
+  const dialog = screen.getByRole('dialog', { name: 'Difesa' });
+  const prompt = text => within(dialog).getByText(text);
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(prompt('Nyx → Kai')).toBeInTheDocument();
+
+  // Escape or Back again with no tap in between: the cancel cannot be refused and the dialog shuts natively.
+  fireEvent(dialog, new Event('cancel'));
+  dialog.removeAttribute('open');
+  fireEvent(dialog, new Event('close'));
+  expect(dialog).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByRole('button', { name: 'Difesa · 3' }));
+  expect(dialog).toHaveAttribute('open');
+  expect(prompt('Nyx → Bro')).toBeInTheDocument();
+  expect(within(dialog).getByRole('spinbutton')).toHaveFocus();
+
+  // The dialog's own late close event, after a new prompt reopened it, leaves that prompt in place.
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(dialog).not.toHaveAttribute('open');
+  show([defenseRequest('req-q1'), defenseRequest('req-q2', 'Kai'), defenseRequest('req-q3', 'Lia'), defenseRequest('req-q4', 'Mo')]);
+  fireEvent(dialog, new Event('close'));
+  expect(dialog).toHaveAttribute('open');
+  expect(prompt('Nyx → Mo')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Difesa · / })).not.toBeInTheDocument();
+});
+
+test('the defense die submits validated fields once and an unconfirmed answer retries without another roll control', async () => {
+  const request = defenseRequest('req-die', 'Bro', {
+    defense: { label: 'Disciplina', value: 3, showDie: true, die: 12, showReduction: true, reduction: 2 },
+  });
+  const reply = deferred();
+  const { onRespond } = setup([request], { answers: [] });
+  onRespond.mockReturnValueOnce(reply.promise).mockResolvedValueOnce({ outcome: 'evaded', effects: [] });
+  const dialog = within(screen.getByRole('dialog', { name: 'Difesa' }));
+  const roll = dialog.getByRole('button', { name: 'Tira Disciplina' });
+  const die = dialog.getByRole('spinbutton', { name: 'Dado Anima' });
+  expect(roll).toHaveAttribute('type', 'submit');
+  expect(dialog.getAllByRole('button').filter(button => button.type === 'submit')).toEqual([roll]);
+  expect(dialog.queryByText('Trascina per tirare')).not.toBeInTheDocument();
+
+  fireEvent.change(die, { target: { value: '101' } });
+  expect(roll).toBeDisabled();
+  fireEvent.submit(roll.form);
+  expect(onRespond).not.toHaveBeenCalled();
+  fireEvent.change(die, { target: { value: '20' } });
+  expect(roll).toBeEnabled();
+  fireEvent.click(roll);
+  expect(onRespond).toHaveBeenCalledWith(request, { defense: 3, die: 20, reduction: 2 });
+  expect(roll).toBeDisabled();
+  fireEvent.submit(roll.form);
+  expect(onRespond).toHaveBeenCalledTimes(1);
+  await act(async () => reply.reject(Object.assign(new Error('Conferma non ricevuta.'), { unconfirmed: true })));
+  expect(dialog.queryByRole('button', { name: 'Tira Disciplina' })).not.toBeInTheDocument();
+  const retryDie = dialog.getByRole('button', { name: 'Riprova' });
+  expect(retryDie).toHaveClass('gc-die-button');
+  fireEvent.click(retryDie);
+  await waitFor(() => expect(dialog.queryByRole('button', { name: 'Riprova' })).not.toBeInTheDocument());
+  expect(onRespond).toHaveBeenCalledTimes(2);
+  expect(onRespond).toHaveBeenLastCalledWith(request, { defense: 3, die: 20, reduction: 2 });
+});
+
+test('a double tap on the die sends once, and the retry takes the focus a tap left on the dialog box', async () => {
+  const request = defenseRequest('req-tap', 'Bro', { defense: { label: 'Disciplina', value: 3, showDie: true, die: 12 } });
+  const reply = deferred();
+  const { onRespond } = setup([request], { answers: [] });
+  onRespond.mockReturnValueOnce(reply.promise).mockResolvedValueOnce({ outcome: 'evaded', effects: [] });
+  const box = screen.getByRole('dialog', { name: 'Difesa' });
+  const roll = within(box).getByRole('button', { name: 'Tira Disciplina' });
+  // Both taps land before the die is drawn disabled.
+  act(() => {
+    roll.click();
+    roll.click();
+  });
+  expect(onRespond).toHaveBeenCalledTimes(1);
+  // Safari focuses no tapped button, and a tap on a disabled one: the browser leaves focus on the dialog's own box.
+  box.tabIndex = -1;
+  box.focus();
+  await act(async () => reply.reject(Object.assign(new Error('Conferma non ricevuta.'), { unconfirmed: true })));
+  const retry = within(box).getByRole('button', { name: 'Riprova' });
+  expect(retry).toHaveFocus();
+  await act(async () => {
+    retry.click();
+    retry.click();
+  });
+  expect(onRespond).toHaveBeenCalledTimes(2);
+  expect(onRespond).toHaveBeenLastCalledWith(request, { defense: 3, die: 12 });
+});
+
+test('the private defense and its receipt follow the board without reopening the modal or covering the actor step', async () => {
+  const board = document.createElement('div');
+  board.setAttribute('data-combat-map-viewport', '');
+  board.getBoundingClientRect = () => ({ left: 20, right: 620, top: 100, bottom: 600 });
+  document.body.appendChild(board);
+  try {
+    const request = defenseRequest('req-board', 'Bro', { defense: { value: 2, showDie: true, die: 12 } });
+    const { show, onRespond } = setup([request]);
+    const dialog = screen.getByRole('dialog', { name: 'Difesa' });
+    const dock = queryByAttribute('data-map-defense', document.body, '');
+    expect(dock).toHaveAttribute('data-map-defense');
+    expect(dock.style.getPropertyValue('--gc-defense-center')).toBe('320px');
+    expect(dock.style.getPropertyValue('--gc-defense-baseline')).toBe('588px');
+    const field = within(dialog).getByRole('spinbutton', { name: 'Dado Anima' });
+    field.focus();
+    fireEvent.change(field, { target: { value: '20' } });
+
+    board.getBoundingClientRect = () => ({ left: 20, right: 350, top: 80, bottom: 600 });
+    fireEvent.resize(window);
+    await waitFor(() => expect(dock.style.getPropertyValue('--gc-defense-center')).toBe('185px'));
+    expect(dock.style.getPropertyValue('--gc-defense-width')).toBe('316px');
+    expect(field).toHaveFocus();
+
+    // Changing routes while editing returns the existing native modal to its default global position.
+    board.remove();
+    fireEvent(window, new Event('grigliata-defense-stage-change'));
+    await waitFor(() => expect(dock).not.toHaveAttribute('data-map-defense'));
+    expect(screen.getByRole('dialog', { name: 'Difesa' })).toBe(dialog);
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(20);
+
+    document.body.appendChild(board);
+    fireEvent(window, new Event('grigliata-defense-stage-change'));
+    await waitFor(() => expect(dock).toHaveAttribute('data-map-defense'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Tira Difesa' }));
+    show([]);
+    expect(await screen.findByText('Colpito')).toBeVisible();
+    expect(onRespond).toHaveBeenCalledTimes(1);
+    expect(dock.style.getPropertyValue('--gc-receipt-baseline')).toBe('588px');
+
+    const actor = document.createElement('button');
+    actor.className = 'gc-map-step';
+    actor.textContent = 'Tira i dadi';
+    actor.getBoundingClientRect = () => ({ top: 490, bottom: 588, height: 98 });
+    board.appendChild(actor);
+    actor.focus();
+    fireEvent(window, new Event('grigliata-defense-stage-change'));
+    await waitFor(() => expect(dock.style.getPropertyValue('--gc-receipt-baseline')).toBe('482px'));
+    expect(actor).toHaveFocus();
+    expect(live(request.id)).toHaveLength(1);
+
+    board.getBoundingClientRect = () => ({ left: 20, right: 620, top: -600, bottom: -100 });
+    fireEvent.scroll(window);
+    await waitFor(() => expect(dock).not.toHaveAttribute('data-map-defense'));
+    expect(screen.getByText('Colpito')).toBeVisible();
+    expect(onWatchDamage).toHaveBeenCalledTimes(1);
+  } finally {
+    board.remove();
+  }
+});
 
 test('only a landed answer with concrete damage follows its own private request, and the form waits for the server’s copy', async () => {
   const request = defenseRequest('req-a');

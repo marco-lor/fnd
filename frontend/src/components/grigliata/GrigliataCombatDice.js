@@ -1,11 +1,14 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FaTimes } from 'react-icons/fa';
+import { FiArrowRight, FiX } from 'react-icons/fi';
+import { FaDiceD20 } from 'react-icons/fa';
+import { GiD4, GiD10, GiD12, GiDiceEightFacesEight, GiDiceTwentyFacesTwenty, GiPerspectiveDiceSixFacesThree } from 'react-icons/gi';
 import { attackDiceNotation, COMBAT_CONFIRMATION_STATUS } from './combatPresentation';
 import { buildPlacementDocId, getGridCellPositionPx } from './boardUtils';
 import './grigliataCombat.css';
 
-// The defense receipt and the throw handle's preview show a few standard dice.
+// The defense receipt shows a few standard dice.
 const RENDERED_SIDES = new Set([4, 6, 8, 10, 12, 20, 100]);
+const DIE_ICONS = { 4: GiD4, 6: GiPerspectiveDiceSixFacesThree, 8: GiDiceEightFacesEight, 10: GiD10, 12: GiD12, 20: GiDiceTwentyFacesTwenty };
 const MAX_RENDERED_SOLIDS = 12;
 // The map shows every die of every pool the server rolls: at most 8 terms of 20 dice, 320 solids when they are d100
 // (two d10 each). Only a malformed receipt could pass this bound; it would then show no dice, never part of them.
@@ -24,10 +27,6 @@ const validRoll = die => Number.isInteger(die?.sides) && die.sides >= 2
 
 export const combatDiceFaces = rolls => Array.isArray(rolls) ? rolls.filter(validRoll) : NO_ROLLS;
 const solidCount = rolls => rolls.reduce((count, die) => count + (die.sides === 100 ? 2 : 1), 0);
-const exampleFor = notation => {
-  const sides = Number(notation?.match(/d(\d+)/i)?.[1]);
-  return RENDERED_SIDES.has(sides) ? [{ sides, value: sides }] : NO_ROLLS;
-};
 
 // The dice the server rolls for a notation, in formula order, as dicePlan in functions/src/grigliataCombatCore.ts
 // reads it: constants are folded into the total and never thrown; other text throws nothing.
@@ -75,7 +74,7 @@ function useDiceMotion() {
   return allowed;
 }
 
-export function CombatDiceCanvas({ rolls, kind, gesture, preview = false, pending = false, releasedAt }) {
+export function CombatDiceCanvas({ rolls, kind }) {
   const canvas = useRef(null);
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -103,47 +102,41 @@ export function CombatDiceCanvas({ rolls, kind, gesture, preview = false, pendin
     import('./combatDiceCanvas').then(({ animateCombatDice }) => {
       if (!live) return;
       const now = performance.now();
-      const startedAt = pending ? releasedAt : playback.get(rolls) ?? Math.max(releasedAt ?? now, now - 700);
-      if (!preview && !pending) playback.set(rolls, startedAt);
-      stop = animateCombatDice(surface, rolls, HUE[kind], { gesture, preview, pending, startedAt });
+      const startedAt = playback.get(rolls) ?? now;
+      playback.set(rolls, startedAt);
+      stop = animateCombatDice(surface, rolls, HUE[kind], { startedAt });
       if (!stop) setActive(false);
     }).catch(() => { if (live) setActive(false); });
     return () => {
       live = false;
       stop?.();
     };
-  }, [canProject, rolls, kind, gesture, preview, pending, releasedAt]);
-  return canProject ? <canvas className="gc-dice-canvas" data-preview={preview || undefined}
+  }, [canProject, rolls, kind]);
+  return canProject ? <canvas className="gc-dice-canvas"
     data-pool={solidCount(rolls) > 4 ? 'large' : undefined} ref={canvas} aria-hidden="true" /> : null;
 }
 
-// A throw reads just the horizontal swipe. The native button beside it is also the keyboard and tap control.
-export function CombatDiceDrag({ disabled, kind, notation, onThrow }) {
-  const pointer = useRef(null);
-  const preview = useMemo(() => exampleFor(notation), [notation]);
+export function CombatDieButton({ label, notation, type = 'button', disabled, busy, onClick, buttonRef }) {
+  const paint = useId();
+  const sides = notation?.match(/d(\d+)/i)?.[1];
+  const Icon = sides ? DIE_ICONS[sides] : FaDiceD20;
   return (
-    <div className="gc-dice-drag" aria-hidden="true" data-disabled={disabled || undefined}
-      onPointerDown={event => {
-        if (disabled || event.isPrimary === false || event.button !== 0) return;
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
-      }}
-      onPointerUp={event => {
-        const start = pointer.current;
-        if (!start || event.pointerId !== start.id) return;
-        pointer.current = null;
-        const dx = event.clientX - start.x;
-        const dy = event.clientY - start.y;
-        if (!disabled && Math.abs(dx) >= 24 && Math.abs(dx) > Math.abs(dy)) {
-          onThrow({ direction: Math.sign(dx), power: Math.min(1.25, 0.78 + Math.abs(dx) / 320) });
-        }
-      }}
-      onPointerCancel={() => { pointer.current = null; }}
-      onLostPointerCapture={() => { pointer.current = null; }}
-    >
-      {preview.length > 0 && <CombatDiceCanvas rolls={preview} kind={kind} preview />}
-      Trascina per tirare
-    </div>
+    <button className="gc-die-button" type={type} ref={buttonRef} aria-label={label} title={label}
+      disabled={disabled} aria-disabled={busy || undefined} onClick={busy ? event => event.preventDefault() : onClick}>
+      <svg className="gc-die-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+        <defs><linearGradient id={paint} x1="0" y1="0" x2="0.85" y2="1">
+          <stop stopColor="#ebfff7" />
+          <stop offset=".48" stopColor="#85ead6" />
+          <stop offset="1" stopColor="#38a9a4" />
+        </linearGradient></defs>
+        {Icon ? <Icon size={48} fill={'url(#' + paint + ')'} /> : <>
+          <path d="M24 2 43 13 46 30 24 46 2 30 5 13Z" fill={'url(#' + paint + ')'} />
+          <path d="M5 13 24 8 43 13 38 33 24 46 10 33Z" fill="none" stroke="#217d79" strokeWidth="1.5" />
+          <text x="24" y="28" textAnchor="middle" fill="#103b41" fontFamily="system-ui, sans-serif"
+            fontWeight="700" fontSize={sides.length > 2 ? 12 : 15}>{sides === '100' ? '%' : sides}</text>
+        </>}
+      </svg>
+    </button>
   );
 }
 
@@ -159,13 +152,14 @@ export function CombatDiceFaces({ rolls }) {
 
 const RESULT_STATUS = {
   waiting: 'In attesa di risposta',
-  retry: 'Parità · rilancio nel pannello Combattimento',
+  retry: 'Parità',
   awaitingDamage: 'In attesa del tiro di danno',
   awaitingConfirmation: COMBAT_CONFIRMATION_STATUS,
 };
 
-export function CombatMapDamage({ nextDamage }) {
-  return <button type="button" className="gc-secondary" disabled={nextDamage.disabled} onClick={nextDamage.prepare}>{nextDamage.label}</button>;
+export function CombatMapAction({ action, buttonRef, kind }) {
+  return <button type="button" ref={buttonRef} className="gc-next-roll" data-kind={kind}
+    disabled={action.disabled} onClick={action.prepare}>{action.label}<FiArrowRight aria-hidden="true" /></button>;
 }
 
 // The band the map dice land in: centred on the board viewport whatever the pool or the target, in whole pixels.
@@ -177,8 +171,7 @@ export function getCombatDiceMapPosition({ stageSize }) {
   return { left: Math.floor((width - bandWidth) / 2), top: Math.floor((height - bandHeight) / 2), width: bandWidth, height: bandHeight };
 }
 
-// Without a swipe the dice are thrown toward the side of the board the target lies on: its visible pawn, else the
-// aimed cell.
+// Throw toward the target's visible pawn, or its aimed cell.
 export function getCombatDiceThrowSide({ anchor, visibleTokens, grid, viewport, stageSize }) {
   const visible = new Map(visibleTokens.map(token => [buildPlacementDocId(anchor?.backgroundId, token.tokenId), token.renderPosition]));
   const target = anchor?.targetIds?.map(id => visible.get(id)).find(Boolean);
@@ -205,12 +198,11 @@ function mapThrow(tray, side) {
     throws.set(id, resolved);
     return resolved;
   }
-  const { direction = side(), power = 1 } = tray.gesture || {};
   const sending = tray.phase === 'sending';
   // A reply this page never saw thrown plays from its receipt; an older one is shown at rest.
   const fresh = sending || (Number.isFinite(tray.releasedAt) && now - tray.releasedAt < STALE_THROW);
   const record = {
-    key: {}, releasedAt: tray.releasedAt, watched: sending, direction, power, paintedAt: null,
+    key: {}, releasedAt: tray.releasedAt, watched: sending, direction: side(), paintedAt: null,
     startedAt: fresh ? tray.releasedAt : -Infinity, resolvedAt: sending ? null : fresh ? now : -Infinity,
   };
   throws.set(id, record);
@@ -269,7 +261,7 @@ export function CombatMapDice({ tray, visibleTokens, grid, viewport, stageSize }
   const receipt = result ? faces : null;
   const scene = useMemo(() => record && {
     planned, receipt, releasedAt: record.startedAt, resolvedAt: record.resolvedAt, paintedAt: record.paintedAt,
-    direction: record.direction, power: record.power,
+    direction: record.direction,
   }, [record, planned, receipt]);
   const shown = solidCount(receipt || planned);
   if (!motion || !scene || !stageSize.width || !stageSize.height || (receipt && shown > MAX_MAP_SOLIDS)
@@ -284,63 +276,78 @@ export function CombatMapDice({ tray, visibleTokens, grid, viewport, stageSize }
   );
 }
 
-export default function GrigliataCombatDiceTray({ tray, nextDamage, resultStatus, resultOutcomes = NO_ROLLS }) {
+export default function GrigliataCombatDiceTray({ tray, lastFocusedTray, nextDamage, nextRetry, resultStatus, resultOutcomes = NO_ROLLS }) {
   const { id, title, notation, kind, phase, error, close, throwDice } = tray;
   const rolls = useMemo(() => combatDiceFaces(tray.rolls), [tray.rolls]);
   const headingId = useId();
   const section = useRef(null);
   const trigger = useRef(null);
   const closeButton = useRef(null);
+  const retryButton = useRef(null);
+  const damageButton = useRef(null);
+  const lastFocused = useRef(null);
   const sending = phase === 'sending';
   const result = phase === 'result';
   const shownNotation = result && kind === 'attack' && rolls.length > 0 && rolls.every(die => die.sides === rolls[0].sides)
     ? attackDiceNotation(rolls[0].sides, rolls.length) : notation;
-  const canCloseOnly = result || phase === 'rejected';
+  const finished = result || phase === 'rejected';
+  const canRetry = Boolean(result && nextRetry && !nextRetry.disabled);
+  const canRollDamage = Boolean(result && nextDamage && !nextDamage.disabled);
   useLayoutEffect(() => {
-    section.current?.scrollIntoView?.({ block: 'nearest' });
+    if (!trigger.current || (lastFocusedTray && lastFocusedTray.current === id)) return;
+    // Closing the aim restores its launcher. Only a newly prepared throw should take that focus.
+    if (lastFocusedTray) lastFocusedTray.current = id;
+    const rect = section.current.getBoundingClientRect();
+    if (rect.top < 0 || rect.bottom > window.innerHeight) section.current.scrollIntoView?.({ block: 'nearest' });
     trigger.current?.focus({ preventScroll: true });
-  }, [id]);
+  }, [id, lastFocusedTray]);
   useLayoutEffect(() => {
-    if (canCloseOnly && (document.activeElement === document.body || section.current?.contains(document.activeElement))) {
-      closeButton.current?.focus({ preventScroll: true });
+    if (!finished) return;
+    const active = document.activeElement;
+    if (active === closeButton.current || (active === document.body && lastFocused.current && !lastFocused.current.isConnected)) {
+      (canRetry ? retryButton : canRollDamage ? damageButton : closeButton).current?.focus({ preventScroll: true });
     }
-  }, [canCloseOnly]);
+  }, [finished, canRetry, canRollDamage]);
+
+  const outcomes = <ul className="gc-dice-outcomes" aria-label="Esiti dei bersagli"
+    tabIndex={resultOutcomes.length > 4 ? 0 : undefined}>
+    {resultOutcomes.map(({ id, name, label }) => <li key={id}>{name} · {label}</li>)}
+  </ul>;
 
   return (
-    <section className="gc-dice-tray" aria-labelledby={headingId} ref={section} data-kind={kind}>
-      <div className="gc-dice-bar">
+    <section className="gc-map-step gc-dice-tray" aria-labelledby={headingId} ref={section} data-kind={kind}
+      onFocusCapture={event => { lastFocused.current = event.target; }}
+      onBlurCapture={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) lastFocused.current = null; }}
+      onKeyDown={event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!sending) close();
+      }}>
+      <header className="gc-dice-head">
+        <h3 id={headingId}>{title}</h3>
         <button type="button" className="gc-dice-close" aria-label="Chiudi il vassoio" ref={closeButton}
-          aria-disabled={sending} onClick={close}><FaTimes aria-hidden="true" /></button>
-        <div className="gc-dice-main" data-multiple-outcomes={result && resultOutcomes.length > 1 ? '' : undefined}>
-          <header className="gc-dice-head">
-            <h3 id={headingId}>{title}</h3>
-            <code>{shownNotation}</code>
-          </header>
-          {!canCloseOnly && (
-            <div className="gc-dice-controls">
-              <CombatDiceDrag disabled={sending} kind={kind} notation={notation} onThrow={throwDice} />
-              <button type="button" className="gc-primary" ref={trigger} aria-disabled={sending}
-                onClick={() => throwDice()}>{phase === 'error' ? 'Riprova il tiro' : 'Tira i dadi'}</button>
-            </div>
-          )}
-          <div className="gc-dice-result" role="status">
-            {result && (
-              <>
-                {rolls.length ? <CombatDiceFaces rolls={rolls} /> : <p>Azione registrata.</p>}
-                {Number.isFinite(tray.damage) && <p className="gc-dice-total">{tray.damage} danni proposti</p>}
-                {RESULT_STATUS[resultStatus] && <p>{RESULT_STATUS[resultStatus]}</p>}
-                {resultOutcomes.length > 0 && <ul className="gc-dice-outcomes" aria-label="Esiti dei bersagli"
-                  tabIndex={resultOutcomes.length > 4 ? 0 : undefined}>
-                  {resultOutcomes.map(({ id, name, label }) => <li key={id}>{name} · {label}</li>)}
-                </ul>}
-              </>
-            )}
-            {sending && <p>Attendi l’esito del tiro…</p>}
-          </div>
-          {result && nextDamage && <CombatMapDamage nextDamage={nextDamage} />}
-          {error && <p role="alert" className="gc-error">{error}</p>}
-        </div>
+          aria-disabled={sending} onClick={() => { if (!sending) close(); }}><FiX aria-hidden="true" /></button>
+      </header>
+      <p className="gc-dice-notation">{result ? 'Esito del tiro' : kind === 'damage' ? 'Tiro di danno' : 'Tiro di attacco'} · <code>{shownNotation}</code></p>
+      <div className="gc-dice-result" role="status">
+        {result && <>
+          {rolls.length ? <CombatDiceFaces rolls={rolls} /> : <p>Azione registrata.</p>}
+          {Number.isFinite(tray.damage) && <p className="gc-dice-total">{tray.damage} danni proposti</p>}
+          {RESULT_STATUS[resultStatus] && <p>{RESULT_STATUS[resultStatus]}</p>}
+          {resultOutcomes.length === 1 && outcomes}
+        </>}
+        {sending && <p>Attendi l’esito del tiro…</p>}
       </div>
+      {result && resultOutcomes.length > 1 && <details className="gc-outcome-details" key={tray.combatId}>
+        <summary>Esiti dei bersagli · {resultOutcomes.length}</summary>
+        {outcomes}
+      </details>}
+      {error && <p role="alert" className="gc-error">{error}</p>}
+      {!finished && <CombatDieButton label={phase === 'error' ? 'Riprova il tiro' : 'Tira i dadi'}
+        notation={notation} buttonRef={trigger} busy={sending} onClick={() => throwDice()} />}
+      {result && nextRetry && <CombatMapAction action={nextRetry} kind="attack" buttonRef={retryButton} />}
+      {result && nextDamage && <CombatMapAction action={nextDamage} kind="damage" buttonRef={damageButton} />}
     </section>
   );
 }
