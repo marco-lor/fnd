@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, queryByAttribute, render, screen, within } from '@testing-library/react';
 import GrigliataCombatDiceTray, {
   CombatMapDice, getCombatDiceMapPosition, getCombatDiceThrowSide, planCombatDice,
 } from './GrigliataCombatDice';
@@ -17,7 +17,7 @@ const PHONE = { width: 336, height: 298 };
 test.each([['1d100', '%'], ['4d62 - 1d62', '62']])('the roll control identifies %s on its face', (notation, face) => {
   render(<GrigliataCombatDiceTray tray={{ ...tray, notation }} />);
   const button = screen.getByRole('button', { name: 'Tira i dadi' });
-  expect(button.querySelector('svg text')).toHaveTextContent(face);
+  expect(within(button).getByText(face, { selector: 'text' })).toBeVisible();
 });
 
 const fakeContext = () => {
@@ -651,7 +651,7 @@ describe('the map dice', () => {
     const { rerender } = render(<>{mapDice(ready)}<GrigliataCombatDiceTray tray={ready} /></>);
     const roll = screen.getByRole('button', { name: 'Tira i dadi' });
     expect(roll).toBeVisible();
-    expect(roll.querySelector('svg, img')).toBeVisible();
+    expect(queryByAttribute('class', roll, 'gc-die-icon')).toBeVisible();
     fireEvent.click(roll);
     expect(ready.throwDice).toHaveBeenCalledTimes(1);
     const rolls = [42, 1, 15, 62, 28].map((value, i) => ({ sides: 62, value, ...(i === 4 && { sign: -1 }) }));

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, queryByAttribute, render, screen, waitFor, within } from '@testing-library/react';
 import { GrigliataDefensePopup, receiptOwnerDamage } from './GrigliataDefensePopup';
 
 const uid = 'bro-user';
@@ -119,7 +119,7 @@ test('the defense die submits validated fields once and an unconfirmed answer re
   const roll = dialog.getByRole('button', { name: 'Tira Disciplina' });
   const die = dialog.getByRole('spinbutton', { name: 'Dado Anima' });
   expect(roll).toHaveAttribute('type', 'submit');
-  expect(roll.form.querySelectorAll('[type="submit"]')).toHaveLength(1);
+  expect(dialog.getAllByRole('button').filter(button => button.type === 'submit')).toEqual([roll]);
   expect(dialog.queryByText('Trascina per tirare')).not.toBeInTheDocument();
 
   fireEvent.change(die, { target: { value: '101' } });
@@ -136,8 +136,9 @@ test('the defense die submits validated fields once and an unconfirmed answer re
   await act(async () => reply.reject(Object.assign(new Error('Conferma non ricevuta.'), { unconfirmed: true })));
   expect(dialog.queryByRole('button', { name: 'Tira Disciplina' })).not.toBeInTheDocument();
   const retryDie = dialog.getByRole('button', { name: 'Riprova' });
-  expect(retryDie.querySelector('svg')).toBeInTheDocument();
-  await act(async () => fireEvent.click(retryDie));
+  expect(retryDie).toHaveClass('gc-die-button');
+  fireEvent.click(retryDie);
+  await waitFor(() => expect(dialog.queryByRole('button', { name: 'Riprova' })).not.toBeInTheDocument());
   expect(onRespond).toHaveBeenCalledTimes(2);
   expect(onRespond).toHaveBeenLastCalledWith(request, { defense: 3, die: 20, reduction: 2 });
 });
@@ -178,7 +179,7 @@ test('the private defense and its receipt follow the board without reopening the
     const request = defenseRequest('req-board', 'Bro', { defense: { value: 2, showDie: true, die: 12 } });
     const { show, onRespond } = setup([request]);
     const dialog = screen.getByRole('dialog', { name: 'Difesa' });
-    const dock = dialog.parentElement;
+    const dock = queryByAttribute('data-map-defense', document.body, '');
     expect(dock).toHaveAttribute('data-map-defense');
     expect(dock.style.getPropertyValue('--gc-defense-center')).toBe('320px');
     expect(dock.style.getPropertyValue('--gc-defense-baseline')).toBe('588px');

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, queryByAttribute, render, screen, waitFor, within } from '@testing-library/react';
 import { useReducedMotion } from 'framer-motion';
 import GrigliataBoard, {
   buildAoEFigureMeasurementDecorationLayout,
@@ -852,9 +852,10 @@ describe('GrigliataBoard', () => {
     render(<GrigliataBoard {...props} />);
     const projection = await screen.findByTestId('grigliata-board-dice-projection');
     expect(projection).toHaveAttribute('aria-hidden', 'true');
-    expect(projection.parentElement.querySelector('[data-konva-type="Stage"]')).toBeInTheDocument();
+    const viewport = queryByAttribute('data-combat-map-viewport', document.body, '');
+    expect(viewport).toContainElement(projection);
+    expect(viewport).toContainElement(queryByAttribute('data-konva-type', viewport, 'Stage'));
     const result = screen.getByRole('region', { name: 'Spada' });
-    const viewport = screen.getByTestId('grigliata-quick-controls').parentElement;
     expect(viewport).toContainElement(result);
     expect(result).toHaveClass('gc-map-step');
     expect(result).toHaveTextContent('d12 7');
@@ -876,9 +877,9 @@ describe('GrigliataBoard', () => {
       combatNextDamage: { label: 'Tiro di danno · Talpa', prepare: jest.fn() },
     });
     const { rerender } = render(<GrigliataBoard {...props} />);
-    const viewport = screen.getByTestId('grigliata-quick-controls').parentElement;
-    const aim = screen.getByRole('button', { name: 'Conferma bersagli' }).closest('.gc-map-step');
-    expect(viewport).toContainElement(aim);
+    const viewport = queryByAttribute('data-combat-map-viewport', document.body, '');
+    const mapStep = () => queryByAttribute('class', viewport, /\bgc-map-step\b/);
+    expect(mapStep()).toContainElement(screen.getByRole('button', { name: 'Conferma bersagli' }));
     expect(screen.queryByRole('button', { name: 'Tira i dadi' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: props.combatNextDamage.label })).not.toBeInTheDocument();
 
@@ -890,7 +891,7 @@ describe('GrigliataBoard', () => {
 
     // Cancelling a new aim restores its launcher; the old throw must not take focus again.
     rerender(<GrigliataBoard {...props} />);
-    const boardControl = screen.getByTestId('grigliata-quick-controls').querySelector('button');
+    const boardControl = screen.getByRole('button', { name: 'Return to mouse selection' });
     boardControl.focus();
     rerender(<GrigliataBoard {...props} combatAim={null} />);
     expect(boardControl).toHaveFocus();
@@ -898,7 +899,7 @@ describe('GrigliataBoard', () => {
 
     rerender(<GrigliataBoard {...props} combatAim={null} combatTray={null} />);
     const next = within(viewport).getByRole('button', { name: props.combatNextDamage.label });
-    expect(next.closest('.gc-map-step')).toBeInTheDocument();
+    expect(mapStep()).toContainElement(next);
     fireEvent.click(next);
     expect(props.combatNextDamage.prepare).toHaveBeenCalledTimes(1);
   });
