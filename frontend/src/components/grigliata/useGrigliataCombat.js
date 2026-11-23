@@ -30,18 +30,20 @@ const byTargetName = (a, b) => String(a.name || '').localeCompare(String(b.name 
 // The owner's private copies of opposed outcomes, newest first, as journal entries: one per action with only the
 // owner's own pawns, keyed by the real action id the damage command needs. Only the fields the journal and the damage
 // form read are kept; the attacker is never named.
-function ownerDamageEvents(docs, uid) {
+function ownerDamageEvents(docs, uid, cancelled) {
   const byCombat = new Map();
   for (const doc of docs) {
     const { combatId, ownerDamage } = doc;
     const target = ownerDamage?.target;
     if (typeof combatId !== 'string' || !combatId || typeof target?.placementId !== 'string' || target.ownerUid !== uid) continue;
+    const terminal = doc.status === 'cancelled';
+    if (!terminal && cancelled.has(combatId)) continue;
     if (!byCombat.has(combatId)) {
       // The first copy is the newest. The launch time, when the copy carries it, keeps the entry in place among full
       // records once its damage is applied.
       const stamp = doc.createdAt?.toMillis ? doc.createdAt : doc.ownerDamageUpdatedAt;
       byCombat.set(combatId, {
-        id: combatId, ownerPrivate: true, status: 'done', kind: ownerDamage.kind, actor: HIDDEN_ATTACKER,
+        id: combatId, ownerPrivate: true, status: terminal ? 'cancelled' : 'done', kind: ownerDamage.kind, actor: HIDDEN_ATTACKER,
         action: { name: ownerDamage.action?.name, hands: ownerDamage.action?.hands },
         createdAt: stamp, updatedAt: doc.ownerDamageUpdatedAt, targets: [],
       });
@@ -149,9 +151,9 @@ function useCombatFeed(uid, backgroundId, isManager, open, cancelled) {
       else if (!full && event) unique.set(id, event);
     }
     // A fresher owner copy can advance its target's outcome without hiding the rest of the full record.
-    for (const projected of ownerDamageEvents(bySource.ownerDamage || EMPTY, uid)) {
-      if (cancelled.has(projected.id)) continue;
+    for (const projected of ownerDamageEvents(bySource.ownerDamage || EMPTY, uid, cancelled)) {
       const full = unique.get(projected.id);
+      if (full?.status === 'cancelled') continue;
       unique.set(projected.id, full ? mergeOwnerDamage(full, projected) : projected);
     }
     const pending = unresolved.map(event => unique.get(event.id))

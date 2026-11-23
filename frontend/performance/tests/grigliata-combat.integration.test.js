@@ -4,10 +4,10 @@ const path = require('node:path');
 const {createRequire} = require('node:module');
 const {after, before, test} = require('node:test');
 const {assertFails, assertSucceeds, initializeTestEnvironment} = require('@firebase/rules-unit-testing');
-const {collection, deleteField, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, where} = require('firebase/firestore');
+const {collection, deleteField, doc, getDoc, getDocs, getDocsFromServer, limit, orderBy, query, serverTimestamp, setDoc, where} = require('firebase/firestore');
 const functionsRequire = createRequire(path.join(__dirname, '../../functions/package.json'));
 const {initializeApp, deleteApp} = functionsRequire('firebase-admin/app');
-const {getFirestore} = functionsRequire('firebase-admin/firestore');
+const {FieldValue, getFirestore} = functionsRequire('firebase-admin/firestore');
 const {getGrigliataCombatArsenal, mutateGrigliataCombat} = require('../../functions/lib/grigliataCombat');
 const {
   task05AdjustGold, task05CommitConsumable, task05PrepareConsumable, task05UpdateGrigliataCharacterResources,
@@ -236,6 +236,62 @@ test('cancelling one volley refunds the real losses, retires both prompts and pr
   assert.deepEqual((await requests(second.combatId)).docs.map(item => item.get('status')), ['waiting', 'waiting']);
   await assert.rejects(() => mutate(npcOwner, lateDefense), {code: 'failed-precondition'});
   await assert.rejects(() => applyDamage(otherDm, combatId, defender, 9), {code: 'failed-precondition'});
+});
+
+test('the private Registro query returns a cancelled visible outcome on a fresh client and retires the other invitation', async () => {
+  await seed(`grigliata_tokens/${npcOwner}`, {tokenType: 'character', ownerUid: npcOwner, label: 'Hidden caster'});
+  await seed(`grigliata_token_placements/${placementId(npcOwner)}`, {
+    backgroundId: board, tokenId: npcOwner, ownerUid: npcOwner, col: 2, row: 1, isVisibleToPlayers: false,
+  });
+  await seed(`users/${npcOwner}/spells/private-volley`, {Nome: 'Raffica privata', Costo: 0, combat: {
+    mode: 'multiple', targetCount: 2, rangeFt: 20, attackStats: ['Mira'], defenseStats: ['Difesa'],
+    attackDie: false, defenseDie: false, damageExpr: '4',
+  }});
+  const {combatId} = await mutate(npcOwner, {command: 'launch', operationId: 'private-volley-cancel',
+    backgroundId: board, actorPlacementId: placementId(npcOwner), kind: 'spell', actionId: 'personal:private-volley',
+    targetPlacementIds: [placementId(defender), placementId(attacker)]});
+  const event = await trackCombat(combatId);
+  assert.equal((await event.get()).get('shared'), false);
+  // Age is not a cancellation condition. A different DM can still cancel after one defender answers.
+  await event.update({createdAt: new Date(0)});
+  const defense = {command: 'defend', combatId, round: 1, targetPlacementId: placementId(defender), defense: -99};
+  assert.equal((await mutate(defender, defense)).outcome, 'hit');
+  const client = uid => environment.authenticatedContext(uid).firestore();
+  const register = async (firestore, uid) => (await assertSucceeds(getDocsFromServer(query(
+    collection(firestore, 'grigliata_combat_requests'), where('ownerUid', '==', uid), where('backgroundId', '==', board),
+    orderBy('ownerDamageUpdatedAt', 'desc'), limit(40)
+  )))).docs.filter(row => row.get('combatId') === combatId);
+  const inbox = async (firestore, uid) => (await assertSucceeds(getDocsFromServer(query(
+    collection(firestore, 'grigliata_combat_requests'), where('ownerUid', '==', uid),
+    where('status', 'in', ['waiting', 'damagePending'])
+  )))).docs.filter(row => row.get('combatId') === combatId);
+  const owner = client(defender);
+  const waitingOwner = client(attacker);
+  const [before] = await register(owner, defender);
+  assert.equal(before.get('ownerDamage.target.damage'), 4);
+  // Old private entries sometimes only carry the projection timestamp used by Registro.
+  await db.doc(before.ref.path).update({createdAt: FieldValue.delete(), ownerDamageUpdatedAt: new Date(0)});
+  assert.equal((await inbox(waitingOwner, attacker)).length, 1);
+  assert.deepEqual(await register(waitingOwner, attacker), []);
+  await assert.rejects(() => mutate(defender, {command: 'cancel', combatId}), {code: 'not-found'});
+  await mutate(otherDm, {command: 'cancel', combatId});
+
+  const fresh = client(defender);
+  const rows = await register(fresh, defender);
+  assert.deepEqual(rows.map(row => row.id), [before.id]);
+  const {createdAt, updatedAt, ownerDamageUpdatedAt, ...summary} = rows[0].data();
+  assert.equal(createdAt.toMillis(), 0);
+  assert.ok(updatedAt.isEqual(ownerDamageUpdatedAt));
+  assert.deepEqual(summary, {combatId, backgroundId: board, ownerUid: defender, status: 'cancelled',
+    ownerDamage: {kind: 'spell', action: {name: 'Raffica privata'},
+      target: {placementId: placementId(defender), name: defender, ownerUid: defender}}});
+  await assertFails(getDoc(doc(fresh, event.path)));
+  await assertFails(getDoc(doc(waitingOwner, before.ref.path)));
+  assert.deepEqual(await register(waitingOwner, attacker), []);
+  assert.deepEqual(await inbox(waitingOwner, attacker), []);
+  assert.deepEqual(await inbox(fresh, defender), []);
+  await assert.rejects(() => mutate(attacker, {...defense, targetPlacementId: placementId(attacker)}), {code: 'failed-precondition'});
+  await assert.rejects(() => applyDamage(defender, combatId, defender, 4), {code: 'failed-precondition'});
 });
 
 test('only one of the final damage confirmation and cancellation can commit', async () => {

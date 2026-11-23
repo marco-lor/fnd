@@ -1411,6 +1411,73 @@ const updateDefenderResource = data => task05UpdateResource.run({
   auth: {uid: defender}, data: {operationId: `resource-test-${++operations}`, ...data},
 });
 
+test('cancellation caps healed PF and recovered PM and Essenza at the current maxima', async () => {
+  damageFixture();
+  seedStats(attacker, {manaCurrent: 10, manaTotal: 12, essenzaCurrent: 5, essenzaTotal: 5});
+  seedStats(defender, {hpCurrent: 20, hpTotal: 20});
+  seedElf();
+  seedSpell('capped', {Nome: 'Raffica', Costo: 5, combat: {
+    mode: 'multiple', targetCount: 2, damageExpr: '4', extraResource: {name: 'Essenza', amount: 2},
+  }});
+  const {combatId} = await launch('spell', 'personal:capped', {
+    targetPlacementIds: [place(defender), place('elf')], confirmExtra: true,
+  });
+  await applyDamage(combatId, {amount: 4}, defender);
+  assert.equal(resources(defender).stats.hpCurrent, 16);
+  assert.equal(resources(attacker).stats.manaCurrent, 5);
+  await updateDefenderResource({resource: 'hp', mode: 'set', value: 20});
+  await task05UpdateResource.run({auth: {uid: attacker}, data: {
+    operationId: 'regenerate-mana-after-launch', resource: 'mana', mode: 'delta', value: 4,
+  }});
+  // The DM lowers the mana cap after launch, and grants Essenza above its own cap.
+  for (const [resource, value, totalValue] of [['mana', 9, 10], ['essenza', 7, 5]]) {
+    await task05UpdateResource.run({auth: {uid: dm}, data: {
+      operationId: `set-${resource}-after-launch`, userId: attacker, resource, mode: 'set', value, totalValue,
+    }});
+  }
+  assert.deepEqual((await cancel(combatId)).cancellation, {needsReview: true});
+  assert.equal(resources(defender).stats.hpCurrent, 20);
+  assert.equal(resources(attacker).stats.manaCurrent, 10);
+  assert.equal(resources(attacker).stats.essenzaCurrent, 7);
+  const receipt = db.read(privateReceiptPath(combatId)).cancellation;
+  assert.deepEqual(receipt.refunds.map(({amounts}) => amounts), [{manaCurrent: 1}]);
+  assert.deepEqual(receipt.corrections.map(({subject, reason, amounts}) => [subject.id, reason, amounts]), [
+    [attacker, 'resourceCapacity', {manaCurrent: 4}], [attacker, 'resourceCapacity', {essenzaCurrent: 2}],
+    [defender, 'resourceCapacity', {hpCurrent: 4}],
+  ]);
+  const writes = db.writes.length;
+  await cancel(combatId, dm);
+  assert.equal(db.writes.length, writes);
+});
+
+test('refunds use explicit legacy totals, including zero', async () => {
+  damageFixture();
+  db.seed(`users/${attacker}`, {role: 'player', stats: {manaTotal: '10', essenzaTotal: 0}});
+  seedStats(attacker, {manaCurrent: 10, essenzaCurrent: 3});
+  seedSpell('legacy-cap', {Nome: 'Costo', Costo: 4, combat: {
+    damageExpr: '2', extraResource: {name: 'Essenza', amount: 1},
+  }});
+  const {combatId} = await launch('spell', 'personal:legacy-cap', {confirmExtra: true});
+  seedStats(attacker, {manaCurrent: 9, essenzaCurrent: 0});
+  await cancel(combatId);
+  assert.equal(resources(attacker).stats.manaCurrent, 10);
+  assert.equal(resources(attacker).stats.essenzaCurrent, 0);
+});
+
+for (const hpTotal of [10, undefined]) {
+  test(`a custom token refunds PF with ${hpTotal === undefined ? 'no recorded' : 'a known'} maximum`, async () => {
+    damageFixture();
+    seedPawn('custom', 2, {tokenType: 'custom', stats: {hpCurrent: 8, ...(hpTotal !== undefined && {hpTotal})}});
+    const hit = await damageOneOfTwoTargets('custom');
+    const tokenPath = 'grigliata_tokens/custom';
+    const token = db.read(tokenPath);
+    db.seed(tokenPath, {...token, stats: {...token.stats, hpCurrent: 9}});
+    await cancel(hit);
+    assert.equal(db.read(tokenPath).stats.hpCurrent, hpTotal === undefined ? 11 : 10);
+    assert.equal(db.read(tokenPath).stats.hpTotal, hpTotal);
+  });
+}
+
 for (const tokenType of ['character', 'foe']) {
   test(`cancellation restores a ${tokenType}'s barrier after it pays only PM for another spell`, async () => {
     damageFixture();

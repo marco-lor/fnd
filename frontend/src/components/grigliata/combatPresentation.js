@@ -227,6 +227,7 @@ const CORRECTION_REASONS = {
   barrierUnavailable: 'Barriera o scudo non disponibile.',
   barrierAmbiguous: 'Verifica se nel frattempo la barriera o lo scudo sono cambiati.',
   barrierCapacity: 'Il ripristino supera la capienza attuale.',
+  resourceCapacity: 'Quota non rimborsata perché supera la capienza attuale.',
 };
 const CORRECTION_RESOURCES = {
   hpCurrent: 'PF', manaCurrent: 'PM', essenzaCurrent: 'Essenza', barrieraCurrent: 'punti barriera', shieldCurrent: 'punti scudo',

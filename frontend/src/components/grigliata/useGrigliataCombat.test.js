@@ -1061,6 +1061,32 @@ test('a cancelled record and a cancelled private request suppress stale damage c
   expect(result.current.panel.events).toEqual([]);
 });
 
+test('a cancelled private entry remains read-only in Registro after a fresh mount', async () => {
+  const first = playerView();
+  const old = ownerCopy('private-roll', 'lia', 'Lia', { outcome: 'hit', damage: 7 }, 10);
+  const terminal = { ...old, createdAt: at(1), ownerDamageUpdatedAt: at(20), status: 'cancelled',
+    ownerDamage: { kind: 'weapon', action: { name: 'Pugnale' }, target: { placementId: id('lia'), name: 'Lia', ownerUid: uid } } };
+  emit(OWNER_DAMAGE, [old]);
+  openEntry('Pugnale');
+  expect(damageForms()).toHaveLength(1);
+  const staleEvent = first.current.view.panel.events[0];
+  emit(OWNER_DAMAGE, [terminal]);
+  expect(screen.getByText('Annullata')).toBeVisible();
+  expect(damageForms()).toHaveLength(0);
+  await act(async () => first.current.view.panel.onApplyDamage(staleEvent, staleEvent.targets[0], 7));
+  expect(mutate).not.toHaveBeenCalled();
+  first.unmount();
+
+  const fresh = playerView();
+  emit(OWNER_DAMAGE, [terminal]);
+  openEntry('Pugnale');
+  expect(screen.getByText('Annullata')).toBeVisible();
+  expect(screen.getByText(/^Attaccante nascosto/, { selector: '.gc-log-caption small' })).toHaveTextContent('Attaccante nascostoLia');
+  expect(screen.queryByText(/Orco/)).not.toBeInTheDocument();
+  expect(damageForms()).toHaveLength(0);
+  expect(fresh.current.view.panel.pending).toEqual([]);
+});
+
 test('two same-name hidden pawns have distinct damage controls without coordinates', async () => {
   playerView({ tokens: [] });
   emit(OWNER_DAMAGE, [

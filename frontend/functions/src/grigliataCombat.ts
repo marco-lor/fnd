@@ -1384,12 +1384,27 @@ const cancelCombat = async (context: Context, input: Fields) => {
   transaction.update(event.ref, {status: result.status, cancellation: result.cancellation, updatedAt: now, resolvedAt: now});
   for (const request of requests) {
     if (!request.exists) continue;
+    const ownerUid = request.get("ownerUid") ?? null;
+    const target = asRecord(request.get("ownerDamage.target"));
+    const projectedAt = request.get("ownerDamageUpdatedAt");
+    // Only an existing private journal entry keeps a row. A pending invitation
+    // alone never disclosed a damage entry to this owner.
+    const keepPrivateEntry = data.shared !== true && projectedAt != null &&
+      typeof ownerUid === "string" && target.ownerUid === ownerUid && isValidFirestoreDocumentId(target.placementId);
     transaction.set(request.ref, {
       combatId, status: "cancelled",
       backgroundId: request.get("backgroundId") ?? data.backgroundId ?? null,
-      ownerUid: request.get("ownerUid") ?? null,
-      createdAt: request.get("createdAt") ?? now,
+      ownerUid,
+      createdAt: request.get("createdAt") ?? projectedAt ?? now,
       updatedAt: now,
+      ...(keepPrivateEntry && {
+        ownerDamageUpdatedAt: now,
+        ownerDamage: {
+          kind: request.get("ownerDamage.kind") ?? null,
+          action: {name: asTrimmedString(request.get("ownerDamage.action.name"))},
+          target: {placementId: target.placementId, name: asTrimmedString(target.name), ownerUid},
+        },
+      }),
     });
   }
   return result;
